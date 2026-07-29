@@ -1,0 +1,75 @@
+export const SUBSCRIPTION_STATUS = {
+  ACTIVE:    'active',
+  INACTIVE:  'inactive',
+  CANCELLED: 'cancelled',
+  PAST_DUE:  'past_due',
+  TRIALING:  'trialing',
+}
+
+export const dummyPlans = [
+  {
+    id:               'plan_free',
+    name:             'Free',
+    description:      'Basic access. No credit card required.',
+    price:            0,
+    currency:         'INR',
+    interval:         'monthly',
+    intervalCount:    1,
+    razorpayPlanId:   null,
+    popular:          false,
+    features: [
+      '5 GB storage',
+      'Basic file manager',
+      'URL grouping (up to 50 URLs)',
+      'Community support',
+    ],
+  },
+  {
+    id:               'plan_pro',
+    name:             'Pro',
+    description:      'For professionals who need more power.',
+    price:            499,
+    currency:         'INR',
+    interval:         'monthly',
+    intervalCount:    1,
+    razorpayPlanId:   process.env.RAZORPAY_PLAN_ID_PRO ?? '',
+    popular:          true,
+    features: [
+      '50 GB storage',
+      'Unlimited uploads',
+      'Bulk URL export (Excel / JSON)',
+      'Thumbnail proxy',
+      'Priority email support',
+    ],
+  },
+  {
+    id:               'plan_business',
+    name:             'Business',
+    description:      'Teams, agencies, and power users.',
+    price:            1499,
+    currency:         'INR',
+    interval:         'monthly',
+    intervalCount:    1,
+    razorpayPlanId:   process.env.RAZORPAY_PLAN_ID_BUSINESS ?? '',
+    popular:          false,
+    features: [
+      'Unlimited storage',
+      'Up to 5 team seats',
+      'API access',
+      'Custom domain',
+      'Analytics dashboard',
+      'Dedicated support',
+    ],
+  },
+]
+
+export const dummySubscription = {
+  status:                  SUBSCRIPTION_STATUS.INACTIVE,
+  plan:                    null,
+  planId:                  null,
+  razorpaySubscriptionId:  null,
+  currentPeriodStart:      null,
+  currentPeriodEnd:        null,
+  cancelAtPeriodEnd:       false,
+  trialEnd:                null,
+}
