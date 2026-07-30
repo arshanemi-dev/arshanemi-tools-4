@@ -16,13 +16,13 @@ export const DEFAULT_COMPANY = {
 export const MASTER_ADMIN = {
   name: 'Master Admin',
   email: 'arshanemi@gmail.com',
-  password: 'AN$#*ks102030',
+  password: 'Admin@1234',
 };
 
 // Company-scoped admin for DEFAULT_COMPANY.
 export const DEFAULT_COMPANY_ADMIN = {
   name: 'Jikishorji',
   email: 'jikishorji@gmail.com',
-  password: 'AMZ#-sn3060',
+  password: 'India@123',
   role: 'admin',
 };

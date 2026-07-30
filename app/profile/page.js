@@ -9,7 +9,7 @@ import BottomMenu from '@/components/dashboard/BottomMenu'
 import ProfileContent from '@/components/profile/ProfileContent'
 
 const HEADER_HIDDEN = process.env.NEXT_PUBLIC_IS_Header_Hide === 'true'
-const BOTTOM_MENU_SHOWN = process.env.NEXT_PUBLIC_IS_Bottom_Menu === 'true'
+const BOTTOM_MENU_SHOWN = process.env.NEXT_PUBLIC_SHOW_FLOATING_MENU === 'true'
 
 // Public-facing profile page — where the plain 'user' role lands (no
 // /settings sidebar for that role by design; see app/settings/layout.js).

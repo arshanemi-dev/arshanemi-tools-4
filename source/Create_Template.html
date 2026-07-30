@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-Commerce Auto Listing Mapper</title>
+  
+  <!-- React and Babel CDN libraries for browser rendering -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <!-- SheetJS library to read Excel files -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; background-color: #f8f9fa; }
+    .card { background: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    label { font-weight: bold; display: block; margin-bottom: 5px; }
+    select, input, button { padding: 8px 12px; margin-top: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+    button { background-color: #007bff; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #0056b3; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+    .badge-req { background: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; }
+    .badge-opt { background: #ffc107; color: black; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; }
+  </style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    function AutoListingMapper() {
+      const [workbook, setWorkbook] = useState(null);
+      const [sheetNames, setSheetNames] = useState([]);
+      const [dataSheet, setDataSheet] = useState('');
+      const [dropdownSheet, setDropdownSheet] = useState('');
+      const [headers, setHeaders] = useState([]);
+      const [dropdownOptions, setDropdownOptions] = useState({});
+
+      // 1. File Reader Logic
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const bstr = evt.target.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          setWorkbook(wb);
+          setSheetNames(wb.SheetNames);
+          
+          if (wb.SheetNames.length > 0) setDataSheet(wb.SheetNames[0]);
+          if (wb.SheetNames.length > 1) setDropdownSheet(wb.SheetNames[1]);
+        };
+        reader.readAsBinaryString(file);
+      };
+
+      // 2. Extract Data & Dropdowns from Selected Sheets
+      const processSheets = () => {
+        if (!workbook) return;
+
+        // Get Main Headers from Selected Data Sheet
+        const wsData = workbook.Sheets[dataSheet];
+        if (wsData) {
+          const jsonData = XLSX.utils.sheet_to_json(wsData, { header: 1 });
+          const mainHeaders = jsonData[0] || [];
+          setHeaders(mainHeaders);
+        }
+
+        // Get Reference Dropdowns from Selected Option Sheet
+        if (dropdownSheet && workbook.Sheets[dropdownSheet]) {
+          const wsDropdown = workbook.Sheets[dropdownSheet];
+          const dropdownJson = XLSX.utils.sheet_to_json(wsDropdown);
+          
+          // Organize columns as arrays for dropdown options
+          const optionsMap = {};
+          if (dropdownJson.length > 0) {
+            Object.keys(dropdownJson[0]).forEach((colKey) => {
+              optionsMap[colKey] = dropdownJson.map(row => row[colKey]).filter(Boolean);
+            });
+          }
+          setDropdownOptions(optionsMap);
+        }
+      };
+
+      return (
+        <div>
+          <h2>E-Commerce Auto Listing Mapper</h2>
+
+          {/* Section 1: Upload File */}
+          <div className="card">
+            <label>1. Upload Master Excel File (.xlsx / .xls)</label>
+            <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} />
+          </div>
+
+          {/* Section 2: Choose Sheets */}
+          {sheetNames.length > 0 && (
+            <div className="card">
+              <h3>2. Select Sheets</h3>
+              <div className="grid">
+                <div>
+                  <label>Product Data Sheet (Compulsory Prefill Data):</label>
+                  <select value={dataSheet} onChange={(e) => setDataSheet(e.target.value)} style={{ width: '100%' }}>
+                    {sheetNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label>Dropdowns Reference Sheet (Sheet 2 or 3):</label>
+                  <select value={dropdownSheet} onChange={(e) => setDropdownSheet(e.target.value)} style={{ width: '100%' }}>
+                    <option value="">-- None --</option>
+                    {sheetNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <br />
+              <button onClick={processSheets}>Load Mapping Interface</button>
+            </div>
+          )}
+
+          {/* Section 3: Field Mapping */}
+          {headers.length > 0 && (
+            <div className="card">
+              <h3>3. Group Headers & Map Fields</h3>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <h4>Found Headers in [{dataSheet}]:</h4>
+                {headers.map((header, idx) => (
+                  <div key={idx} className="row">
+                    <div>
+                      <strong>{header}</strong>
+                      {idx < 3 ? <span className="badge-req">Compulsory</span> : <span className="badge-opt">Optional</span>}
+                    </div>
+
+                    <div>
+                      <select style={{ marginRight: '10px' }}>
+                        <option value="">-- Map Target Field --</option>
+                        <option value="sku">SKU / Style Code</option>
+                        <option value="title">Product Name</option>
+                        <option value="price">MRP / Price</option>
+                        <option value="fabric">Fabric</option>
+                        <option value="sleeve">Sleeve Style</option>
+                        <option value="neck">Neck Style</option>
+                      </select>
+
+                      {/* Reference Dropdown from Sheet 2/3 */}
+                      {Object.keys(dropdownOptions).length > 0 && (
+                        <select>
+                          <option value="">-- Select Dropdown List --</option>
+                          {Object.keys(dropdownOptions).map((colName) => (
+                            <option key={colName} value={colName}>Use values from [{colName}]</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AutoListingMapper />);
+  </script>
+</body>
+</html>
