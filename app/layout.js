@@ -33,9 +33,10 @@ export const metadata = {
 export default async function RootLayout({ children }) {
   const headersList = await headers()
   const pathname = headersList.get('x-pathname') || ''
-  // The settings shell (Sidebar/Topbar) manages its own fixed-viewport
-  // scroll region — every other route needs normal document scrolling.
-  const isAdmin = pathname.startsWith('/settings')
+  // The settings shell (Sidebar/Topbar) and the Listing Tools shell both
+  // manage their own fixed-viewport scroll region — every other route needs
+  // normal document scrolling.
+  const isAdmin = pathname.startsWith('/settings') || pathname.startsWith('/listing-tools')
 
   return (
     <html lang="en-IN" suppressHydrationWarning>

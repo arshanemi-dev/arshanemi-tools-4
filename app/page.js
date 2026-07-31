@@ -1,7 +1,5 @@
-import ListingToolsPage from "./listing-tools/page";
+import { redirect } from 'next/navigation'
 
 export default function Home() {
-  return (
-    <ListingToolsPage/>
-  )
+  redirect('/listing-tools')
 }

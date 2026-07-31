@@ -47,7 +47,7 @@ async function main() {
     COMPANY_EMAIL, COMPANY_PHONE_PRIMARY, COMPANY_PHONE_SECONDARY,
     COMPANY_WHATSAPP, COMPANY_ADDRESS, COMPANY_HOURS, COMPANY_NAME,
   } = await imp('data/company.js')
-  const { DEFAULT_COMPANY, MASTER_ADMIN, DEFAULT_COMPANY_ADMIN } = await imp('data/default.js')
+  const { DEFAULT_COMPANY, MASTER_ADMIN, DEFAULT_COMPANY_ADMIN, ADDITIONAL_ADMINS } = await imp('data/default.js')
 
   // ── Singletons ──────────────────────────────────────────────────────────────
   console.log('⚙️   Seeding singletons...\n')
@@ -146,6 +146,33 @@ async function main() {
     }
   }
 
+  // ── Additional seeded accounts (ADDITIONAL_ADMINS) ──────────────────────────
+  // Extra convenience accounts beyond the master admin + company admin above —
+  // same refresh-else-create pattern, scoped to defaultCompany unless the
+  // account's role is 'master_admin'.
+  const additionalUsers = []
+  if (ADDITIONAL_ADMINS?.length) {
+    console.log('\n👥  Seeding additional accounts...\n')
+    for (const acct of ADDITIONAL_ADMINS) {
+      const email = acct.email.toLowerCase().trim()
+      const passwordHash = await bcrypt.hash(acct.password, SALT_ROUNDS)
+      const role = acct.role || 'user'
+      const companyId = role === 'master_admin' ? null : (defaultCompany?.id ?? null)
+      const companySuffix = defaultCompany && role !== 'master_admin' ? `, company: ${defaultCompany.name}` : ''
+
+      let user = await getUserByEmail(email)
+      if (user) {
+        await updateUser(user.id, { name: acct.name, isActive: true, role, companyId })
+        await updateUserPassword(user.id, passwordHash)
+        console.log(`  ✓ ${email} already exists — refreshed  (${acct.password})  — role: ${role}${companySuffix}`)
+      } else {
+        user = await createUser({ name: acct.name, email, mobile: null, passwordHash, role, companyId })
+        console.log(`  ✓ ${user.email}  (${acct.password})  — role: ${role}${companySuffix}`)
+      }
+      additionalUsers.push({ user, role })
+    }
+  }
+
   // ── Default user_settings (tools access) ───────────────────────────────────
   console.log('\n🔧  Seeding default user_settings...\n')
 
@@ -154,6 +181,10 @@ async function main() {
   if (companyAdmin) {
     await createUserSettings(companyAdmin.id, 'admin')
     console.log(`  ✓ user_settings for ${companyAdmin.email}`)
+  }
+  for (const { user, role } of additionalUsers) {
+    await createUserSettings(user.id, role)
+    console.log(`  ✓ user_settings for ${user.email}`)
   }
 
   console.log('\n✅  Seed complete!\n')

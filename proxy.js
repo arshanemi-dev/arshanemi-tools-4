@@ -27,13 +27,20 @@ export async function proxy(req) {
   }
 
   const isAdminPath = pathname.startsWith('/settings') || pathname.startsWith('/api/admin')
+  // Listing Tools requires a logged-in session same as /settings, but any
+  // authenticated role may reach it (not just master_admin/admin), and an
+  // unauthenticated visitor bounces to the general /login page rather than
+  // /settings/login — see app/listing-tools/layout.js for the rest of the
+  // gate (connected-mode check + role-agnostic access).
+  const isListingToolsPath = pathname.startsWith('/listing-tools') || pathname.startsWith('/api/listing-tools')
+  const requiresAuth = isAdminPath || isListingToolsPath
 
   // Non-admin API routes (e.g. /api/auth/*) and the standalone auth pages
   // (/login, ...): inject CORS headers where relevant and pass
   // through, but still stamp x-pathname so the root layout can tell these
   // full-bleed auth screens apart from regular public pages and skip the
   // site Header/Footer for them.
-  if (!isAdminPath) {
+  if (!requiresAuth) {
     const res = NextResponse.next()
     res.headers.set('x-pathname', pathname)
     if (pathname.startsWith('/api/')) setCorsHeaders(res, origin)
@@ -57,14 +64,14 @@ export async function proxy(req) {
   // role here — the layout and API routes below decide what each role can
   // actually see/do, same defense-in-depth pattern already used elsewhere.
   const token = req.cookies.get('admin-token')?.value || req.cookies.get('arshanemi-token')?.value
+  const loginPath = isListingToolsPath ? '/login' : '/settings/login'
   if (!token) {
     if (pathname.startsWith('/api/')) {
       const res = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       setCorsHeaders(res, origin)
       return res
     }
-    const loginUrl = new URL('/settings/login', req.url)
-    return NextResponse.redirect(loginUrl)
+    return NextResponse.redirect(new URL(loginPath, req.url))
   }
 
   try {
@@ -80,11 +87,10 @@ export async function proxy(req) {
       setCorsHeaders(res, origin)
       return res
     }
-    const loginUrl = new URL('/settings/login', req.url)
-    return NextResponse.redirect(loginUrl)
+    return NextResponse.redirect(new URL(loginPath, req.url))
   }
 }
 
 export const config = {
-  matcher: ['/settings/:path*', '/api/:path*', '/login',  '/forgot-password', '/reset-password'],
+  matcher: ['/settings/:path*', '/listing-tools/:path*', '/api/:path*', '/login', '/forgot-password', '/reset-password'],
 }
