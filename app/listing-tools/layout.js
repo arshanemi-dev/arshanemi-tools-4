@@ -4,6 +4,7 @@ import { verifyToken } from '@/lib/auth'
 import { IS_CONNECT } from '@/lib/connect'
 import { ToastProvider } from '@/components/admin/Toast'
 import ListingToolsSidebar from '@/components/listing/ListingToolsSidebar'
+import ListingToolsHeader from '@/components/listing/ListingToolsHeader'
 
 export const metadata = {
   title: 'Listing Tools — Arshanemi',
@@ -39,9 +40,12 @@ export default async function ListingToolsLayout({ children }) {
 
   return (
     <ToastProvider>
-      <div className="flex h-screen overflow-hidden bg-background">
-        <ListingToolsSidebar />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+      <div className="flex flex-col h-screen overflow-hidden bg-background">
+        <ListingToolsHeader name={payload.name} email={payload.email} role={payload.role} />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <ListingToolsSidebar role={payload.role} />
+          <main className="flex-1 overflow-y-auto">{children}</main>
+        </div>
       </div>
     </ToastProvider>
   )

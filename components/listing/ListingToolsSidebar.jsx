@@ -3,10 +3,13 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useParams } from 'next/navigation'
 
-// Static 5-item dark sidebar — intentionally separate from
+// Static dark sidebar — intentionally separate from
 // components/admin/Sidebar.jsx, which is wired to /settings's role-based
 // nav config. Every account that reaches /listing-tools at all (any
-// authenticated role, gated by the layout) sees the same five items.
+// authenticated role, gated by the layout) sees these five items; "Template
+// Access" is appended only for master_admin (see role prop below), backing
+// app/listing-tools/template-access/page.js which enforces the same gate
+// server-side for anyone who types the URL directly.
 const NAV_ITEMS = [
   { href: '/listing-tools', label: 'Auto Listing' },
   { href: '/listing-tools/design-details', label: 'Design Details' },
@@ -15,10 +18,15 @@ const NAV_ITEMS = [
   { href: '/listing-tools/template-settings', label: 'Template Settings' },
 ]
 
-export default function ListingToolsSidebar() {
+const MASTER_ADMIN_NAV_ITEMS = [
+  { href: '/listing-tools/template-access', label: 'Template Access' },
+]
+
+export default function ListingToolsSidebar({ role }) {
   const pathname = usePathname()
   const params = useParams()
   const [templates, setTemplates] = useState([])
+  const navItems = role === 'master_admin' ? [...NAV_ITEMS, ...MASTER_ADMIN_NAV_ITEMS] : NAV_ITEMS
 
   // The template1/2/3 switcher under "Auto Listing" only appears while
   // browsing a specific template's workspace (screenshots show it beside
@@ -43,7 +51,7 @@ export default function ListingToolsSidebar() {
       [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:transparent
       [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
       <nav className="flex flex-col">
-        {NAV_ITEMS.map((item, i) => (
+        {navItems.map((item, i) => (
           <div key={item.href}>
             <Link
               href={item.href}

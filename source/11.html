@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-Commerce Auto Listing Mapper - CRM Kanban View</title>
+  
+  <!-- React and Babel CDN libraries -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <!-- SheetJS library to read Excel files -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 24px; background-color: #f4f6f9; color: #1f2937; }
+    .container { max-width: 1600px; margin: 0 auto; }
+    .card { background: #ffffff; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    h2 { margin-top: 0; font-size: 24px; color: #111827; }
+    h3 { margin-top: 0; font-size: 18px; color: #374151; }
+    label { font-weight: 600; display: block; margin-bottom: 8px; font-size: 13px; color: #374151; white-space: nowrap; }
+    select, input, textarea, button { padding: 8px 12px; border-radius: 6px; border: 1px solid #d1d5db; font-size: 13px; outline: none; }
+    select:focus, input:focus, textarea:focus { border-color: #2563eb; }
+    button { background-color: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background-color: #1d4ed8; }
+    .btn-success { background-color: #059669; }
+    .btn-success:hover { background-color: #047857; }
+    .btn-secondary { background-color: #4b5563; }
+    .btn-secondary:hover { background-color: #374151; }
+    .btn-outline { background-color: transparent; border: 1px solid #d1d5db; color: #374151; }
+    .btn-outline:hover { background-color: #f3f4f6; }
+    .btn-warning { background-color: #d97706; color: white; }
+    .btn-warning:hover { background-color: #b45309; }
+    
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    
+    /* Single Line Horizontal Flex Rows for Section 4 & 5 */
+    .single-line-row-sec4 { display: flex; align-items: flex-end; gap: 16px; width: 100%; }
+    .single-line-row-sec4 > div { flex: 1; }
+    
+    .single-line-row-sec5 { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
+    .single-line-row-sec5 > div { flex: 1; }
+
+    /* Tabs & CRM Kanban Header Styles */
+    .tabs-header { display: flex; align-items: center; border-bottom: 2px solid #e5e7eb; gap: 8px; margin-top: 20px; overflow-x: auto; padding-bottom: 2px; }
+    .tab-btn { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; border-bottom: none; border-radius: 8px 8px 0 0; padding: 10px 18px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
+    .tab-btn.active { background: #ffffff; color: #2563eb; border-color: #e5e7eb #e5e7eb #ffffff #e5e7eb; border-top: 3px solid #2563eb; margin-bottom: -2px; }
+    .add-tab-btn { background: #ecfdf5; color: #059669; border: 1px dashed #10b981; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .add-tab-btn:hover { background: #d1fae5; }
+    
+    /* Dynamics 365 / CRM Kanban Board Layout */
+    .kanban-board { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 16px; margin-top: 16px; align-items: flex-start; }
+    .kanban-column { background: #f8fafc; border: 1px solid #e2e8f0; border-top: 4px solid #3b82f6; border-radius: 8px; min-width: 340px; max-width: 360px; flex: 0 0 340px; display: flex; flex-direction: column; max-height: 75vh; }
+    .kanban-col-header { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #ffffff; border-radius: 8px 8px 0 0; display: flex; flex-direction: column; gap: 8px; position: sticky; top: 0; z-index: 10; }
+    .kanban-col-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .kanban-col-body { padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+    
+    /* Kanban Card Item */
+    .kanban-card-item { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); display: flex; flex-direction: column; gap: 10px; transition: box-shadow 0.2s; }
+    .kanban-card-item:hover { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .kanban-item-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    
+    .badge { padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .badge-unmap { background: #e5e7eb; color: #374151; }
+    .badge-compulsory { background: #fee2e2; color: #991b1b; }
+    .badge-prefill { background: #dbeafe; color: #1e40af; }
+    .badge-optional { background: #fef3c7; color: #92400e; }
+    .badge-custom { background: #f3e8ff; color: #6b21a8; }
+
+    .multi-select-box { border: 1px solid #d1d5db; border-radius: 6px; padding: 12px; background: #fafafa; margin-bottom: 16px; }
+    
+    .sec5-actions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
+    .search-bar { display: flex; align-items: center; gap: 8px; }
+
+    .ai-editor-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef } = React;
+
+    function AutoListingMapper() {
+      const [workbook, setWorkbook] = useState(null);
+      const [sheetNames, setSheetNames] = useState(['Blouses-Fill this', 'Validation Sheet']);
+      const [dataSheet, setDataSheet] = useState('Blouses-Fill this');
+      const [dropdownSheet, setDropdownSheet] = useState('Validation Sheet');
+      
+      const [tabs, setTabs] = useState(['unmap field', 'compulsory', 'prefill', 'optional']);
+      const [activeTab, setActiveTab] = useState('unmap field'); // Used for multi-select drawer target
+
+      // Inline renaming state for CRM group column titles
+      const [editingTab, setEditingTab] = useState(null);
+      const [tempTabName, setTempTabName] = useState('');
+
+      const [headersMap, setHeadersMap] = useState({
+        'Blouses Template (Women Fashion/Ethnic Wear/Sarees, Blouses & Petticoats/Blouses)': 'unmap field',
+        'GST %': 'unmap field',
+        'HSN ID': 'unmap field',
+        'Brand Name': 'unmap field',
+        'Fabric': 'unmap field',
+        'Sleeve Length': 'unmap field'
+      });
+
+      const [dropdownOptions, setDropdownOptions] = useState({
+        'Fabric Options': ['Cotton', 'Silk', 'Georgette'],
+        'Sleeve Options': ['Short Sleeve', 'Long Sleeve', 'Half Sleeve']
+      });
+
+      // Section 4 Data
+      const [sec4Data, setSec4Data] = useState({
+        marketplaceName: 'Meesho',
+        category: 'Blouses',
+        version: 'v1.0'
+      });
+
+      // Section 5 Data & Tools
+      const [searchQuery, setSearchQuery] = useState('');
+      const [showAiEditor, setShowAiEditor] = useState(false);
+
+      const templatePresets = [
+        'Meesho Blouse Standard Rules',
+        'Amazon Fashion Blouse Rules',
+        'Flipkart Ethnic Wear Rules',
+        'Custom AI Rule Template'
+      ];
+
+      const [sec5Data, setSec5Data] = useState({
+        templateName: 'Meesho Blouse Standard Rules',
+        marketplace: 'Meesho',
+        category: 'Blouses',
+        title: 'Auto SEO title template',
+        description: 'Auto description prompt',
+        keyword: 'Primary keywords',
+        otherRules: 'No special characters'
+      });
+
+      const fileInputRefSec5 = useRef(null);
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const bstr = evt.target.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          setWorkbook(wb);
+          setSheetNames(wb.SheetNames);
+          
+          if (wb.SheetNames.length > 0) {
+            setDataSheet(wb.SheetNames[0]);
+            readHeadersFromSheet(wb, wb.SheetNames[0]);
+          }
+          if (wb.SheetNames.length > 1) {
+            setDropdownSheet(wb.SheetNames[1]);
+            readDropdownsFromSheet(wb, wb.SheetNames[1]);
+          }
+        };
+        reader.readAsBinaryString(file);
+      };
+
+      const readHeadersFromSheet = (wb, sheet) => {
+        const ws = wb.Sheets[sheet];
+        if (!ws) return;
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const extracted = jsonData[0] || [];
+        
+        const newMap = {};
+        extracted.forEach(h => { newMap[h] = 'unmap field'; });
+        setHeadersMap(newMap);
+      };
+
+      const readDropdownsFromSheet = (wb, sheet) => {
+        const ws = wb.Sheets[sheet];
+        if (!ws) return;
+        const dropdownJson = XLSX.utils.sheet_to_json(ws);
+        const optionsMap = {};
+        if (dropdownJson.length > 0) {
+          Object.keys(dropdownJson[0]).forEach((colKey) => {
+            optionsMap[colKey] = dropdownJson.map(row => row[colKey]).filter(Boolean);
+          });
+        }
+        setDropdownOptions(optionsMap);
+      };
+
+      const handleAddTab = () => {
+        const newTabName = `Group ${tabs.length}`;
+        setTabs([...tabs, newTabName]);
+        setActiveTab(newTabName);
+      };
+
+      // Inline renaming logic for group/column names
+      const handleStartRename = (tabName, e) => {
+        e.stopPropagation();
+        setEditingTab(tabName);
+        setTempTabName(tabName);
+      };
+
+      const handleSaveRename = (oldName) => {
+        const trimmed = tempTabName.trim();
+        if (!trimmed || tabs.includes(trimmed)) {
+          setEditingTab(null);
+          return;
+        }
+
+        // Update tabs array
+        const updatedTabs = tabs.map(t => (t === oldName ? trimmed : t));
+        setTabs(updatedTabs);
+
+        // Update headers mapping references
+        const updatedHeaders = { ...headersMap };
+        Object.keys(updatedHeaders).forEach(h => {
+          if (updatedHeaders[h] === oldName) {
+            updatedHeaders[h] = trimmed;
+          }
+        });
+        setHeadersMap(updatedHeaders);
+
+        if (activeTab === oldName) {
+          setActiveTab(trimmed);
+        }
+        setEditingTab(null);
+      };
+
+      const handleAssignMultipleHeaders = (e) => {
+        const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
+        if (selectedOptions.length === 0) return;
+
+        const updated = { ...headersMap };
+        selectedOptions.forEach(header => {
+          updated[header] = activeTab;
+        });
+        setHeadersMap(updated);
+      };
+
+      const handleGroupChange = (headerName, newGroup) => {
+        setHeadersMap({ ...headersMap, [headerName]: newGroup });
+      };
+
+      // Section 5 Actions
+      const handleCopySec5 = () => {
+        const payload = JSON.stringify(sec5Data, null, 2);
+        navigator.clipboard.writeText(payload);
+        alert('Section 5 AI Rules copied to clipboard!');
+      };
+
+      const handleUploadSec5Json = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const parsed = JSON.parse(evt.target.result);
+            setSec5Data({ ...sec5Data, ...parsed });
+            alert('Rules uploaded successfully!');
+          } catch (err) {
+            alert('Invalid JSON file format.');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      // Unmapped headers are those set specifically to 'unmap field'
+      const unmappedHeaders = Object.keys(headersMap).filter(h => headersMap[h] === 'unmap field');
+
+      return (
+        <div className="container">
+          <h2>E-Commerce Auto Listing Mapper</h2>
+
+          {/* Section 1 */}
+          <div className="card">
+            <h3>1. Upload Master Excel File (.xlsx / .xls)</h3>
+            <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} />
+          </div>
+
+          {/* Section 2 */}
+          <div className="card">
+            <h3>2. Select Sheets</h3>
+            <div className="grid">
+              <div>
+                <label>Product Data Sheet (Compulsory Prefill Data):</label>
+                <select 
+                  value={dataSheet} 
+                  onChange={(e) => {
+                    setDataSheet(e.target.value);
+                    if (workbook) readHeadersFromSheet(workbook, e.target.value);
+                  }} 
+                  style={{ width: '100%' }}
+                >
+                  {sheetNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Dropdowns Reference Sheet (Sheet 2 or 3):</label>
+                <select 
+                  value={dropdownSheet} 
+                  onChange={(e) => {
+                    setDropdownSheet(e.target.value);
+                    if (workbook) readDropdownsFromSheet(workbook, e.target.value);
+                  }} 
+                  style={{ width: '100%' }}
+                >
+                  <option value="">-- None --</option>
+                  {sheetNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3 */}
+          <div className="card">
+            <h3>3. Group Headers & Map Fields (CRM Kanban Multi-Column View)</h3>
+            <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '16px' }}>
+              Found Headers in <strong>[{dataSheet}]</strong>. Click any group tab/column title below to instantly edit its name, or view all columns side-by-side like Dynamics 365 Kanban.
+            </p>
+
+            {/* Top Selector for Multi-Select Bulk Assignment Drawer */}
+            <div className="multi-select-box">
+              <label>
+                📥 <strong>Bulk Assign Unmapped Headers to Target Group:</strong> Select active group tab below, then hold Ctrl/Cmd to select multiple unmapped fields:
+              </label>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginTop: '8px' }}>
+                <select 
+                  value={activeTab} 
+                  onChange={(e) => setActiveTab(e.target.value)}
+                  style={{ fontWeight: 'bold', color: '#2563eb' }}
+                >
+                  {tabs.map(t => (
+                    <option key={t} value={t}>Target Group: [{t}]</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                  ({unmappedHeaders.length} unmapped headers available)
+                </span>
+              </div>
+
+              {activeTab !== 'unmap field' && unmappedHeaders.length > 0 && (
+                <select 
+                  multiple 
+                  style={{ width: '100%', height: '80px', marginTop: '10px' }}
+                  onChange={handleAssignMultipleHeaders}
+                  defaultValue={[]}
+                >
+                  {unmappedHeaders.map((header) => (
+                    <option key={header} value={header}>{header}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Dynamics 365 Style Multi-Column Kanban View */}
+            <div className="kanban-board">
+              {tabs.map((tabName, idx) => {
+                const colHeaders = Object.keys(headersMap).filter(h => headersMap[h] === tabName);
+                return (
+                  <div className="kanban-column" key={idx}>
+                    
+                    {/* Kanban Column Header with Click-to-Rename Input Support */}
+                    <div className="kanban-col-header">
+                      <div className="kanban-col-title-row">
+                        {editingTab === tabName ? (
+                          <div style={{ display: 'flex', gap: '4px', width: '100%' }}>
+                            <input 
+                              type="text" 
+                              value={tempTabName} 
+                              autoFocus
+                              onChange={(e) => setTempTabName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRename(tabName); }}
+                              style={{ flex: 1, padding: '4px 8px' }}
+                            />
+                            <button className="btn-success" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={() => handleSaveRename(tabName)}>Save</button>
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={(e) => handleStartRename(tabName, e)} 
+                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', width: '100%', justifyContent: 'space-between' }}
+                            title="Click to rename group"
+                          >
+                            <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b' }}>
+                              ✏️ {tabName}
+                            </span>
+                            <span className="badge" style={{ background: '#e2e8f0', color: '#475569' }}>
+                              {colHeaders.length}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Kanban Column Body Containing Field Cards */}
+                    <div className="kanban-col-body">
+                      {colHeaders.length === 0 ? (
+                        <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px', fontStyle: 'italic' }}>
+                          No headers in this group.
+                        </div>
+                      ) : (
+                        colHeaders.map((headerName, hIdx) => (
+                          <div className="kanban-card-item" key={hIdx}>
+                            <div className="kanban-item-header">
+                              <strong style={{ fontSize: '13px', color: '#0f172a', wordBreak: 'break-word' }}>
+                                {headerName}
+                              </strong>
+                              <span className={`badge badge-${tabName === 'unmap field' ? 'unmap' : tabName === 'compulsory' ? 'compulsory' : tabName === 'prefill' ? 'prefill' : tabName === 'optional' ? 'optional' : 'custom'}`}>
+                                {tabName}
+                              </span>
+                            </div>
+
+                            <div>
+                              <label style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>Move to Group:</label>
+                              <select 
+                                value={headersMap[headerName]} 
+                                onChange={(e) => handleGroupChange(headerName, e.target.value)}
+                                style={{ width: '100%', padding: '6px', fontSize: '12px' }}
+                              >
+                                {tabs.map((t) => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>Map Target Field:</label>
+                              <select style={{ width: '100%', padding: '6px', fontSize: '12px' }}>
+                                <option value="">-- Select Target --</option>
+                                <option value="sku">SKU / Style Code</option>
+                                <option value="title">Product Name</option>
+                                <option value="price">MRP / Price</option>
+                                <option value="gst">GST %</option>
+                                <option value="hsn">HSN ID</option>
+                                <option value="brand">Brand Name</option>
+                                <option value="fabric">Fabric</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>Dropdown Reference:</label>
+                              {Object.keys(dropdownOptions).length > 0 ? (
+                                <select style={{ width: '100%', padding: '6px', fontSize: '12px' }}>
+                                  <option value="">-- Select Dropdown List --</option>
+                                  {Object.keys(dropdownOptions).map((colName) => (
+                                    <option key={colName} value={colName}>Use [{colName}]</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>No dropdown sheet</span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                  </div>
+                );
+              })}
+
+              {/* Add New Group Column Button */}
+              <div style={{ minWidth: '220px', display: 'flex', alignItems: 'flex-start', paddingTop: '10px' }}>
+                <button className="add-tab-btn" onClick={handleAddTab} style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
+                  + Add New Group Column
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          {/* SECTION 4 */}
+          <div className="card">
+            <h3>4. Preset & Export Configuration</h3>
+            <div className="single-line-row-sec4">
+              <div>
+                <label>marketplace name</label>
+                <input 
+                  type="text" 
+                  value={sec4Data.marketplaceName} 
+                  onChange={(e) => setSec4Data({ ...sec4Data, marketplaceName: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>cetegery</label>
+                <input 
+                  type="text" 
+                  value={sec4Data.category} 
+                  onChange={(e) => setSec4Data({ ...sec4Data, category: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>virsion</label>
+                <input 
+                  type="text" 
+                  value={sec4Data.version} 
+                  onChange={(e) => setSec4Data({ ...sec4Data, version: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ flex: '0 0 120px' }}>
+                <button className="btn-success" style={{ width: '100%', height: '37px' }}>
+                  save
+                </button>
+              </div>
+
+              <div>
+                <label>final name</label>
+                <input 
+                  type="text" 
+                  value={`${sec4Data.marketplaceName}_${sec4Data.category}_${sec4Data.version}`}
+                  readOnly
+                  style={{ width: '100%', background: '#f9fafb', color: '#374151', fontWeight: 'bold' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 5 */}
+          <div className="card">
+            <div className="sec5-actions">
+              <h3 style={{ margin: 0 }}>5. AI Rules & Template Generation</h3>
+              
+              <div className="search-bar">
+                <input 
+                  type="text" 
+                  placeholder="🔍 Search rule keywords..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ width: '200px' }}
+                />
+                
+                <button className="btn-warning" onClick={() => setShowAiEditor(!showAiEditor)}>
+                  ✏️ {showAiEditor ? 'Hide AI Editor' : 'Edit AI Rules'}
+                </button>
+
+                <button className="btn-outline" onClick={handleCopySec5}>
+                  📋 Copy Rules
+                </button>
+
+                <button className="btn-secondary" onClick={() => fileInputRefSec5.current.click()}>
+                  📤 Upload Rules (.json)
+                </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRefSec5} 
+                  style={{ display: 'none' }} 
+                  accept=".json"
+                  onChange={handleUploadSec5Json} 
+                />
+              </div>
+            </div>
+
+            <div className="single-line-row-sec5">
+              <div>
+                <label>tamplate name</label>
+                <select 
+                  value={sec5Data.templateName} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, templateName: e.target.value })}
+                  style={{ width: '100%' }}
+                >
+                  {templatePresets.map((preset, idx) => (
+                    <option key={idx} value={preset}>{preset}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>marketplace</label>
+                <input 
+                  type="text" 
+                  value={sec5Data.marketplace} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, marketplace: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>categery</label>
+                <input 
+                  type="text" 
+                  value={sec5Data.category} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, category: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>tital</label>
+                <input 
+                  type="text" 
+                  placeholder="Title Rule"
+                  value={sec5Data.title} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, title: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>description</label>
+                <input 
+                  type="text" 
+                  placeholder="Desc Rule"
+                  value={sec5Data.description} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, description: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>keyword</label>
+                <input 
+                  type="text" 
+                  placeholder="Keyword Rule"
+                  value={sec5Data.keyword} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, keyword: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label>other rules</label>
+                <input 
+                  type="text" 
+                  placeholder="Other Rules"
+                  value={sec5Data.otherRules} 
+                  onChange={(e) => setSec5Data({ ...sec5Data, otherRules: e.target.value })}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+
+            {showAiEditor && (
+              <div className="ai-editor-box">
+                <h4>Edit AI Generation Prompts & Instructions</h4>
+                <div className="grid">
+                  <div>
+                    <label>Title Prompt Template:</label>
+                    <textarea 
+                      rows="3" 
+                      value={sec5Data.title} 
+                      onChange={(e) => setSec5Data({ ...sec5Data, title: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label>Description Prompt Template:</label>
+                    <textarea 
+                      rows="3" 
+                      value={sec5Data.description} 
+                      onChange={(e) => setSec5Data({ ...sec5Data, description: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid" style={{ marginTop: '12px' }}>
+                  <div>
+                    <label>Keyword Rules:</label>
+                    <textarea 
+                      rows="3" 
+                      value={sec5Data.keyword} 
+                      onChange={(e) => setSec5Data({ ...sec5Data, keyword: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label>Other Rules & Tone Constraints:</label>
+                    <textarea 
+                      rows="3" 
+                      value={sec5Data.otherRules} 
+                      onChange={(e) => setSec5Data({ ...sec5Data, otherRules: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AutoListingMapper />);
+  </script>
+</body>
+</html>
