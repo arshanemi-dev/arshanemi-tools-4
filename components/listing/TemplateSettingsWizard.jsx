@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { UploadCloud, FileSpreadsheet, Loader2, Check, Lock, PlusCircle } from 'lucide-react'
+import { UploadCloud, FileSpreadsheet, Loader2, Check, Lock, PlusCircle, ArrowLeft } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 import PillButton from './PillButton'
 import GroupTabsStep, { UNMAPPED_TAB_ID } from './GroupTabsStep'
@@ -202,6 +202,45 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
   return fields
 }
 
+// Flattens an existing template's per-group sheets/headers (loaded from
+// GET /api/listing-tools/[templateId]) back into the wizard's flat `fields`
+// array — the inverse of the grouping handleSave does on the way out.
+// Header ids are kept exactly as stored so a later save's PATCH lines up
+// with the rows already on file for each group (see the route's own
+// comment on why rows are never touched here).
+function fieldsFromContent(content) {
+  const fields = []
+  for (const sheet of content.sheets || []) {
+    for (const h of sheet.headers || []) {
+      fields.push({
+        id: h.id,
+        label: h.label,
+        groupId: h.group || sheet.group,
+        dataType: h.dataType || 'text',
+        dropdownColumn: h.dropdownSource?.columnName || '',
+        dropdownValues: h.dropdownSource?.values ? [...h.dropdownSource.values] : [],
+        // No live dropdownColumns map exists in edit mode (no sheet was
+        // just parsed) — keep the original source sheet name so a re-save
+        // doesn't drop it from dropdownSource.
+        dropdownSheetName: h.dropdownSource?.sheetName || null,
+        isUniqueKeyPart: !!h.isUniqueKeyPart,
+      })
+    }
+  }
+  return fields
+}
+// Only records a tabLabels override where the stored sheetName actually
+// differs from the group's default label — i.e. it was renamed via the
+// Kanban column's click-to-rename at some point.
+function tabLabelsFromContent(content) {
+  const labels = {}
+  for (const g of GROUPS) {
+    const sheet = (content.sheets || []).find((s) => s.group === g.id)
+    if (sheet?.sheetName && sheet.sheetName !== g.label) labels[g.id] = sheet.sheetName
+  }
+  return labels
+}
+
 // Small "step not ready yet" note shown above a dimmed section — every
 // section on this page always renders (per product direction: show the
 // whole flow up front), so the signal that a step isn't usable yet is this
@@ -214,14 +253,19 @@ function LockedNote({ children }) {
   )
 }
 
-// Single-page template creation flow: upload → pick the Product Data Sheet
-// (+ optional Dropdown Reference Sheet) → group the resulting fields on a
-// Kanban board → configure export preset + AI rules → save. Every section
-// stays mounted and visible from the start; sections that depend on an
-// earlier one being finished are just dimmed/non-interactive (LockedNote)
-// until that earlier step is done.
-export default function TemplateSettingsWizard() {
+// Single-page template creation/edit flow. Create mode: upload → pick the
+// Product Data Sheet (+ optional Dropdown Reference Sheet) → group the
+// resulting fields on a Kanban board → configure export preset + AI rules →
+// save (POST, creates a new template). Edit mode (templateId passed in from
+// app/listing-tools/template-settings/[templateId]/page.js): loads the
+// existing template's headers/groups/preset/AI rules straight onto the same
+// Kanban board — Sections 1-2 (upload/pick sheet) don't apply since there's
+// no file to re-parse — and Save PATCHes the existing template in place,
+// never touching the row data those headers describe (see the PATCH
+// route's own comment on that).
+export default function TemplateSettingsWizard({ templateId }) {
   const { addToast } = useToast()
+  const isEditMode = !!templateId
 
   const [fileName, setFileName] = useState('')
   const [workbook, setWorkbook] = useState(null)
@@ -241,7 +285,42 @@ export default function TemplateSettingsWizard() {
   const [aiRulesData, setAiRulesData] = useState(DEFAULT_AI_RULES)
 
   const [saving, setSaving] = useState(false)
-  const [savedTemplate, setSavedTemplate] = useState(null) // { id, templateName } once Save Template succeeds
+  const [savedTemplate, setSavedTemplate] = useState(null) // { id, templateName } once Save succeeds
+
+  const [loadingExisting, setLoadingExisting] = useState(isEditMode)
+  const [loadError, setLoadError] = useState(false)
+
+  // Edit mode only — loads the template once and drops it straight onto the
+  // Kanban board (skips Sections 1-2 entirely).
+  useEffect(() => {
+    if (!templateId) return
+    let cancelled = false
+    fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return
+        if (!data?.template || !data?.content) { setLoadError(true); return }
+        setFields(fieldsFromContent(data.content))
+        setTabLabels(tabLabelsFromContent(data.content))
+        setPresetData({
+          marketplaceName: data.template.marketplaceName || '',
+          category: data.template.category || '',
+          exportVersion: data.template.exportVersion || '',
+        })
+        setAiRulesData({
+          marketplace: data.template.marketplaceName || '',
+          category: data.template.category || '',
+          title: data.template.aiRules?.title || '',
+          description: data.template.aiRules?.description || '',
+          keyword: data.template.aiRules?.keyword || '',
+          otherRules: data.template.aiRules?.otherRules || '',
+        })
+        setShowGroups(true)
+      })
+      .catch(() => { if (!cancelled) setLoadError(true) })
+      .finally(() => { if (!cancelled) setLoadingExisting(false) })
+    return () => { cancelled = true }
+  }, [templateId])
 
   async function handleFile(file) {
     if (!file) return
@@ -288,7 +367,8 @@ export default function TemplateSettingsWizard() {
   // source/11.html's readHeadersFromSheet). Changing the Dropdown Reference
   // Sheet re-derives dropdownColumns the same way, kept as one combined
   // rebuild for predictability rather than trying to patch only the fields
-  // an auto-match previously touched.
+  // an auto-match previously touched. Create mode only — edit mode never
+  // sets `workbook`, so this never fires there.
   useEffect(() => {
     if (!workbook || !dataSheetName) return
     let cancelled = false
@@ -346,61 +426,87 @@ export default function TemplateSettingsWizard() {
   }
 
   async function handleSave() {
-    const grouped = GROUPS
-      .map((g, i) => ({
-        sheetName: tabLabels[g.id] || g.label,
-        sheetIndex: i,
+    const allGrouped = GROUPS.map((g, i) => ({
+      sheetName: tabLabels[g.id] || g.label,
+      sheetIndex: i,
+      group: g.id,
+      headers: fields.filter((f) => f.groupId === g.id).map((f, idx) => ({
+        id: f.id,
+        label: f.label,
+        order: idx,
         group: g.id,
-        headers: fields.filter((f) => f.groupId === g.id).map((f, idx) => ({
-          id: f.id,
-          label: f.label,
-          order: idx,
-          group: g.id,
-          dataType: f.dataType,
-          isUniqueKeyPart: f.isUniqueKeyPart,
-          // Saves the field's own (possibly hand-edited via +/- in the card)
-          // value list, not blindly the shared sheet column's raw values.
-          dropdownSource: f.dataType === 'dropdown'
-            ? {
-                sheetName: dropdownColumns[f.dropdownColumn]?.sheetName || null,
-                columnName: f.dropdownColumn || null,
-                values: f.dropdownValues && f.dropdownValues.length ? f.dropdownValues : (dropdownColumns[f.dropdownColumn]?.values || []),
-              }
-            : null,
-        })),
-        rows: [],
-      }))
-      .filter((g) => g.headers.length > 0)
+        dataType: f.dataType,
+        isUniqueKeyPart: f.isUniqueKeyPart,
+        // Saves the field's own (possibly hand-edited via +/- in the card)
+        // value list, not blindly the shared sheet column's raw values.
+        dropdownSource: f.dataType === 'dropdown'
+          ? {
+              sheetName: dropdownColumns[f.dropdownColumn]?.sheetName || f.dropdownSheetName || null,
+              columnName: f.dropdownColumn || null,
+              values: f.dropdownValues && f.dropdownValues.length ? f.dropdownValues : (dropdownColumns[f.dropdownColumn]?.values || []),
+            }
+          : null,
+      })),
+      rows: [],
+    }))
 
-    if (grouped.length === 0) {
+    const totalHeaders = allGrouped.reduce((sum, g) => sum + g.headers.length, 0)
+    if (totalHeaders === 0) {
       addToast('Add at least one field to a group before saving.', 'error')
       return
     }
 
     setSaving(true)
     try {
-      const mergedColumns = Object.fromEntries(Object.entries(dropdownColumns).map(([k, v]) => [k, v.values]))
+      let res
+      if (isEditMode) {
+        // Every group is sent, even ones with 0 headers right now — that's
+        // how the PATCH route tells "this group is intentionally empty"
+        // apart from "this group wasn't mentioned" (which would otherwise
+        // leave its old headers/rows alone). No dropdownReference/
+        // sourceFileName here: Sections 1-2 don't exist in edit mode, so
+        // there's nothing new to report — the route keeps what's on file.
+        res = await fetch(`/api/listing-tools/${templateId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateName: finalTemplateName,
+            marketplaceName: presetData.marketplaceName,
+            category: presetData.category,
+            exportVersion: presetData.exportVersion,
+            aiRules: aiRulesData,
+            sheets: allGrouped,
+          }),
+        })
+      } else {
+        const mergedColumns = Object.fromEntries(Object.entries(dropdownColumns).map(([k, v]) => [k, v.values]))
+        res = await fetch('/api/listing-tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateName: finalTemplateName,
+            sourceFileName: fileName,
+            sheets: allGrouped.filter((g) => g.headers.length > 0),
+            dropdownReference: dropdownSheetName
+              ? { sheetName: dropdownSheetName, columns: mergedColumns }
+              : { sheetName: null, columns: {} },
+            marketplaceName: presetData.marketplaceName,
+            category: presetData.category,
+            exportVersion: presetData.exportVersion,
+            aiRules: aiRulesData,
+          }),
+        })
+      }
+      // A server error can come back with an empty/HTML body (proxy
+      // timeout, an unhandled exception before route.js's own try/catch
+      // JSON-ifies it) — res.json() throws "Unexpected end of JSON input"
+      // on that, which is far more confusing than just naming the HTTP
+      // status, so parse defensively instead of assuming JSON.
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || `Failed to save template (${res.status})`)
+      if (!data?.template) throw new Error('Server did not return the saved template.')
 
-      const res = await fetch('/api/listing-tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateName: finalTemplateName,
-          sourceFileName: fileName,
-          sheets: grouped,
-          dropdownReference: dropdownSheetName
-            ? { sheetName: dropdownSheetName, columns: mergedColumns }
-            : { sheetName: null, columns: {} },
-          marketplaceName: presetData.marketplaceName,
-          category: presetData.category,
-          exportVersion: presetData.exportVersion,
-          aiRules: aiRulesData,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to save template')
-
-      addToast('Template created', 'success')
+      addToast(isEditMode ? 'Template updated' : 'Template created', 'success')
       setSavedTemplate({ id: data.template.id, templateName: data.template.templateName })
     } catch (err) {
       addToast(err.message, 'error')
@@ -416,98 +522,125 @@ export default function TemplateSettingsWizard() {
   // keep in sync with it.
   const finalTemplateName = `${presetData.marketplaceName || 'marketplace'}_${presetData.category || 'category'}_${presetData.exportVersion || 'v1.0'}`
 
+  if (isEditMode && loadingExisting) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+      </div>
+    )
+  }
+  if (isEditMode && loadError) {
+    return (
+      <div className="max-w-lg mx-auto px-6 py-16 text-center">
+        <p className="text-[14px] font-semibold text-gray-800">Couldn&apos;t load this template.</p>
+        <p className="text-[13px] text-gray-500 mt-1">It may have been deleted, or you don&apos;t have access to it.</p>
+        <Link href="/listing-tools/template-settings" className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to Template Settings
+        </Link>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full mx-auto px-6 py-8 space-y-5">
       <div>
-        <h1 className="text-lg font-bold text-gray-900">Create Template</h1>
+        <h1 className="text-lg font-bold text-gray-900">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
         <p className="text-[13px] text-gray-500 mt-0.5">
-          Upload a master sheet and pick its Product Data Sheet — its headers appear on the Kanban board below automatically. Drag headers between groups, or bulk-assign several at once.
+          {isEditMode
+            ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
+            : "Upload a master sheet and pick its Product Data Sheet — its headers appear on the Kanban board below automatically. Drag headers between groups, or bulk-assign several at once."}
         </p>
       </div>
 
-      {/* Section 1 — Upload */}
-      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-          <h2 className="text-[13px] font-semibold text-gray-800">1. Upload Master Excel File</h2>
-        </div>
-        <div className="p-4">
-          {!fileName ? (
-            <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 rounded-xl py-12 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition-colors">
-              {parsing ? <Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /> : <UploadCloud className="w-7 h-7 text-gray-400" />}
-              <div className="text-center">
-                <p className="text-[13.5px] font-semibold text-gray-800">Click to upload .xlsx / .xls</p>
-                <p className="text-[12px] text-gray-400 mt-0.5">Any number of sheets — you&apos;ll pick their role next</p>
-              </div>
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-            </label>
-          ) : (
-            <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
-              <FileSpreadsheet className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-gray-800 truncate">{fileName}</p>
-                <p className="text-[12px] text-gray-400">{sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found</p>
-              </div>
-              <label className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer flex-shrink-0">
-                Replace file
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-              </label>
+      {!isEditMode && (
+        <>
+          {/* Section 1 — Upload */}
+          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+              <h2 className="text-[13px] font-semibold text-gray-800">1. Upload Master Excel File</h2>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Section 2 — Choose sheets (single-select, matching source/11.html) */}
-      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-          <h2 className="text-[13px] font-semibold text-gray-800">2. Select Sheets</h2>
-        </div>
-        <div className={sheetsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
-          {sheetsLocked && <LockedNote>Upload a file in Section 1 to unlock.</LockedNote>}
-          <div className="grid md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Product Data Sheet (Compulsory Prefill Data)</label>
-              <select
-                value={dataSheetName}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setDataSheetName(val)
-                  if (!val) {
-                    setShowGroups(false)
-                    setFields([])
-                    setDropdownColumns({})
-                  }
-                }}
-                className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              >
-                <option value="">-- Select sheet --</option>
-                {sheetMeta.map((s) => (
-                  <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Dropdowns Reference Sheet</label>
-              <select
-                value={dropdownSheetName}
-                onChange={(e) => setDropdownSheetName(e.target.value)}
-                className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              >
-                <option value="">-- None --</option>
-                {sheetMeta.map((s) => (
-                  <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
-                ))}
-              </select>
+            <div className="p-4">
+              {!fileName ? (
+                <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 rounded-xl py-12 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition-colors">
+                  {parsing ? <Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /> : <UploadCloud className="w-7 h-7 text-gray-400" />}
+                  <div className="text-center">
+                    <p className="text-[13.5px] font-semibold text-gray-800">Click to upload .xlsx / .xls</p>
+                    <p className="text-[12px] text-gray-400 mt-0.5">Any number of sheets — you&apos;ll pick their role next</p>
+                  </div>
+                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+                </label>
+              ) : (
+                <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                  <FileSpreadsheet className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-gray-800 truncate">{fileName}</p>
+                    <p className="text-[12px] text-gray-400">{sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found</p>
+                  </div>
+                  <label className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer flex-shrink-0">
+                    Replace file
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+                  </label>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      </div>
+
+          {/* Section 2 — Choose sheets (single-select, matching source/11.html) */}
+          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+              <h2 className="text-[13px] font-semibold text-gray-800">2. Select Sheets</h2>
+            </div>
+            <div className={sheetsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
+              {sheetsLocked && <LockedNote>Upload a file in Section 1 to unlock.</LockedNote>}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Product Data Sheet (Compulsory Prefill Data)</label>
+                  <select
+                    value={dataSheetName}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setDataSheetName(val)
+                      if (!val) {
+                        setShowGroups(false)
+                        setFields([])
+                        setDropdownColumns({})
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  >
+                    <option value="">-- Select sheet --</option>
+                    {sheetMeta.map((s) => (
+                      <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Dropdowns Reference Sheet</label>
+                  <select
+                    value={dropdownSheetName}
+                    onChange={(e) => setDropdownSheetName(e.target.value)}
+                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  >
+                    <option value="">-- None --</option>
+                    {sheetMeta.map((s) => (
+                      <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Section 3 — Kanban groups + mapping */}
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
         <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold text-gray-800">3. Group Headers &amp; Map Fields</h2>
-          <span className="text-[11.5px] text-gray-400">{fields.length} field{fields.length === 1 ? '' : 's'} from &quot;{dataSheetName || '—'}&quot;</span>
+          <span className="text-[11.5px] text-gray-400">
+            {fields.length} field{fields.length === 1 ? '' : 's'}{!isEditMode && ` from "${dataSheetName || '—'}"`}
+          </span>
         </div>
         <div className={groupsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
           {groupsLocked && <LockedNote>Select a Product Data Sheet in Section 2 to unlock.</LockedNote>}
@@ -536,13 +669,13 @@ export default function TemplateSettingsWizard() {
         <AiRulesSection value={aiRulesData} onChange={setAiRulesData} latestTemplateId={savedTemplate?.id} currentPreset={currentPreset} />
       </div>
 
-      {/* Save — persists the real template (name/description/sheets + Section 4/5 data) via /api/listing-tools */}
+      {/* Save — persists the real template (sheets + Section 4/5 data) via /api/listing-tools */}
       <div className="border border-gray-200 rounded-lg bg-white p-4 space-y-4">
         {savedTemplate ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[13.5px] font-semibold text-gray-800">
-                &quot;{savedTemplate.templateName}&quot; created.
+                &quot;{savedTemplate.templateName}&quot; {isEditMode ? 'updated.' : 'created.'}
               </p>
               <p className="text-[12px] text-gray-500 mt-0.5">Section 5 above now shows this template&apos;s saved rules.</p>
             </div>
@@ -550,7 +683,13 @@ export default function TemplateSettingsWizard() {
               <Link href={`/listing-tools/templates/${savedTemplate.id}`}>
                 <PillButton variant="ghost">View Template</PillButton>
               </Link>
-              <PillButton variant="upload" icon={PlusCircle} onClick={resetWizard}>Create Another Template</PillButton>
+              {isEditMode ? (
+                <Link href="/listing-tools/template-settings">
+                  <PillButton variant="upload" icon={ArrowLeft}>Back to Templates</PillButton>
+                </Link>
+              ) : (
+                <PillButton variant="upload" icon={PlusCircle} onClick={resetWizard}>Create Another Template</PillButton>
+              )}
             </div>
           </div>
         ) : (
@@ -561,7 +700,7 @@ export default function TemplateSettingsWizard() {
                 Will be saved as <span className="font-semibold text-gray-700">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
               </p>
               <PillButton variant="upload" icon={Check} loading={saving} onClick={handleSave}>
-                Save Template &amp; AI Rules
+                {isEditMode ? 'Save Changes' : 'Save Template & AI Rules'}
               </PillButton>
             </div>
           </div>

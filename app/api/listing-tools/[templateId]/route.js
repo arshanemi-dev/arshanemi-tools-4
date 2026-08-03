@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, updateTemplateMeta, deleteTemplate } from '@/lib/listingTemplates'
+import {
+  getTemplateMeta, getTemplateContent, updateTemplateMeta, deleteTemplate,
+  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS,
+} from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
 async function authorizeForTemplate(req, templateId) {
@@ -14,38 +17,102 @@ async function authorizeForTemplate(req, templateId) {
 }
 
 export async function GET(req, { params }) {
-  const { templateId } = await params
-  const { error, meta } = await authorizeForTemplate(req, templateId)
-  if (error) return error
-  const content = await getTemplateContent(templateId)
-  return NextResponse.json({ template: meta, content })
+  try {
+    const { templateId } = await params
+    const { error, meta } = await authorizeForTemplate(req, templateId)
+    if (error) return error
+    const content = await getTemplateContent(templateId)
+    return NextResponse.json({ template: meta, content })
+  } catch (err) {
+    return NextResponse.json({ error: err.message || 'Failed to load template' }, { status: 500 })
+  }
 }
 
+// Body from the simple rename case (AutoListingRow etc.): { templateName,
+// description }. Body from Template Settings' wizard editing a template's
+// structure: also includes marketplaceName, category, exportVersion,
+// aiRules, sheets: [{group, sheetName, sheetIndex, headers}] (no rows — the
+// wizard never touches row data, see the sheets-handling block below).
 export async function PATCH(req, { params }) {
-  const { templateId } = await params
-  const { error, meta } = await authorizeForTemplate(req, templateId)
-  if (error) return error
+  try {
+    const { templateId } = await params
+    const { error, meta } = await authorizeForTemplate(req, templateId)
+    if (error) return error
 
-  const body = await req.json().catch(() => ({}))
-  const patch = {}
-  if ('templateName' in body) patch.templateName = body.templateName
-  if ('description' in body) patch.description = body.description
-  const updated = await updateTemplateMeta(templateId, patch)
+    const body = await req.json().catch(() => ({}))
+    const patch = {}
+    if ('templateName' in body) patch.templateName = body.templateName
+    if ('description' in body) patch.description = body.description
+    if ('marketplaceName' in body) patch.marketplaceName = body.marketplaceName?.trim() || ''
+    if ('category' in body) patch.category = body.category?.trim() || ''
+    if ('exportVersion' in body) patch.exportVersion = body.exportVersion?.trim() || ''
+    if ('aiRules' in body) patch.aiRules = body.aiRules
+    if ('marketplaceName' in body || 'category' in body || 'exportVersion' in body) {
+      const mp = 'marketplaceName' in body ? body.marketplaceName : meta.marketplaceName
+      const cat = 'category' in body ? body.category : meta.category
+      const ver = 'exportVersion' in body ? body.exportVersion : meta.exportVersion
+      patch.finalName = [mp, cat, ver].map((s) => s?.trim()).filter(Boolean).join('_')
+    }
 
-  recordTemplateHistory(req, {
-    templateId, templateName: updated.templateName, sheetGroup: 'template', action: 'save',
-    snapshotMeta: { renamed: 'templateName' in body },
-  })
+    let content
+    // A structure edit from Template Settings' wizard — replaces each
+    // group's headers metadata but always keeps that group's *existing*
+    // rows untouched. Headers just describe what to fill in; rows are real
+    // product data owned by Auto Listing / Design Details / Prefill
+    // Details / Choose Your Template, which this wizard never edits. Every
+    // one of the 4 groups is always written (never filtered out for having
+    // 0 headers right now, unlike the create route) so a group's existing
+    // rows are never dropped just because its headers were temporarily
+    // empty mid-edit (e.g. while a header is being dragged to another
+    // group in the Kanban board).
+    if (Array.isArray(body.sheets)) {
+      const existing = await getTemplateContent(templateId)
+      const bySheetGroup = Object.fromEntries(body.sheets.map((s) => [s.group, s]))
+      const normalizedSheets = GROUPS.map((group, i) => {
+        const incoming = bySheetGroup[group]
+        const existingSheet = existing.sheets.find((s) => s.group === group)
+        const headers = incoming
+          ? incoming.headers.map((h) => ({ ...h, dataType: h.dataType || detectDataType(h.label) }))
+          : (existingSheet?.headers || [])
+        return {
+          sheetName: incoming?.sheetName || existingSheet?.sheetName,
+          sheetIndex: incoming?.sheetIndex ?? i,
+          group,
+          headers,
+          rows: ensureTrailingEmptyRow(headers, existingSheet?.rows || []),
+        }
+      })
+      content = await saveTemplateContent(templateId, {
+        templateId,
+        sheets: normalizedSheets,
+        unmappedHeaders: [],
+        dropdownReference: body.dropdownReference || existing.dropdownReference,
+      })
+    }
 
-  return NextResponse.json({ template: updated })
+    const updated = await updateTemplateMeta(templateId, patch)
+
+    recordTemplateHistory(req, {
+      templateId, templateName: updated.templateName, sheetGroup: 'template', action: 'save',
+      snapshotMeta: { renamed: 'templateName' in body, structureEdited: Array.isArray(body.sheets) },
+    })
+
+    return NextResponse.json({ template: updated, ...(content ? { content } : {}) })
+  } catch (err) {
+    return NextResponse.json({ error: err.message || 'Failed to update template' }, { status: 500 })
+  }
 }
 
 export async function DELETE(req, { params }) {
-  const { templateId } = await params
-  const { error, meta } = await authorizeForTemplate(req, templateId)
-  if (error) return error
+  try {
+    const { templateId } = await params
+    const { error, meta } = await authorizeForTemplate(req, templateId)
+    if (error) return error
 
-  await deleteTemplate(templateId)
-  recordTemplateHistory(req, { templateId, templateName: meta.templateName, sheetGroup: 'template', action: 'delete' })
-  return NextResponse.json({ ok: true })
+    await deleteTemplate(templateId)
+    recordTemplateHistory(req, { templateId, templateName: meta.templateName, sheetGroup: 'template', action: 'delete' })
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: err.message || 'Failed to delete template' }, { status: 500 })
+  }
 }

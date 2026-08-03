@@ -1,8 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { Search, Plus } from 'lucide-react'
-import PillButton from '@/components/listing/PillButton'
+import { Search } from 'lucide-react'
 import AutoListingRow from '@/components/listing/AutoListingRow'
 
 export default function AutoListingPage() {
@@ -25,19 +23,14 @@ export default function AutoListingPage() {
 
   return (
     <div className="min-h-full bg-gray-50 px-6 py-6">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates…"
-            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
-          />
-        </div>
-        <Link href="/listing-tools/template-settings">
-          <PillButton variant="upload" icon={Plus}>New Template</PillButton>
-        </Link>
+      <div className="relative max-w-md mb-5">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search templates…"
+          className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        />
       </div>
 
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">

@@ -25,23 +25,22 @@ const MASTER_ADMIN_NAV_ITEMS = [
 export default function ListingToolsSidebar({ role }) {
   const pathname = usePathname()
   const params = useParams()
-  const [templates, setTemplates] = useState([])
+  const [myTemplates, setMyTemplates] = useState([])
   const navItems = role === 'master_admin' ? [...NAV_ITEMS, ...MASTER_ADMIN_NAV_ITEMS] : NAV_ITEMS
 
-  // The template1/2/3 switcher under "Auto Listing" only appears while
-  // browsing a specific template's workspace (screenshots show it beside
-  // the stacked Compulsory/Prefill/Optional view), not on every page.
-  const showTemplateList = pathname.startsWith('/listing-tools/templates/')
-
+  // "My Template" checkboxes on Choose Your Template (app/listing-tools/templates/page.js)
+  // save into this same per-user selection — refetched on every mount, i.e.
+  // every full page reload, so this list never drifts from what was last
+  // saved there. Shown under "Auto Listing" on every /listing-tools page
+  // whenever non-empty (pixel-matches source/*.png — no toggle affordance).
   useEffect(() => {
-    if (!showTemplateList) return
     let cancelled = false
-    fetch('/api/listing-tools', { credentials: 'include' })
+    fetch('/api/listing-tools/assignments/me', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { templates: [] }))
-      .then((data) => { if (!cancelled) setTemplates(data.templates || []) })
+      .then((data) => { if (!cancelled) setMyTemplates(data.templates || []) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [showTemplateList])
+  }, [])
 
   const isActive = (href) => (href === '/listing-tools' ? pathname === '/listing-tools' : pathname.startsWith(href))
   const activeTemplateId = params?.templateId
@@ -62,14 +61,14 @@ export default function ListingToolsSidebar({ role }) {
               {item.label}
             </Link>
 
-            {i === 0 && showTemplateList && templates.length > 0 && (
+            {i === 0 && myTemplates.length > 0 && (
               <ul className="pb-2">
-                {templates.map((t) => (
-                  <li key={t.id}>
+                {myTemplates.map((t) => (
+                  <li key={t.templateId}>
                     <Link
-                      href={`/listing-tools/templates/${t.id}`}
+                      href={`/listing-tools/templates/${t.templateId}`}
                       className={`flex items-center gap-2 pl-7 pr-5 py-1.5 text-[13px] transition-colors ${
-                        t.id === activeTemplateId ? 'text-emerald-400 font-medium' : 'text-white/55 hover:text-white'
+                        t.templateId === activeTemplateId ? 'text-emerald-400 font-medium' : 'text-white/55 hover:text-white'
                       }`}
                     >
                       <span className="w-1 h-1 rounded-full bg-current flex-shrink-0" />

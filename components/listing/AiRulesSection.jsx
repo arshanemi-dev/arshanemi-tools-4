@@ -105,7 +105,7 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
   // actually get edited for the template being created), and Title/
   // Description are per-template detail that copy/paste don't touch.
   function handleCopy() {
-    navigator.clipboard.writeText(JSON.stringify({ keyword: value.keyword, otherRules: value.otherRules }, null, 2))
+    navigator.clipboard.writeText(JSON.stringify({ title: value.title, description: value.description, keyword: value.keyword, otherRules: value.otherRules }, null, 2))
     addToast('Keyword and rules copied to clipboard.', 'success')
   }
 
@@ -115,6 +115,8 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
       const parsed = JSON.parse(text)
       onChange({
         ...value,
+        title: parsed.title ?? value.title,
+        description: parsed.description ?? value.description,
         keyword: parsed.keyword ?? value.keyword,
         otherRules: parsed.otherRules ?? value.otherRules,
       })

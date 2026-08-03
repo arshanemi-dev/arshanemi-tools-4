@@ -10,14 +10,31 @@ const TYPE_OPTIONS = [
   { value: 'image', label: 'Image', icon: ImageIcon },
 ]
 
-const BADGE_STYLES = {
-  [UNMAPPED_TAB_ID]: 'bg-gray-200 text-gray-700',
-  compulsory: 'bg-red-100 text-red-800',
-  prefill: 'bg-blue-100 text-blue-800',
-  optional: 'bg-amber-100 text-amber-800',
+// Every class string below is written out in full (never built with
+// template-string interpolation) so Tailwind's build actually generates it —
+// a dynamically-assembled class like `border-t-${color}-500` would work in
+// dev but silently vanish from the production CSS since Tailwind can't see
+// a literal class name to scan for.
+const COLOR_PALETTE = {
+  gray: { border: 'border-t-gray-400', dot: 'bg-gray-400', badge: 'bg-gray-200 text-gray-700' },
+  indigo: { border: 'border-t-indigo-500', dot: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-800' },
+  purple: { border: 'border-t-purple-500', dot: 'bg-purple-500', badge: 'bg-purple-100 text-purple-800' },
+  red: { border: 'border-t-red-500', dot: 'bg-red-500', badge: 'bg-red-100 text-red-800' },
+  blue: { border: 'border-t-blue-500', dot: 'bg-blue-500', badge: 'bg-blue-100 text-blue-800' },
+  amber: { border: 'border-t-amber-500', dot: 'bg-amber-500', badge: 'bg-amber-100 text-amber-800' },
+  emerald: { border: 'border-t-emerald-500', dot: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-800' },
+  pink: { border: 'border-t-pink-500', dot: 'bg-pink-500', badge: 'bg-pink-100 text-pink-800' },
+  orange: { border: 'border-t-orange-500', dot: 'bg-orange-500', badge: 'bg-orange-100 text-orange-800' },
+  teal: { border: 'border-t-teal-500', dot: 'bg-teal-500', badge: 'bg-teal-100 text-teal-800' },
 }
-function badgeClass(tabId) {
-  return BADGE_STYLES[tabId] || 'bg-purple-100 text-purple-800'
+// Sensible starting color per group, same family the badges always used —
+// the picker lets you override any of these per column.
+const DEFAULT_TAB_COLOR = {
+  [UNMAPPED_TAB_ID]: 'gray',
+  design_system: 'purple',
+  compulsory: 'red',
+  prefill: 'blue',
+  optional: 'amber',
 }
 
 const fieldLabelCls = 'text-[11px] font-semibold text-gray-500 uppercase tracking-wide'
@@ -39,8 +56,21 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
   const [dragOverTabId, setDragOverTabId] = useState(null)
 
   const [advancedOpenIds, setAdvancedOpenIds] = useState(() => new Set())
+  const [tabColors, setTabColors] = useState({}) // { [tabId]: colorKey } — overrides DEFAULT_TAB_COLOR, UI-only
+  const [colorPickerOpenId, setColorPickerOpenId] = useState(null)
 
   const unmappedFields = fields.filter((f) => f.groupId === UNMAPPED_TAB_ID)
+
+  function colorFor(tabId) {
+    return tabColors[tabId] || DEFAULT_TAB_COLOR[tabId] || 'indigo'
+  }
+  function badgeClassFor(tabId) {
+    return COLOR_PALETTE[colorFor(tabId)].badge
+  }
+  function setTabColor(tabId, colorKey) {
+    setTabColors((prev) => ({ ...prev, [tabId]: colorKey }))
+    setColorPickerOpenId(null)
+  }
 
   // Checking a header assigns it to the target group immediately — no
   // separate "Assign" confirm button. The row disappears from this list on
@@ -111,7 +141,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                 <span
                   key={f.id}
                   title={`Group: ${groupLabel}`}
-                  className={`inline-flex max-w-[220px] items-center gap-1 truncate rounded-full px-2.5 py-1 text-[11px] font-medium ${badgeClass(f.groupId)}`}
+                  className={`inline-flex max-w-[220px] items-center gap-1 truncate rounded-full px-2.5 py-1 text-[11px] font-medium ${badgeClassFor(f.groupId)}`}
                 >
                   {f.label}
                 </span>
@@ -174,46 +204,74 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
         {tabs.map((tab) => {
           const colFields = fields.filter((f) => f.groupId === tab.id)
           const isDragOver = dragOverTabId === tab.id
+          const colorKey = colorFor(tab.id)
           return (
             <div
               key={tab.id}
-              className="flex w-[300px] flex-shrink-0 flex-col rounded-lg border border-t-4 border-gray-200 border-t-indigo-500 bg-gray-50"
+              className={`flex w-[300px] flex-shrink-0 flex-col rounded-lg border border-t-4 border-gray-200 bg-gray-50 ${COLOR_PALETTE[colorKey].border}`}
               style={{ height: '70vh' }}
             >
               <div className="sticky top-0 z-10 rounded-t-md border-b border-gray-200 bg-white px-3.5 py-3">
-                {editingTabId === tab.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={tempLabel}
-                      onChange={(e) => setTempLabel(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') commitRename(tab) }}
-                      onBlur={() => commitRename(tab)}
-                      className="min-w-0 flex-1 rounded border border-indigo-300 px-2 py-1 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                    />
+                <div className="flex items-center gap-2">
+                  {editingTabId === tab.id ? (
+                    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <input
+                        autoFocus
+                        value={tempLabel}
+                        onChange={(e) => setTempLabel(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitRename(tab) }}
+                        onBlur={() => commitRename(tab)}
+                        className="min-w-0 flex-1 rounded border border-indigo-300 px-2 py-1 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => commitRename(tab)}
+                        className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => commitRename(tab)}
-                      className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600"
+                      onClick={() => startRename(tab)}
+                      disabled={tab.id === UNMAPPED_TAB_ID}
+                      title={tab.id === UNMAPPED_TAB_ID ? undefined : 'Click to rename group'}
+                      className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left disabled:cursor-default"
                     >
-                      Save
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-semibold text-gray-800">
+                        {tab.id !== UNMAPPED_TAB_ID && <Pencil className="w-3 h-3 flex-shrink-0 text-gray-400" />}
+                        {tab.label}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10.5px] font-bold text-gray-600">{colFields.length}</span>
                     </button>
+                  )}
+
+                  {/* Color picker — right end of the column header. Sets this
+                      column's top-border/badge color; UI preference only,
+                      not saved with the template. */}
+                  <div className="relative flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setColorPickerOpenId((cur) => (cur === tab.id ? null : tab.id))}
+                      title="Change group color"
+                      className={`h-4 w-4 rounded-full ring-1 ring-inset ring-black/10 ${COLOR_PALETTE[colorKey].dot}`}
+                    />
+                    {colorPickerOpenId === tab.id && (
+                      <div className="absolute right-0 top-full z-20 mt-1 grid w-[124px] grid-cols-5 gap-1.5 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+                        {Object.keys(COLOR_PALETTE).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            title={key}
+                            onClick={() => setTabColor(tab.id, key)}
+                            className={`h-5 w-5 rounded-full ${COLOR_PALETTE[key].dot} ${colorKey === key ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => startRename(tab)}
-                    disabled={tab.id === UNMAPPED_TAB_ID}
-                    title={tab.id === UNMAPPED_TAB_ID ? undefined : 'Click to rename group'}
-                    className="flex w-full items-center justify-between gap-2 text-left disabled:cursor-default"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-semibold text-gray-800">
-                      {tab.id !== UNMAPPED_TAB_ID && <Pencil className="w-3 h-3 flex-shrink-0 text-gray-400" />}
-                      {tab.label}
-                    </span>
-                    <span className="shrink-0 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10.5px] font-bold text-gray-600">{colFields.length}</span>
-                  </button>
-                )}
+                </div>
               </div>
 
               <div
@@ -241,7 +299,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           onMouseDown={(e) => e.stopPropagation()}
                           className="min-w-0 flex-1 border-0 bg-transparent px-0 py-0.5 text-[13px] font-semibold text-gray-800 focus:outline-none focus:ring-0"
                         />
-                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass(field.groupId)}`}>
+                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClassFor(field.groupId)}`}>
                           {tab.label}
                         </span>
                         {/* Advanced settings toggle — right side of the card.
