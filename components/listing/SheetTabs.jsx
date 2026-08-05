@@ -1,13 +1,13 @@
 'use client'
 
 const TABS = [
-  { group: 'design_system', label: 'Design details' },
+  { group: 'design_system', label: 'Product details' },
   { group: 'compulsory', label: 'Compulsory' },
   { group: 'prefill', label: 'Prefill' },
   { group: 'optional', label: 'Optional' },
 ]
 
-// variant="light" — the standalone Design Details page's own tab strip
+// variant="light" — the standalone Product Details page's own tab strip
 // (light-gray active pill). variant="dark" — the stacked group blocks on
 // the Choose Your Template page (solid black active pill), matching the
 // two distinct treatments visible across the source screenshots.

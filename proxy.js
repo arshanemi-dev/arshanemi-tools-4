@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 
 const SECRET = new TextEncoder().encode(process.env.JWT_SECRET)
-const PUBLIC_PATHS = ['/settings/login', '/api/auth/login']
+const PUBLIC_PATHS = ['/api/auth/login']
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3001').split(',').map((o) => o.trim())
 
@@ -26,12 +26,10 @@ export async function proxy(req) {
     return res
   }
 
-  const isAdminPath = pathname.startsWith('/settings') || pathname.startsWith('/api/admin')
-  // Listing Tools requires a logged-in session same as /settings, but any
-  // authenticated role may reach it (not just master_admin/admin), and an
-  // unauthenticated visitor bounces to the general /login page rather than
-  // /settings/login — see app/listing-tools/layout.js for the rest of the
-  // gate (connected-mode check + role-agnostic access).
+  const isAdminPath = pathname.startsWith('/api/admin')
+  // Listing Tools requires a logged-in session, and any authenticated role
+  // may reach it (not just master_admin/admin) — see app/listing-tools/layout.js
+  // for the rest of the gate (connected-mode check + role-agnostic access).
   const isListingToolsPath = pathname.startsWith('/listing-tools') || pathname.startsWith('/api/listing-tools')
   const requiresAuth = isAdminPath || isListingToolsPath
 
@@ -60,11 +58,12 @@ export async function proxy(req) {
 
   // Any authenticated role (master_admin / admin / user) gets an
   // 'arshanemi-token' cookie on login; only master_admin additionally gets
-  // 'admin-token'. Structural access to /settings is granted to any logged-in
-  // role here — the layout and API routes below decide what each role can
-  // actually see/do, same defense-in-depth pattern already used elsewhere.
+  // 'admin-token'. Structural access to these paths is granted to any
+  // logged-in role here — the layout and API routes below decide what each
+  // role can actually see/do, same defense-in-depth pattern already used
+  // elsewhere.
   const token = req.cookies.get('admin-token')?.value || req.cookies.get('arshanemi-token')?.value
-  const loginPath = isListingToolsPath ? '/login' : '/settings/login'
+  const loginPath = '/login'
   if (!token) {
     if (pathname.startsWith('/api/')) {
       const res = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -92,5 +91,5 @@ export async function proxy(req) {
 }
 
 export const config = {
-  matcher: ['/settings/:path*', '/listing-tools/:path*', '/api/:path*', '/login', '/forgot-password', '/reset-password'],
+  matcher: ['/listing-tools/:path*', '/api/:path*', '/login', '/forgot-password', '/reset-password'],
 }

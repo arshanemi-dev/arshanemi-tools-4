@@ -13,15 +13,17 @@ function countFilledRows(rows) {
   return rows.filter((r) => Object.values(r).some((v) => String(v ?? '').trim())).length
 }
 
-// master_admin sees every company's templates (mirrors the settings-access
-// grant model); every other role only ever sees its own company's — there
-// is no cross-company sharing (see plan's "Other assumptions").
+// master_admin sees every template, from every user — the only role with a
+// system-wide view. Every other role only ever sees templates it created
+// itself (ownerUserId match) — never another user's, and never
+// master_admin's own templates; company-wide sharing was the old model and
+// leaked templates across unrelated accounts in the same company.
 export async function GET(req) {
   try {
     const { payload, error } = await authorize(req)
     if (error) return error
-    const companyId = payload.role === 'master_admin' ? undefined : (payload.companyId ?? null)
-    const templates = await listTemplates({ companyId })
+    const ownerUserId = payload.role === 'master_admin' ? undefined : payload.userId
+    const templates = await listTemplates({ ownerUserId })
     return NextResponse.json({ templates })
   } catch (err) {
     // Any unhandled throw here (e.g. a Blob storage/env issue) previously
@@ -74,6 +76,8 @@ export async function POST(req) {
       ownerUserId: payload.userId,
       ownerUserName: payload.name,
       sourceFileName: body.sourceFileName,
+      sourceFileUrl: body.sourceFileUrl,
+      sourceSheetName: body.sourceSheetName,
       marketplaceName: body.marketplaceName,
       category: body.category,
       exportVersion: body.exportVersion,

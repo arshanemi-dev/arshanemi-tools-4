@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Image as ImageIcon, Type, ListFilter, Key, Pencil, Layers, Plus, Settings, X } from 'lucide-react'
+import { Image as ImageIcon, Type, ListFilter, Key, Pencil, Layers, Plus, Settings, X, Trash2 } from 'lucide-react'
 
 export const UNMAPPED_TAB_ID = 'unmapped'
 
@@ -49,7 +49,7 @@ const fieldLabelCls = 'text-[11px] font-semibold text-gray-500 uppercase trackin
 // Column titles are click-to-rename inline, matching 11.html's pencil-icon
 // rename — see TemplateSettingsWizard's `tabLabels` for why this only ever
 // changes the display label, never the group id fields are stored under.
-export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTargetChange, onUpdateField, onBulkAssign, onRenameTab, onAddTab, allowAddTab = true }) {
+export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTargetChange, onUpdateField, onBulkAssign, onRenameTab, onAddTab, onRemoveTab, onAddHeader, onDeleteHeader, allowAddTab = true }) {
   const [newTabName, setNewTabName] = useState('')
   const [editingTabId, setEditingTabId] = useState(null)
   const [tempLabel, setTempLabel] = useState('')
@@ -271,6 +271,21 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       </div>
                     )}
                   </div>
+
+                  {/* Remove group — any group can go except Unselected
+                      (the staging bucket, not a real column). Any header
+                      sitting in it moves back to Unselected first, never
+                      dropped — see TemplateSettingsWizard's removeTab. */}
+                  {tab.id !== UNMAPPED_TAB_ID && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveTab(tab.id)}
+                      title="Remove this group"
+                      className="flex-shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -280,6 +295,17 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                 onDrop={(e) => handleDrop(e, tab.id)}
                 className={`flex flex-1 flex-col gap-3 overflow-y-auto rounded-b-md p-3 transition-colors ${isDragOver ? 'bg-indigo-50' : ''}`}
               >
+                {/* Add a brand-new header directly into this group — not
+                    extracted from the upload, just a manually-added field
+                    you rename/configure afterward. */}
+                <button
+                  type="button"
+                  onClick={() => onAddHeader(tab.id)}
+                  className="flex w-full flex-shrink-0 items-center justify-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-[11.5px] font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                >
+                  <Plus className="w-3 h-3" /> Add Header
+                </button>
+
                 {colFields.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center">
                     <p className="text-center text-[12px] italic text-gray-400">No headers in this group.</p>
@@ -317,7 +343,31 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           {field.isUniqueKeyPart && <Key className="w-3 h-3 text-indigo-500" />}
                           <Settings className="w-3.5 h-3.5" />
                         </button>
+
+                        {/* Delete this header entirely — not a move to
+                            Unselected, the field is gone. No confirm dialog,
+                            matching the same plain-click convention as
+                            removing a whole group column above. */}
+                        <button
+                          type="button"
+                          onClick={() => onDeleteHeader(field.id)}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          title="Delete this header"
+                          className="flex shrink-0 items-center rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
+
+                      {/* Instructional note the source cell carried alongside
+                          the title (see splitHeaderCell in
+                          TemplateSettingsWizard.jsx) — shown here so it's
+                          obviously not lost, not welded onto the label above. */}
+                      {field.description && (
+                        <p className="line-clamp-2 text-[11px] italic text-gray-400" title={field.description}>
+                          {field.description}
+                        </p>
+                      )}
 
                       <div className="flex flex-col gap-1">
                         <label className={fieldLabelCls}>Field Type</label>

@@ -58,7 +58,7 @@ export default function SheetGrid({
             {sortedHeaders.map((h) => (
               <th key={h.id} className="border-b border-r border-gray-200 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap">
                 <div className="flex items-center gap-1.5">
-                  <span>{h.label}</span>
+                  <span title={h.description || undefined}>{h.label}</span>
                   {h.dataType === 'dropdown' && <ChevronDown className="w-3 h-3 text-gray-400" />}
                   {onFilterChange && h.isUniqueKeyPart && (
                     <button

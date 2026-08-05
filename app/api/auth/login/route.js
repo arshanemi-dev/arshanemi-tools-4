@@ -24,8 +24,8 @@ export async function POST(req) {
   // Connected mode: proxy credentials to the root admin panel and hand its
   // issued tokens back to the browser as-is. Requires this app's JWT_SECRET /
   // JWT_REFRESH_SECRET to match root's — see .env.example — so the tokens
-  // issued here also verify against this app's own /settings SSR gate
-  // (app/settings/layout.js + proxy.js), which still checks locally.
+  // issued here also verify against this app's own proxy.js/listing-tools
+  // layout gate, which still checks locally.
   if (IS_CONNECT) {
     const { status, data } = await proxyAuthCall('/api/auth/login', { body: { identifier: id, password, otpCode } })
     if (data.otpRequired) return NextResponse.json(data, { status })
@@ -54,8 +54,8 @@ export async function POST(req) {
 
     // OTP-gated login: always required for master_admin, optional per-user otherwise —
     // unless OTP verification is globally disabled, in which case login is
-    // password-only for every role and the /login and /settings/login OTP
-    // step never renders (they're both driven off this same otpRequired flag).
+    // password-only for every role and /login's OTP step never renders
+    // (it's driven off this same otpRequired flag).
     const otpRequired = !OTP_DISABLED && (user.role === 'master_admin' || !!user.otp_enabled)
 
     if (otpCode) {
@@ -108,9 +108,9 @@ export async function POST(req) {
       res.cookies.set({ ...cookie, name: ADMIN_COOKIE })
     } else {
       // A stale 'admin-token' cookie from a previous master_admin session on
-      // this browser must not leak into this login — /settings/layout.js
-      // reads 'admin-token' first, so without this a regular user signing in
-      // right after a master_admin would still be treated as master_admin.
+      // this browser must not leak into this login — proxy.js reads
+      // 'admin-token' first, so without this a regular user signing in right
+      // after a master_admin would still be treated as master_admin.
       res.cookies.set({ ...clearAuthCookie(), name: ADMIN_COOKIE })
     }
 

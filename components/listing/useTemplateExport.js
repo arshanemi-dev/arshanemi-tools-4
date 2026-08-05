@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { runBillingGate } from '@/lib/toolBilling'
-import { downloadExcel, downloadPdf, countBillableRows } from '@/lib/exports/listingExport'
+import { downloadExcelSmart, downloadPdf, countBillableRows } from '@/lib/exports/listingExport'
 import { useToast } from '@/components/admin/Toast'
 
 // Shared export flow for every Download Sheet / Download Final Sheet button:
@@ -16,7 +16,7 @@ export default function useTemplateExport(templateId) {
   const [exporting, setExporting] = useState(false)
   const [gate, setGate] = useState(null)
 
-  async function runExport({ template, groups, format = 'excel' }) {
+  async function runExport({ template, groups, format = 'excel', meta }) {
     if (!template || exporting) return
     setExporting(true)
     try {
@@ -37,7 +37,7 @@ export default function useTemplateExport(templateId) {
         }
       }
 
-      if (format === 'excel') await downloadExcel(effectiveTemplate, { groups })
+      if (format === 'excel') await downloadExcelSmart(effectiveTemplate, meta, { groups })
       else await downloadPdf(effectiveTemplate, { groups })
 
       const quantity = countBillableRows(effectiveTemplate, groups) || 1

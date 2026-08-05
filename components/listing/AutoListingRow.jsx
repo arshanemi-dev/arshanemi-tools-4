@@ -88,7 +88,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
                     variant="download"
                     icon={Download}
                     loading={exporting}
-                    onClick={() => runExport({ template: content, groups: ['prefill'], format: 'excel' })}
+                    onClick={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })}
                   >
                     Download Sheet
                   </PillButton>
@@ -109,7 +109,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
       <BillingGateModal
         gate={gate}
         onClose={closeGate}
-        onRetry={() => runExport({ template: content, groups: ['prefill'], format: 'excel' })}
+        onRetry={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })}
       />
     </>
   )

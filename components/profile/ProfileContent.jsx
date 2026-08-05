@@ -115,9 +115,8 @@ function WalletCard({ profile }) {
   )
 }
 
-// Shared profile experience — rendered at both /settings/profile (staff,
-// inside the admin shell) and /profile (plain 'user' role, inside the
-// public dashboard shell with DashboardTopbar). Fully self-contained:
+// Shared profile experience — rendered at /profile for every role, inside
+// the public dashboard shell with DashboardTopbar. Fully self-contained:
 // fetches its own data via /api/auth/me (cookie or Bearer auth), so it
 // doesn't care which shell it's mounted in — only needs a ToastProvider
 // ancestor for the save/update toasts.

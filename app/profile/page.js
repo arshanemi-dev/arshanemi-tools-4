@@ -11,9 +11,9 @@ import ProfileContent from '@/components/profile/ProfileContent'
 const HEADER_HIDDEN = process.env.NEXT_PUBLIC_IS_Header_Hide === 'true'
 const BOTTOM_MENU_SHOWN = process.env.NEXT_PUBLIC_SHOW_FLOATING_MENU === 'true'
 
-// Public-facing profile page — where the plain 'user' role lands (no
-// /settings sidebar for that role by design; see app/settings/layout.js).
-// master_admin/admin keep using /settings/profile inside the admin shell.
+// The one profile page for every role — master_admin/admin/user all land
+// here (there is no separate admin-shell copy anymore; the local admin
+// panel at /settings was removed in favor of the hub admin panel).
 export default function ProfilePage() {
   const router = useRouter()
   const [authStatus, setAuthStatus] = useState('checking') // checking | authed

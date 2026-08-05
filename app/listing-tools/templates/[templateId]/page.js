@@ -94,7 +94,7 @@ export default function TemplateWorkspacePage() {
             variant="download"
             icon={Download}
             loading={exporting}
-            onClick={() => runExport({ template: content, groups: ['design_system', 'compulsory', 'prefill', 'optional'], format: 'excel' })}
+            onClick={() => runExport({ template: content, groups: ['design_system', 'compulsory', 'prefill', 'optional'], format: 'excel', meta: template })}
           >
             Download Final Sheet
           </PillButton>
@@ -124,7 +124,7 @@ export default function TemplateWorkspacePage() {
       <BillingGateModal
         gate={gate}
         onClose={closeGate}
-        onRetry={() => runExport({ template: content, groups: ['design_system', 'compulsory', 'prefill', 'optional'], format: 'excel' })}
+        onRetry={() => runExport({ template: content, groups: ['design_system', 'compulsory', 'prefill', 'optional'], format: 'excel', meta: template })}
       />
     </div>
   )

@@ -11,7 +11,11 @@ export default function AutoListingPage() {
   useEffect(() => {
     fetch('/api/listing-tools', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { templates: [] }))
-      .then((data) => setTemplates(data.templates || []))
+      // A template stays out of Auto Listing until it's explicitly marked
+      // ready from the Template Settings list (isAllowedToShow, off by
+      // default) — this page is for filling in real product data, not for
+      // browsing templates that are still being set up.
+      .then((data) => setTemplates((data.templates || []).filter((t) => t.isAllowedToShow)))
       .catch(() => setTemplates([]))
   }, [])
 
@@ -22,7 +26,7 @@ export default function AutoListingPage() {
   })
 
   return (
-    <div className="min-h-full bg-gray-50 px-6 py-6">
+    <div className="min-h-[70vh] bg-gray-50 px-6 py-6">
       <div className="relative max-w-md mb-5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input

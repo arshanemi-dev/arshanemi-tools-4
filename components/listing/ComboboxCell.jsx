@@ -1,5 +1,6 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 
 // Dropdown grid cell — click opens an option list below the cell, typing
@@ -7,21 +8,55 @@ import { ChevronDown } from 'lucide-react'
 // caller passes in (header.dropdownSource.values), so it always reflects
 // the currently-open template's own saved dropdown source by construction —
 // no separate global option store to keep in sync.
+//
+// The option panel is portaled to document.body and positioned with
+// `fixed` coordinates from the trigger's own bounding rect — every grid
+// card that uses this cell wraps it in `overflow-hidden`/`overflow-auto`
+// (for the rounded-corner + scroll behavior), which clips any child
+// regardless of z-index, so a normal in-place absolutely-positioned panel
+// gets cut off near a card's bottom/right edge. Escaping via a portal
+// sidesteps that entirely instead of fighting it with a higher z-index.
 export default function ComboboxCell({ value, options = [], onChange, disabled }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState(value || '')
-  const wrapRef = useRef(null)
+  const [rect, setRect] = useState(null)
+  const buttonRef = useRef(null)
+  const panelRef = useRef(null)
 
   useEffect(() => {
     function onDocClick(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setOpen(false)
-        setQuery(value || '')
-      }
+      if (buttonRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return
+      setOpen(false)
+      setQuery(value || '')
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [value])
+
+  // Closing on scroll/resize (rather than re-tracking position live) keeps
+  // this simple — reopening recomputes the rect fresh, and the alternative
+  // (a scroll/resize listener that repositions every frame) isn't worth it
+  // for a grid cell dropdown.
+  useEffect(() => {
+    if (!open) return
+    function close() { setOpen(false) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  function toggleOpen() {
+    if (disabled) return
+    if (!open) {
+      const r = buttonRef.current?.getBoundingClientRect()
+      if (r) setRect(r)
+      setQuery(value || '')
+    }
+    setOpen((o) => !o)
+  }
 
   const filtered = options.filter((o) => String(o).toLowerCase().includes(query.toLowerCase()))
 
@@ -32,19 +67,24 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
-        onClick={() => { setQuery(value || ''); setOpen((o) => !o) }}
+        onClick={toggleOpen}
         className="w-full min-w-[110px] flex items-center justify-between gap-1 px-3 py-2 text-left text-[13px] text-gray-800 hover:bg-gray-50 disabled:text-gray-400 disabled:hover:bg-transparent focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
       >
         <span className="truncate">{value || ''}</span>
         <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
       </button>
 
-      {open && !disabled && (
-        <div className="absolute z-20 top-full left-0 mt-0.5 w-full min-w-[160px] bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+      {open && !disabled && rect && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 160) }}
+          className="z-[999] bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto"
+        >
           <input
             autoFocus
             value={query}
@@ -67,7 +107,8 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
               {option}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

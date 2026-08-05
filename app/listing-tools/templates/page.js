@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Search } from 'lucide-react'
+import { Search, Plus, Minus } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import { useToast } from '@/components/admin/Toast'
 
@@ -14,7 +14,9 @@ export default function ChooseTemplatePage() {
   useEffect(() => {
     fetch('/api/listing-tools', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { templates: [] }))
-      .then((data) => setTemplates(data.templates || []))
+      // Same isAllowedToShow gate as Auto Listing — a template only shows up
+      // here once someone's marked it ready from the Template Settings list.
+      .then((data) => setTemplates((data.templates || []).filter((t) => t.isAllowedToShow)))
       .catch(() => setTemplates([]))
 
     fetch('/api/listing-tools/assignments/me', { credentials: 'include' })
@@ -30,27 +32,33 @@ export default function ChooseTemplatePage() {
   })
 
   // Full-replace PUT — the hub deletes-then-reinserts this user's whole
-  // assignment row, so every toggle sends the complete desired set, not a delta.
-  async function toggleMine(template) {
-    const wasChecked = mine.has(template.id)
-    const next = new Set(mine)
-    if (wasChecked) next.delete(template.id)
-    else next.add(template.id)
+  // assignment row, so every add/remove sends the complete desired set, not
+  // a delta.
+  async function syncMine(next) {
+    const prev = mine
     setMine(next)
-
     const list = (templates || [])
       .filter((t) => next.has(t.id))
       .map((t) => ({ templateId: t.id, templateName: t.templateName }))
-
     const res = await fetch('/api/listing-tools/assignments/me', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ templates: list }),
     })
     if (!res.ok) {
-      setMine(mine) // revert on failure
+      setMine(prev)
       addToast('Could not save your template selection', 'error')
     }
+  }
+  function addMine(template) {
+    if (mine.has(template.id)) return
+    syncMine(new Set(mine).add(template.id))
+  }
+  function removeMine(template) {
+    if (!mine.has(template.id)) return
+    const next = new Set(mine)
+    next.delete(template.id)
+    syncMine(next)
   }
 
   return (
@@ -69,10 +77,10 @@ export default function ChooseTemplatePage() {
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-white border-b border-gray-200">
-              <th className="px-4 py-2.5 text-left font-semibold text-gray-800 w-40">My Template</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-gray-800">Template Name</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-gray-800 w-52">My Template</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-gray-800 w-52">All Template</th>
               <th className="px-4 py-2.5 text-left font-semibold text-gray-800">Description</th>
-              <th className="px-4 py-2.5 text-right font-semibold text-gray-800 w-36">Expand</th>
+              <th className="px-4 py-2.5 text-right font-semibold text-gray-800 w-36">View Details</th>
             </tr>
           </thead>
           <tbody>
@@ -82,28 +90,56 @@ export default function ChooseTemplatePage() {
             {templates !== null && mine !== null && filtered.length === 0 && (
               <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">No templates yet.</td></tr>
             )}
-            {templates !== null && mine !== null && filtered.map((t) => (
-              <tr key={t.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
-                <td className="px-4 py-3">
-                  <label className="inline-flex items-center gap-2 text-gray-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={mine.has(t.id)}
-                      onChange={() => toggleMine(t)}
-                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-400"
-                    />
-                    My Template
-                  </label>
-                </td>
-                <td className="px-4 py-3 text-gray-800 font-medium">{t.templateName}</td>
-                <td className="px-4 py-3 text-gray-500">{t.description || '—'}</td>
-                <td className="px-4 py-3 text-right">
-                  <Link href={`/listing-tools/templates/${t.id}`}>
-                    <PillButton variant="view">View Details</PillButton>
-                  </Link>
-                </td>
-              </tr>
-            ))}
+            {templates !== null && mine !== null && filtered.map((t) => {
+              const isMine = mine.has(t.id)
+              return (
+                <tr key={t.id} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
+                  {/* My Template — a badge only appears once you've actually
+                      added this template; the − removes it. */}
+                  <td className="px-4 py-3">
+                    {isMine ? (
+                      <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-indigo-100 pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-indigo-800">
+                        <span className="truncate">{t.templateName}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeMine(t)}
+                          title="Remove from My Template"
+                          className="flex-shrink-0 rounded-full p-0.5 text-indigo-500 hover:bg-indigo-200 hover:text-indigo-700"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-[12px] text-gray-300">—</span>
+                    )}
+                  </td>
+
+                  {/* All Template — every template gets a badge here, always
+                      with a + to add it (disabled once it's already mine). */}
+                  <td className="px-4 py-3">
+                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-gray-100 pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-gray-700">
+                      <span className="truncate">{t.templateName}</span>
+                      <button
+                        type="button"
+                        onClick={() => addMine(t)}
+                        disabled={isMine}
+                        title={isMine ? 'Already in My Template' : 'Add to My Template'}
+                        className="flex-shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3 text-gray-500">{t.keywords || '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Link href={`/listing-tools/template-settings/${t.id}/details`}>
+                      <PillButton variant="view">View Details</PillButton>
+                    </Link>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

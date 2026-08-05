@@ -1,21 +1,53 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff, Loader2, Zap } from 'lucide-react'
+import { Eye, EyeOff, Loader2, ShieldCheck, Zap } from 'lucide-react'
 import { saveAuthTokens, isLoggedIn } from '@/lib/tokenStore'
 
+const OTP_SECONDS = 60
+
+// Single login surface for every role. master_admin accounts (and any user
+// with otp_enabled) get an extra OTP step after the password check — driven
+// off the same otpRequired flag /api/auth/login has always returned; this
+// used to bounce those accounts to a second, near-duplicate page at
+// /settings/login, which no longer exists now that the local admin shell
+// (Companies/Users/Theme) has been removed in favor of the hub admin panel.
+// Every role lands on the same place after signing in: /listing-tools, the
+// only real product surface left in this app.
 export default function LoginPage() {
   const router = useRouter()
+  const [step, setStep] = useState('credentials') // 'credentials' | 'otp'
   const [form, setForm] = useState({ identifier: '', password: '' })
+  const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [timer, setTimer] = useState(0)
+  const intervalRef = useRef(null)
+  const inputRefs = useRef([])
 
-  // Already signed in — skip straight to the account page.
+  // Already signed in — skip straight to the product.
   useEffect(() => {
-    if (isLoggedIn()) router.replace('/profile')
+    if (isLoggedIn()) router.replace('/listing-tools')
   }, [router])
+
+  useEffect(() => {
+    if (timer <= 0) { clearInterval(intervalRef.current); return }
+    intervalRef.current = setInterval(() => setTimer((t) => t - 1), 1000)
+    return () => clearInterval(intervalRef.current)
+  }, [timer])
+
+  function finishLogin(data) {
+    saveAuthTokens({
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      expiresIn: data.expiresIn,
+      user: data.user,
+    })
+    router.push('/listing-tools')
+    router.refresh()
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -30,19 +62,65 @@ export default function LoginPage() {
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }
       if (data.otpRequired) {
-        // Master admin accounts need the OTP step — that only lives on /settings/login
-        router.push('/settings/login')
+        setStep('otp')
+        setOtp(['', '', '', '', '', ''])
+        setTimer(OTP_SECONDS)
         return
       }
-      saveAuthTokens({
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
-        expiresIn: data.expiresIn,
-        user: data.user,
+      finishLogin(data)
+    } catch {
+      setError('Network error — please try again')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleOtpChange(val, idx) {
+    if (!/^\d?$/.test(val)) return
+    const next = [...otp]
+    next[idx] = val
+    setOtp(next)
+    if (val && idx < 5) inputRefs.current[idx + 1]?.focus()
+  }
+
+  function handleOtpKeyDown(e, idx) {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) inputRefs.current[idx - 1]?.focus()
+  }
+
+  async function handleVerifyOtp() {
+    const code = otp.join('')
+    if (code.length < 6) { setError('Enter all 6 digits'); return }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: form.identifier, otpCode: code }),
       })
-      // Land on the account page.
-      router.push('/profile')
-      router.refresh()
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Invalid or expired OTP'); return }
+      finishLogin(data)
+    } catch {
+      setError('Network error — please try again')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResend() {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Failed to resend OTP'); return }
+      setOtp(['', '', '', '', '', ''])
+      setTimer(OTP_SECONDS)
     } catch {
       setError('Network error — please try again')
     } finally {
@@ -85,63 +163,132 @@ export default function LoginPage() {
             <span className="font-semibold text-foreground">Arshanemi</span>
           </div>
 
-          <h2 className="text-2xl font-bold text-foreground mb-1">Welcome back</h2>
+          {step === 'credentials' ? (
+            <>
+              <h2 className="text-2xl font-bold text-foreground mb-1">Welcome back</h2>
 
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-xl px-4 py-3 mb-5">
-              {error}
-            </div>
-          )}
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-xl px-4 py-3 mb-5 mt-4">
+                  {error}
+                </div>
+              )}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-muted">Email or Mobile</label>
-              <input
-                type="text"
-                value={form.identifier}
-                onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
-                placeholder="email@example.com or 9876543210"
-                required
-                autoComplete="username"
-                className="w-full rounded-xl border border-divider-light bg-card px-4 py-3 text-sm text-foreground placeholder-subtle focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-colors"
-              />
-            </div>
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-muted">Email or Mobile</label>
+                  <input
+                    type="text"
+                    value={form.identifier}
+                    onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
+                    placeholder="email@example.com or 9876543210"
+                    required
+                    autoComplete="username"
+                    className="w-full rounded-xl border border-divider-light bg-card px-4 py-3 text-sm text-foreground placeholder-subtle focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-colors"
+                  />
+                </div>
 
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-muted">Password</label>
-                <Link href="/forgot-password" className="text-xs text-accent hover:underline">
-                  Forgot password?
-                </Link>
-              </div>
-              <div className="relative">
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder="••••••••"
-                  required
-                  autoComplete="current-password"
-                  className="w-full rounded-xl border border-divider-light bg-card px-4 py-3 pr-11 text-sm text-foreground placeholder-subtle focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-colors"
-                />
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-muted">Password</label>
+                    <Link href="/forgot-password" className="text-xs text-accent hover:underline">
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showPw ? 'text' : 'password'}
+                      value={form.password}
+                      onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                      placeholder="••••••••"
+                      required
+                      autoComplete="current-password"
+                      className="w-full rounded-xl border border-divider-light bg-card px-4 py-3 pr-11 text-sm text-foreground placeholder-subtle focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw((s) => !s)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-subtle hover:text-muted"
+                    >
+                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
-                  onClick={() => setShowPw((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-subtle hover:text-muted"
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-accent hover:bg-accent-hover text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2 mt-1"
                 >
-                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {loading ? <><Loader2 className="animate-spin" size={16} /> Signing in…</> : 'Sign In'}
                 </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="w-11 h-11 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+                <ShieldCheck className="w-5 h-5 text-accent" />
               </div>
-            </div>
+              <h2 className="text-2xl font-bold text-foreground mb-1">Verify it&apos;s you</h2>
+              <p className="text-subtle text-sm mb-2">
+                A 6-digit code was emailed to the address on file for{' '}
+                <strong className="text-foreground">{form.identifier}</strong>.
+              </p>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-accent hover:bg-accent-hover text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2 mt-1"
-            >
-              {loading ? <><Loader2 className="animate-spin" size={16} /> Signing in…</> : 'Sign In'}
-            </button>
-          </form>
+              <div className={`inline-flex items-center gap-1.5 text-sm font-semibold mb-6 ${timer > 0 ? 'text-accent' : 'text-red-500'}`}>
+                <span className="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center text-[10px] font-bold">
+                  {timer}
+                </span>
+                {timer > 0 ? `Code expires in ${timer}s` : 'Code expired'}
+              </div>
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-xl px-4 py-3 mb-5">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex gap-2 mb-6">
+                {otp.map((digit, i) => (
+                  <input
+                    key={i}
+                    ref={(el) => (inputRefs.current[i] = el)}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(e.target.value, i)}
+                    onKeyDown={(e) => handleOtpKeyDown(e, i)}
+                    className="w-12 h-12 text-center text-xl font-bold rounded-xl border border-divider-light bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent transition-colors"
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={handleVerifyOtp}
+                disabled={loading || timer === 0}
+                className="w-full bg-accent hover:bg-accent-hover text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2 mb-4"
+              >
+                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying…</> : 'Verify & Sign In'}
+              </button>
+
+              {timer === 0 ? (
+                <button
+                  onClick={handleResend}
+                  disabled={loading}
+                  className="w-full text-accent hover:underline text-sm font-medium"
+                >
+                  Resend code
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setStep('credentials'); setError(''); setOtp(['', '', '', '', '', '']) }}
+                  className="w-full text-subtle hover:text-muted text-sm font-medium"
+                >
+                  Back to login
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>

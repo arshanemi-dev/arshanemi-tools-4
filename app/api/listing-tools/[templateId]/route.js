@@ -5,6 +5,7 @@ import {
   saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS,
 } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
+import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -47,6 +48,7 @@ export async function PATCH(req, { params }) {
     if ('category' in body) patch.category = body.category?.trim() || ''
     if ('exportVersion' in body) patch.exportVersion = body.exportVersion?.trim() || ''
     if ('aiRules' in body) patch.aiRules = body.aiRules
+    if ('isAllowedToShow' in body) patch.isAllowedToShow = !!body.isAllowedToShow
     if ('marketplaceName' in body || 'category' in body || 'exportVersion' in body) {
       const mp = 'marketplaceName' in body ? body.marketplaceName : meta.marketplaceName
       const cat = 'category' in body ? body.category : meta.category
@@ -58,7 +60,7 @@ export async function PATCH(req, { params }) {
     // A structure edit from Template Settings' wizard — replaces each
     // group's headers metadata but always keeps that group's *existing*
     // rows untouched. Headers just describe what to fill in; rows are real
-    // product data owned by Auto Listing / Design Details / Prefill
+    // product data owned by Auto Listing / Product Details / Prefill
     // Details / Choose Your Template, which this wizard never edits. Every
     // one of the 4 groups is always written (never filtered out for having
     // 0 headers right now, unlike the create route) so a group's existing
@@ -110,6 +112,21 @@ export async function DELETE(req, { params }) {
     if (error) return error
 
     await deleteTemplate(templateId)
+
+    // "My Template" assignments live on the hub in their own table with no
+    // FK back to this template — clean them up here so a deleted template
+    // doesn't linger in anyone's sidebar/picker. Best-effort: the template
+    // is already gone at this point regardless of whether this succeeds,
+    // and Choose Your Template already only renders assignments that match
+    // a still-existing template, so a failed cleanup here just leaves a
+    // harmless orphan row rather than a broken page.
+    try {
+      await proxyAdminCall(`/api/listing-tools/assignments?templateId=${encodeURIComponent(templateId)}`, {
+        method: 'DELETE',
+        authHeader: authHeaderFrom(req),
+      })
+    } catch { /* non-fatal, see comment above */ }
+
     recordTemplateHistory(req, { templateId, templateName: meta.templateName, sheetGroup: 'template', action: 'delete' })
     return NextResponse.json({ ok: true })
   } catch (err) {

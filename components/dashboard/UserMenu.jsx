@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { User as UserIcon, Settings, LogOut } from 'lucide-react';
+import { User as UserIcon, LogOut } from 'lucide-react';
 import { clearAuthTokens } from '@/lib/tokenStore';
 
 // variant="compact" renders an icon-only circular trigger (for the bottom-
@@ -99,14 +99,6 @@ function roleLabel(role) {
             >
               <UserIcon size={16} />
               Profile
-            </Link>
-            <Link
-              href="/settings"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted hover:text-foreground hover:bg-card-hover transition-colors"
-            >
-              <Settings size={16} />
-              Settings
             </Link>
             <button
               onClick={handleLogout}

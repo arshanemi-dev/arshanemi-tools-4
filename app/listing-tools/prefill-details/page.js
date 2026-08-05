@@ -1,46 +1,45 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
-import { Search, Download, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Search, Download, UploadCloud, ArrowLeft } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
-import SheetUploadButton from '@/components/listing/SheetUploadButton'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
+import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { useToast } from '@/components/admin/Toast'
+import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
 
-// Fixed to the Prefill (brand) sheet of one template at a time — no group
-// tabs (unlike Design Details), matching the source screenshot which only
-// ever shows a search bar + Upload/Download/Delete Brand here.
+// Landing state is a picker over the user's assigned templates — same list
+// as the Auto Listing sidebar dropdown — nothing loads until one is
+// clicked. Clicking sets ?template= and switches into that template's own
+// Prefill (brand) sheet, same click-to-open pattern as Product Details.
 export default function PrefillDetailsPage() {
+  const searchParams = useSearchParams()
+  const templateId = searchParams.get('template')
+
+  if (!templateId) return <AssignedTemplatePicker basePath="/listing-tools/prefill-details" />
+  return <ScopedPrefillDetails key={templateId} templateId={templateId} />
+}
+
+function ScopedPrefillDetails({ templateId }) {
   const { addToast } = useToast()
-  const [templates, setTemplates] = useState([])
-  const [templateId, setTemplateId] = useState('')
+  const router = useRouter()
+  const [template, setTemplate] = useState(null)
   const [content, setContent] = useState(null)
-  const [selected, setSelected] = useState([])
   const [search, setSearch] = useState('')
+  const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
 
   useEffect(() => {
-    fetch('/api/listing-tools', { credentials: 'include' })
-      .then((r) => r.json())
-      .then((d) => {
-        setTemplates(d.templates || [])
-        if (d.templates?.[0]) setTemplateId(d.templates[0].id)
-      })
-  }, [])
-
-  useEffect(() => {
-    if (!templateId) return
     let cancelled = false
     fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
       .then((r) => r.json())
-      .then((d) => { if (!cancelled) { setContent(d.content); setSelected([]) } })
+      .then((d) => { if (!cancelled) { setTemplate(d.template); setContent(d.content) } })
     return () => { cancelled = true }
   }, [templateId])
 
-  const currentContent = content?.templateId === templateId ? content : null
-  const sheet = currentContent?.sheets.find((s) => s.group === 'prefill')
-  const brandHeaderId = sheet?.headers.find((h) => h.isUniqueKeyPart)?.id
+  const sheet = content?.sheets.find((s) => s.group === 'prefill')
 
   const filteredRows = useMemo(() => {
     if (!sheet) return []
@@ -62,25 +61,27 @@ export default function PrefillDetailsPage() {
     }
   }
 
-  async function handleDeleteSelected() {
-    if (selected.length === 0 || !sheet) return
-    if (!confirm(`Delete ${selected.length} row(s)?`)) return
-    const nextRows = sheet.rows.filter((_, i) => !selected.includes(i))
-    setSelected([])
-    await saveRows(nextRows)
-    addToast('Rows deleted', 'success')
+  async function handleUploadSheet(file) {
+    if (!file || !sheet) return
+    try {
+      const rows = await parseUploadedSheetRows(file, sheet.headers)
+      await saveRows(rows)
+      addToast('Prefill sheet updated', 'success')
+    } catch {
+      addToast("Couldn't read that file — is it a valid .xlsx?", 'error')
+    }
   }
 
   return (
-    <div className="min-h-full bg-gray-50 px-6 py-6 space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={templateId}
-          onChange={(e) => setTemplateId(e.target.value)}
-          className="px-3 py-2 text-[13px] font-medium border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+    <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => router.replace('/listing-tools/prefill-details')}
+          className="flex items-center gap-1.5 text-[13px] font-medium text-gray-500 hover:text-gray-800 flex-shrink-0"
         >
-          {templates.map((t) => <option key={t.id} value={t.id}>{t.templateName}</option>)}
-        </select>
+          <ArrowLeft className="w-3.5 h-3.5" /> {template?.templateName}
+        </button>
 
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -93,39 +94,41 @@ export default function PrefillDetailsPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {sheet && <SheetUploadButton headers={sheet.headers} onRows={saveRows} />}
+          <PillButton variant="upload" icon={UploadCloud} onClick={() => uploadInputRef.current?.click()}>
+            Upload Sheet
+          </PillButton>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => { handleUploadSheet(e.target.files?.[0]); e.target.value = '' }}
+          />
           <PillButton
             variant="download"
             icon={Download}
             loading={exporting}
-            disabled={!currentContent}
-            onClick={() => runExport({ template: currentContent, groups: ['prefill'], format: 'excel' })}
+            disabled={!content}
+            onClick={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })}
           >
             Download Sheet
-          </PillButton>
-          <PillButton variant="delete" icon={Trash2} disabled={selected.length === 0} onClick={handleDeleteSelected}>
-            Delete Brand
           </PillButton>
         </div>
       </div>
 
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-        {!currentContent && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
+        {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
         {sheet && (
           <SheetGrid
             headers={sheet.headers}
             rows={filteredRows}
             onRowsChange={saveRows}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
-            selectable
-            selectedIds={selected}
-            onToggleSelect={(i) => setSelected((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]))}
-            onToggleSelectAll={(checked) => setSelected(checked ? filteredRows.map((_, i) => i) : [])}
           />
         )}
       </div>
 
-      <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: currentContent, groups: ['prefill'], format: 'excel' })} />
+      <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })} />
     </div>
   )
 }

@@ -1,12 +1,14 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { UploadCloud, FileSpreadsheet, Loader2, Check, Lock, PlusCircle, ArrowLeft } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { UploadCloud, FileSpreadsheet, Loader2, Check, Lock, PlusCircle, ArrowLeft, AlertTriangle } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 import PillButton from './PillButton'
 import GroupTabsStep, { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import PresetExportSection from './PresetExportSection'
 import AiRulesSection from './AiRulesSection'
+import { HEADER_ROW_INDEX } from '@/lib/listingSheetLayout'
 
 // Same 4 groups every other Listing Tools screen renders against (see
 // SheetTabs.jsx's TABS / lib/listingTemplates.js GROUPS) — kept as its own
@@ -14,20 +16,24 @@ import AiRulesSection from './AiRulesSection'
 // lib/listingTemplates.js: that module pulls in blobStore.js's server-only
 // Vercel Blob access, which has no place in a client bundle.
 const GROUPS = [
-  { id: 'design_system', label: 'Design Details' },
+  { id: 'design_system', label: 'Product Details' },
   { id: 'compulsory', label: 'Compulsory' },
   { id: 'prefill', label: 'Prefill' },
   { id: 'optional', label: 'Optional' },
 ]
 
 // Kanban columns shown in Section 3 — "Unselected" holds every header until
-// it's moved into one of the 4 real groups. Only those 4 are real columns:
-// the backend (lib/listingTemplates.js GROUPS, the sheets/[group] API route)
-// only ever reads/writes those 4 group ids, so GroupTabsStep's "+ Add
-// Column" custom-group button stays off here — a custom column's fields
-// would just be silently dropped on save. Column *labels* can still be
-// renamed freely (source/11.html's click-to-rename) — see tabLabels below,
-// which only overrides the display name, never the underlying group id.
+// it's moved into one of the 4 real groups. Only those 4 (plus Unselected)
+// are ever persisted: the backend (lib/listingTemplates.js GROUPS, the
+// sheets/[group] API route) only reads/writes those group ids, and so does
+// every other Listing Tools page (Product Details, Prefill Details, Choose
+// Your Template, exports). GroupTabsStep's "+ Add Column" is on for
+// organizing headers while building a template — see `customTabs` below —
+// but a header left in a custom group at save time is caught by
+// handleSave's stuckFields guard rather than silently dropped. Column
+// *labels* on the 4 real groups can be renamed freely (source/11.html's
+// click-to-rename) — see tabLabels below, which only overrides the display
+// name, never the underlying group id.
 const TABS = [{ id: UNMAPPED_TAB_ID, label: 'Unselected' }, ...GROUPS]
 
 const DEFAULT_PRESET = { marketplaceName: 'Meesho', category: '', exportVersion: 'v1.0' }
@@ -42,17 +48,67 @@ function normalize(s) {
 function detectDataType(label) {
   return /image|photo|img/i.test(label || '') ? 'image' : 'text'
 }
+// Header cells in the real master sheet often carry a short field title
+// plus a longer instructional note for whoever fills the sheet in — either
+// on its own line inside the cell (Alt+Enter/wrap-text, which SheetJS
+// preserves as a literal \n in the cell string) or, with no line break at
+// all, just run on straight after the title with a "Please enter…"/"Note:"
+// lead-in ("Product Name Please enter the product name. Note: Please avoid
+// adding product features such as weight, dimension, price description
+// here."). Both need to resolve to a short `label` (the actual column
+// name) with the instructional text captured separately as `description`
+// — collapsing everything to one line first (the old behavior) welds the
+// note onto the label and produces an unusable multi-sentence column name.
+const NOTE_LEAD_IN = /\s+(please\s+(?:enter|select|provide|choose|fill|add|note)\b|note\s*:|instructions?\s*:)/i
+function splitHeaderCell(raw) {
+  const normalized = String(raw ?? '').replace(/ /g, ' ').replace(/\r\n/g, '\n')
+  const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (lines.length > 1) {
+    return {
+      label: lines[0].replace(/\s+/g, ' ').trim(),
+      description: lines.slice(1).join(' ').replace(/\s+/g, ' ').trim(),
+    }
+  }
+  const single = normalized.replace(/\s+/g, ' ').trim()
+  const match = single.match(NOTE_LEAD_IN)
+  if (match && match.index > 0) {
+    return { label: single.slice(0, match.index).trim(), description: single.slice(match.index).trim() }
+  }
+  return { label: single, description: '' }
+}
 function guessIsValidationSheet(name) {
   return /drop.?down|valid|reference|option|list/i.test(name)
 }
 // Some sheets carry auto-generated or leftover filler columns — "Column1",
-// "Header 2", "Unnamed: 3", a lone "N/A" — that aren't real fields to map,
-// just spreadsheet noise. Anchored to the whole label (not just a
-// substring) so a genuine header like "Header Size" or "Field Notes" still
-// comes through — only a label that's *just* one of these words, optionally
-// with a trailing number, gets dropped.
+// "Header 2", "Unnamed: 3", "__EMPTY_4" (a common pandas/Excel round-trip
+// artifact for a blank header cell), a bare "7", "Sample", "TBD" — that
+// aren't real fields to map, just spreadsheet noise. Anchored to the whole
+// label (not just a substring) so a genuine header like "Header Size",
+// "Field Notes", or "Sample ID" still comes through — only a label that's
+// *just* one of these words (optionally with a trailing number), or is
+// purely numeric, gets dropped.
+// Some source sheets carry a locked/internal column whose header cell is
+// itself just an instruction not to touch it — "Don't Change", "Do Not
+// Modify", "Do Not Edit This Column" — rather than naming a real field.
+// Substring (not anchored like the noise-word check above) since these
+// show up as short standalone phrases, not part of a longer real label.
+function isDoNotChangeHeader(label) {
+  return /\b(don'?t|do\s+not)\s+(change|modify|edit|alter|touch|update)\b/i.test(label)
+}
 function isPlaceholderHeader(label) {
-  return /^(unnamed|n\/?a|column|field|header|col)[\s._:-]*\d*$/i.test(label)
+  const v = String(label).trim()
+  if (/^\d+$/.test(v)) return true
+  if (isDoNotChangeHeader(v)) return true
+  return /^(unnamed|__?empty|n\/?a|column|field|header|col|sample|example|test|dummy|placeholder|lorem|xxx|tbd)[\s._:-]*\d*$/i.test(v)
+}
+// Same idea applied to a Dropdown Reference Sheet's actual cell values —
+// "Select…", "Choose an option", "N/A", "--", "TBD" are instruction/filler
+// text a validation sheet sometimes has sitting in with the real options,
+// not real values to offer in a dropdown.
+function isPlaceholderValue(value) {
+  // "select"/"choose" cover short instruction phrases too ("Select an
+  // option", "Choose one") — up to 3 trailing words, not just one.
+  return /^(select|choose)(\s+\S+){0,3}$/i.test(value) || /^(none|null|undefined|n\/?a|tbd|--+|\.+)$/i.test(value)
 }
 // Real master sheets are often named things like "Blouses-Fill this" —
 // smart-select the Product Data Sheet by name instead of always defaulting
@@ -74,30 +130,16 @@ function autoMatchDropdown(label, dropdownColumnNames) {
   return null
 }
 
-// Real templates often carry one or more rows above the real header row: a
-// title (a single merged cell spanning the sheet — merges only populate
-// their top-left cell in the raw data, so that row can look like it has
-// just 1 column) and/or a group-label row (e.g. "Compulsory" merged or
-// repeated across a span of columns). Counting non-empty cells alone can
-// still pick a group-label row by mistake if its labels are repeated per
-// column rather than merged (so it "looks" just as full as the real header
-// row) — counting DISTINCT non-empty values instead fixes that, since a
-// group-label row only ever has a handful of distinct values (one per
-// group) while the real header row's column names are all different.
-function findHeaderRowIndex(aoa, maxScan = 20) {
-  let bestIdx = 0
-  let bestCount = -1
-  const scanLimit = Math.min(aoa.length, maxScan)
-  for (let i = 0; i < scanLimit; i++) {
-    const row = aoa[i] || []
-    const values = row.map((v) => String(v ?? '').trim()).filter(Boolean)
-    const distinctCount = new Set(values.map((v) => v.toLowerCase())).size
-    if (distinctCount > bestCount) {
-      bestCount = distinctCount
-      bestIdx = i
-    }
-  }
-  return bestIdx
+// Fixed row positions, confirmed against the real master sheet's layout —
+// no more dynamic scanning/scoring (picking whichever of the first N rows
+// looked most header-like kept mis-picking the wrong row entirely on real
+// files). Line 1 is a title, line 2 carries the group labels (e.g.
+// "Compulsory") used below to pre-sort headers into their starting group,
+// line 3 is the real header row. (HEADER_ROW_INDEX itself now lives in
+// lib/listingSheetLayout.js so the format-preserving export engine shares
+// the exact same assumption.)
+function findHeaderRowIndex() {
+  return HEADER_ROW_INDEX
 }
 
 // A merged group-label cell only populates its first column in the raw
@@ -142,7 +184,17 @@ function buildDropdownColumns(XLSX, workbook, dropdownSheetName) {
   const dataRows = aoa.slice(headerRowIdx + 1)
   headerRow.forEach((col, colIdx) => {
     if (!col) return
-    const values = [...new Set(dataRows.map((r) => r[colIdx]).filter((v) => v !== undefined && v !== null && String(v).trim() !== '').map(String))]
+    // Only real, short option values — not filler/placeholder text (see
+    // isPlaceholderValue) and not long explanatory sentences a validation
+    // sheet sometimes has in the same column (under 70 chars keeps this to
+    // actual pick-list values, e.g. "Cotton", not a usage note).
+    const values = [...new Set(
+      dataRows
+        .map((r) => r[colIdx])
+        .filter((v) => v !== undefined && v !== null && String(v).trim() !== '')
+        .map((v) => String(v).trim())
+        .filter((v) => v.length < 70 && !isPlaceholderValue(v))
+    )]
     if (values.length) out[col] = { sheetName: dropdownSheetName, columnName: col, values }
   })
   return out
@@ -170,7 +222,10 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
   const seen = new Set()
   let counter = 0
   rawHeaderRow.forEach((rawLabel, colIdx) => {
-    const label = String(rawLabel ?? '').trim()
+    // See splitHeaderCell above \u2014 pulls the short column title apart from
+    // any instructional note the cell also carries, instead of collapsing
+    // both onto one line and calling the whole run-on sentence the label.
+    const { label, description } = splitHeaderCell(rawLabel)
     if (!label) return
     if (isPlaceholderHeader(label)) return
     const key = label.toLowerCase()
@@ -180,7 +235,7 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
     const dropdownMatch = autoMatchDropdown(label, dropdownNames)
     const groupId = matchGroupLabel(groupRow[colIdx]) || UNMAPPED_TAB_ID
     // Once a header's group is known, a couple of labels are unique-key
-    // material by convention: "Design Number" under Design Details, "Brand
+    // material by convention: "Design Number" under Product Details, "Brand
     // Name" under Prefill — auto-check Unique key part for those instead of
     // making the user open Advanced Settings every time.
     const isUniqueKeyPart = (groupId === 'design_system' && /design|number/i.test(label))
@@ -188,9 +243,14 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
     fields.push({
       id: `hdr_${slugify(label)}_${counter}`,
       label,
+      description,
       groupId,
       dataType: dropdownMatch ? 'dropdown' : detectDataType(label),
       dropdownColumn: dropdownMatch || '',
+      // This column's 0-based position in the original Product Data Sheet —
+      // carried through to save so exports can write filled data back into
+      // the exact original column (see lib/exports/excelTemplateEngine.js).
+      sourceColIndex: colIdx,
       // The field's own editable copy of the option list — seeded from the
       // matched column so it shows real values immediately, but from here
       // on it's independent per field (adding/removing a value on one
@@ -215,6 +275,7 @@ function fieldsFromContent(content) {
       fields.push({
         id: h.id,
         label: h.label,
+        description: h.description || '',
         groupId: h.group || sheet.group,
         dataType: h.dataType || 'text',
         dropdownColumn: h.dropdownSource?.columnName || '',
@@ -224,6 +285,9 @@ function fieldsFromContent(content) {
         // doesn't drop it from dropdownSource.
         dropdownSheetName: h.dropdownSource?.sheetName || null,
         isUniqueKeyPart: !!h.isUniqueKeyPart,
+        // Undefined on templates saved before this existed — handled as
+        // "not format-preservable" downstream, never crashes.
+        sourceColIndex: h.sourceColIndex,
       })
     }
   }
@@ -265,6 +329,7 @@ function LockedNote({ children }) {
 // route's own comment on that).
 export default function TemplateSettingsWizard({ templateId }) {
   const { addToast } = useToast()
+  const router = useRouter()
   const isEditMode = !!templateId
 
   const [fileName, setFileName] = useState('')
@@ -273,12 +338,22 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [dataSheetName, setDataSheetName] = useState('')
   const [dropdownSheetName, setDropdownSheetName] = useState('')
   const [parsing, setParsing] = useState(false)
+  // The raw file itself, uploaded to Blob storage alongside the client-side
+  // parse so the Excel Formats tab and format-preserving exports can later
+  // re-open it with full styling (see lib/exports/excelTemplateEngine.js).
+  // Only attempted for real .xlsx uploads — ExcelJS can't read legacy .xls,
+  // and a failed/skipped upload just means those two features fall back to
+  // their plain behavior for this template, never blocks Save.
+  const [sourceFileUrl, setSourceFileUrl] = useState('')
+  const [uploadingSource, setUploadingSource] = useState(false)
 
   const [showGroups, setShowGroups] = useState(false)
   const [fields, setFields] = useState([])
   const [dropdownColumns, setDropdownColumns] = useState({})
   const [bulkTargetId, setBulkTargetId] = useState(UNMAPPED_TAB_ID)
   const [tabLabels, setTabLabels] = useState({}) // { [groupId]: customLabel } — display-only, see TABS comment
+  const [customTabs, setCustomTabs] = useState([]) // [{id,label}] — user-added Kanban columns; organizing-only, see handleSave's stuckFields guard
+  const [removedGroupIds, setRemovedGroupIds] = useState(() => new Set()) // built-in groups (design_system/compulsory/prefill/optional) hidden for this template — Unselected can't be removed
 
   const [presetData, setPresetData] = useState(DEFAULT_PRESET)
   const [currentPreset, setCurrentPreset] = useState(null) // the one Section 4 "Save Preset" snapshot, offered in Section 5's template list — saving again replaces it, never adds another
@@ -353,10 +428,31 @@ export default function TemplateSettingsWizard({ templateId }) {
       setFields([])
       setDropdownColumns({})
       setSavedTemplate(null)
+      setSourceFileUrl('')
+      if (/\.xlsx$/i.test(file.name)) uploadSourceFile(file)
     } catch (err) {
       addToast('Could not read that file — is it a valid .xlsx?', 'error')
     } finally {
       setParsing(false)
+    }
+  }
+
+  // Fire-and-forget alongside the client-side parse above — non-fatal on
+  // failure (see sourceFileUrl's own comment), so this never blocks the
+  // rest of the wizard.
+  async function uploadSourceFile(file) {
+    setUploadingSource(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/listing-tools/source-file', { method: 'POST', body: formData })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.url) throw new Error(data?.error || 'Upload failed')
+      setSourceFileUrl(data.url)
+    } catch {
+      addToast("Couldn't save the original file — Excel Formats and format-matched exports won't be available for this template.", 'error')
+    } finally {
+      setUploadingSource(false)
     }
   }
 
@@ -390,8 +486,64 @@ export default function TemplateSettingsWizard({ templateId }) {
   function bulkAssignFields(ids, groupId) {
     setFields((prev) => prev.map((f) => (ids.includes(f.id) ? { ...f, groupId } : f)))
   }
+  // A manually-added field, not extracted from the upload — dropped straight
+  // into whichever group's "+ Add Header" was clicked, dummy-named and
+  // ready to rename/configure like any other card.
+  function addHeaderToGroup(groupId) {
+    const id = `hdr_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    setFields((prev) => [...prev, {
+      id,
+      label: 'Header New',
+      groupId,
+      dataType: 'text',
+      dropdownColumn: '',
+      dropdownValues: [],
+      isUniqueKeyPart: false,
+    }])
+  }
+  // Removes a header entirely — not a move to Unselected, gone from `fields`
+  // for good (until Save, nothing's persisted either way).
+  function deleteHeader(fieldId) {
+    setFields((prev) => prev.filter((f) => f.id !== fieldId))
+  }
   function renameTab(id, label) {
     setTabLabels((prev) => ({ ...prev, [id]: label }))
+  }
+
+  // Custom Kanban columns are an organizing tool only — the backend (and
+  // every other Listing Tools page: Product Details, Prefill Details,
+  // Choose Your Template, exports) only ever knows about the 4 real groups.
+  // A header left in a custom group at save time gets caught by the
+  // stuckFields check in handleSave, never silently dropped.
+  function addCustomTab(label) {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    const id = `custom_${slugify(trimmed)}_${Date.now()}`
+    setCustomTabs((prev) => [...prev, { id, label: trimmed }])
+  }
+
+  // Any group can be removed for this template — a built-in one
+  // (design_system/compulsory/prefill/optional) or a custom one — except
+  // Unselected, which GroupTabsStep never shows a remove button for.
+  // Headers sitting in the removed group move back to Unselected first, so
+  // nothing is ever lost; a removed built-in group's column just stays
+  // hidden for the rest of this session (resetWizard/reloading brings it
+  // back), same as a removed custom column.
+  function removeTab(id) {
+    if (id === UNMAPPED_TAB_ID) return
+    setFields((prev) => prev.map((f) => (f.groupId === id ? { ...f, groupId: UNMAPPED_TAB_ID } : f)))
+    if (GROUPS.some((g) => g.id === id)) {
+      setRemovedGroupIds((prev) => new Set(prev).add(id))
+    } else {
+      setCustomTabs((prev) => prev.filter((t) => t.id !== id))
+    }
+    setTabLabels((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setBulkTargetId((cur) => (cur === id ? UNMAPPED_TAB_ID : cur))
   }
 
   // Section 4's "Save Preset" doesn't persist anything by itself — it sets
@@ -414,11 +566,15 @@ export default function TemplateSettingsWizard({ templateId }) {
     setSheetMeta([])
     setDataSheetName('')
     setDropdownSheetName('')
+    setSourceFileUrl('')
+    setUploadingSource(false)
     setShowGroups(false)
     setFields([])
     setDropdownColumns({})
     setBulkTargetId(UNMAPPED_TAB_ID)
     setTabLabels({})
+    setCustomTabs([])
+    setRemovedGroupIds(new Set())
     setPresetData(DEFAULT_PRESET)
     setCurrentPreset(null)
     setAiRulesData(DEFAULT_AI_RULES)
@@ -426,6 +582,13 @@ export default function TemplateSettingsWizard({ templateId }) {
   }
 
   async function handleSave() {
+    // Defense in depth — the Save button is already disabled while any
+    // header sits in a custom group (see hasStuckFields below), but guard
+    // here too in case that state ever gets out of sync.
+    if (stuckFields.length > 0) {
+      addToast('Move headers out of custom groups before saving — see the notice above Save.', 'error')
+      return
+    }
     const allGrouped = GROUPS.map((g, i) => ({
       sheetName: tabLabels[g.id] || g.label,
       sheetIndex: i,
@@ -433,10 +596,12 @@ export default function TemplateSettingsWizard({ templateId }) {
       headers: fields.filter((f) => f.groupId === g.id).map((f, idx) => ({
         id: f.id,
         label: f.label,
+        description: f.description || '',
         order: idx,
         group: g.id,
         dataType: f.dataType,
         isUniqueKeyPart: f.isUniqueKeyPart,
+        sourceColIndex: f.sourceColIndex,
         // Saves the field's own (possibly hand-edited via +/- in the card)
         // value list, not blindly the shared sheet column's raw values.
         dropdownSource: f.dataType === 'dropdown'
@@ -486,6 +651,8 @@ export default function TemplateSettingsWizard({ templateId }) {
           body: JSON.stringify({
             templateName: finalTemplateName,
             sourceFileName: fileName,
+            sourceFileUrl: sourceFileUrl || null,
+            sourceSheetName: sourceFileUrl ? dataSheetName : null,
             sheets: allGrouped.filter((g) => g.headers.length > 0),
             dropdownReference: dropdownSheetName
               ? { sheetName: dropdownSheetName, columns: mergedColumns }
@@ -507,7 +674,15 @@ export default function TemplateSettingsWizard({ templateId }) {
       if (!data?.template) throw new Error('Server did not return the saved template.')
 
       addToast(isEditMode ? 'Template updated' : 'Template created', 'success')
-      setSavedTemplate({ id: data.template.id, templateName: data.template.templateName })
+      if (isEditMode) {
+        setSavedTemplate({ id: data.template.id, templateName: data.template.templateName })
+      } else {
+        // Land back on the list rather than this now-saved wizard — the
+        // list route mounts fresh (it's a different page component from
+        // /new), so its own useEffect fetch picks up the new template
+        // without any extra cache-busting.
+        router.push('/listing-tools/template-settings')
+      }
     } catch (err) {
       addToast(err.message, 'error')
     } finally {
@@ -517,7 +692,15 @@ export default function TemplateSettingsWizard({ templateId }) {
 
   const sheetsLocked = !workbook
   const groupsLocked = !showGroups
-  const displayTabs = TABS.map((t) => ({ ...t, label: tabLabels[t.id] || t.label }))
+  const customTabIds = new Set(customTabs.map((t) => t.id))
+  const displayTabs = [...TABS, ...customTabs]
+    .filter((t) => !removedGroupIds.has(t.id))
+    .map((t) => ({ ...t, label: tabLabels[t.id] || t.label }))
+  // Only the 4 real groups + Unselected ever persist (see this file's TABS
+  // comment) — anything left in a custom group would silently vanish on
+  // save if we let it through, so Save stays disabled until these are empty.
+  const stuckFields = fields.filter((f) => customTabIds.has(f.groupId))
+  const stuckGroupNames = [...new Set(stuckFields.map((f) => tabLabels[f.groupId] || customTabs.find((t) => t.id === f.groupId)?.label || f.groupId))]
   // Section 4's Final Name is the template name — no separate name field to
   // keep in sync with it.
   const finalTemplateName = `${presetData.marketplaceName || 'marketplace'}_${presetData.category || 'category'}_${presetData.exportVersion || 'v1.0'}`
@@ -574,7 +757,11 @@ export default function TemplateSettingsWizard({ templateId }) {
                   <FileSpreadsheet className="w-5 h-5 text-indigo-500 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-medium text-gray-800 truncate">{fileName}</p>
-                    <p className="text-[12px] text-gray-400">{sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found</p>
+                    <p className="text-[12px] text-gray-400">
+                      {sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found
+                      {uploadingSource && ' · saving original file…'}
+                      {!uploadingSource && sourceFileUrl && ' · original file saved'}
+                    </p>
                   </div>
                   <label className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer flex-shrink-0">
                     Replace file
@@ -652,7 +839,11 @@ export default function TemplateSettingsWizard({ templateId }) {
             onUpdateField={updateField}
             onBulkAssign={bulkAssignFields}
             onRenameTab={renameTab}
-            allowAddTab={false}
+            onAddTab={addCustomTab}
+            onRemoveTab={removeTab}
+            onAddHeader={addHeaderToGroup}
+            onDeleteHeader={deleteHeader}
+            allowAddTab
           />
         </div>
       </div>
@@ -695,11 +886,19 @@ export default function TemplateSettingsWizard({ templateId }) {
         ) : (
           <div className={groupsLocked ? 'opacity-50 pointer-events-none select-none space-y-4' : 'space-y-4'}>
             {groupsLocked && <LockedNote>Complete Section 3 to unlock.</LockedNote>}
+            {stuckFields.length > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>
+                  {stuckFields.length} header{stuckFields.length === 1 ? '' : 's'} {stuckFields.length === 1 ? 'is' : 'are'} in custom group{stuckGroupNames.length === 1 ? '' : 's'} ({stuckGroupNames.join(', ')}) — drag {stuckFields.length === 1 ? 'it' : 'them'} into Product Details / Compulsory / Prefill / Optional in Section 3 before saving.
+                </span>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3">
               <p className="text-[12px] text-gray-500">
                 Will be saved as <span className="font-semibold text-gray-700">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
               </p>
-              <PillButton variant="upload" icon={Check} loading={saving} onClick={handleSave}>
+              <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0} onClick={handleSave}>
                 {isEditMode ? 'Save Changes' : 'Save Template & AI Rules'}
               </PillButton>
             </div>

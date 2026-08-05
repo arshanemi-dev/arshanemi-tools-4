@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Layers, Settings, LogOut } from 'lucide-react'
+import { Layers, User, LogOut } from 'lucide-react'
 import { clearAuthTokens } from '@/lib/tokenStore'
 
 async function handleLogout() {
@@ -21,7 +21,7 @@ async function handleLogout() {
 // palette as the rest of /listing-tools rather than components/dashboard/
 // UserMenu's dark theme-token system, which ListingToolsSidebar's own
 // comment already calls out as intentionally separate from this shell.
-export default function ListingToolsHeader({ name, email, role }) {
+export default function ListingToolsHeader({ name, email }) {
   const initial = (name || email || '?').trim().charAt(0).toUpperCase()
 
   return (
@@ -37,15 +37,13 @@ export default function ListingToolsHeader({ name, email, role }) {
 
       <div className="flex-1" />
 
-      {role !== 'user' && (
-        <Link
-          href="/settings"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-        >
-          <Settings size={14} />
-          <span className="hidden sm:inline">Settings</span>
-        </Link>
-      )}
+      <Link
+        href="/profile"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+      >
+        <User size={14} />
+        <span className="hidden sm:inline">Profile</span>
+      </Link>
 
       <div className="flex items-center gap-2 pl-2 ml-1 border-l border-gray-200">
         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
