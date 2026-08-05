@@ -50,6 +50,10 @@ export default function PresetExportSection({ value, onChange, onSave, currentPr
           <label className={labelCls}>Version</label>
           <input value={value.exportVersion} onChange={(e) => set('exportVersion', e.target.value)} className={inputCls} />
         </div>
+          <div className="flex-1 min-w-[110px]">
+          <label className={labelCls}>Description</label>
+          <input value={value.description} onChange={(e) => set('description', e.target.value)} className={inputCls} />
+        </div>
 
         <div className="flex-shrink-0">
           <PillButton variant="upload" icon={Save} onClick={handleSavePreset}>

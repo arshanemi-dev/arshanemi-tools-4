@@ -10,11 +10,11 @@ import { usePathname, useSearchParams } from 'next/navigation'
 // below), backing app/listing-tools/template-access/page.js which enforces
 // the same gate server-side for anyone who types the URL directly.
 const NAV_ITEMS = [
-  { href: '/listing-tools', label: 'Auto Listing' },
-  { href: '/listing-tools/product-details', label: 'Product Details' },
-  { href: '/listing-tools/prefill-details', label: 'Prefill Details' },
-  { href: '/listing-tools/templates', label: 'Choose Your template' },
-  { href: '/listing-tools/template-settings', label: 'Template Settings' },
+  { href: '/listing-tools', label: 'Auto Listing' ,templateNav:`auto-details`},
+  { href: '/listing-tools/product-details', label: 'Product Details',templateNav:`product-details` },
+  { href: '/listing-tools/prefill-details', label: 'Prefill Details',templateNav:`prefill-details` },
+  { href: '/listing-tools/templates', label: 'Choose Your template',templateNav:`templates` },
+  { href: '/listing-tools/template-settings', label: 'Template Settings'},
 ]
 
 const MASTER_ADMIN_NAV_ITEMS = [
@@ -44,8 +44,9 @@ export default function ListingToolsSidebar({ role }) {
   // Destination is the Product Details page's single-template scoped view
   // (?template=), not Choose Your Template's stacked [templateId] page —
   // picking a template here opens one tab at a time, first tab selected.
-  const activeTemplateId = pathname === '/listing-tools/product-details' ? searchParams.get('template') : null
-
+  const activeTemplateId = pathname === '/listing-tools/product-details' ? searchParams.get('template') : null;
+  const activateTemplateNav=pathname === '/listing-tools/product-details' ? 'product-details' : pathname === '/listing-tools/prefill-details' ? 'prefill-details' : pathname === '/listing-tools/templates' ? 'templates' : null;
+console.log(activateTemplateNav,activeTemplateId)
   return (
     <aside className="w-48 flex-shrink-0 h-full bg-[#0a0a0a] flex flex-col overflow-y-auto py-5
       [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:transparent
@@ -62,9 +63,9 @@ export default function ListingToolsSidebar({ role }) {
                   {myTemplates.map((t) => (
                     <li key={t.templateId}>
                       <Link
-                        href={`/listing-tools/product-details?template=${t.templateId}`}
+                        href={`/listing-tools/${item.templateNav}?template=${t.templateId}`}
                         className={`flex items-center gap-2 pl-7 pr-5 py-1.5 text-[13px] transition-colors ${
-                          t.templateId === activeTemplateId ? 'text-emerald-400 font-medium' : 'text-white/55 hover:text-white'
+                          t.templateId === activeTemplateId&&item.templateNav === activateTemplateNav ? 'text-emerald-400 font-medium' : 'text-white/55 hover:text-white'
                         }`}
                       >
                         <span className="w-1 h-1 rounded-full bg-current flex-shrink-0" />

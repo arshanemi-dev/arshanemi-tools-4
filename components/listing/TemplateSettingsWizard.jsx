@@ -36,7 +36,7 @@ const GROUPS = [
 // name, never the underlying group id.
 const TABS = [{ id: UNMAPPED_TAB_ID, label: 'Unselected' }, ...GROUPS]
 
-const DEFAULT_PRESET = { marketplaceName: 'Meesho', category: '', exportVersion: 'v1.0' }
+const DEFAULT_PRESET = { marketplaceName: 'Meesho', category: '', exportVersion: 'v1.0', description: '' }
 const DEFAULT_AI_RULES = { marketplace: '', category: '', title: '', description: '', keyword: '', otherRules: '' }
 
 function slugify(label) {
@@ -100,6 +100,26 @@ function isPlaceholderHeader(label) {
   if (/^\d+$/.test(v)) return true
   if (isDoNotChangeHeader(v)) return true
   return /^(unnamed|__?empty|n\/?a|column|field|header|col|sample|example|test|dummy|placeholder|lorem|xxx|tbd)[\s._:-]*\d*$/i.test(v)
+}
+// Task 3: when a header has no Dropdown Reference Sheet match, check
+// whether the Product Data Sheet's own column data looks categorical
+// (values repeat) rather than free text (values are all different) — if
+// so, auto-suggest those as the dropdown's option list instead of leaving
+// it a plain text field the user has to configure by hand. Reuses the same
+// value-cleaning rules as buildDropdownColumns (short, non-placeholder).
+function detectColumnDropdownValues(dataRows, colIdx) {
+  const raw = dataRows
+    .map((r) => r[colIdx])
+    .filter((v) => v !== undefined && v !== null && String(v).trim() !== '')
+    .map((v) => String(v).trim())
+    .filter((v) => v.length < 70 && !isPlaceholderValue(v))
+  if (raw.length < 2) return null
+  const distinct = [...new Set(raw)]
+  // Real repetition (distinct < filled count), within a small option-list
+  // sized range — a free-text column (e.g. "Highlights") has ~as many
+  // distinct values as rows and would never qualify.
+  if (distinct.length < 2 || distinct.length > 20 || distinct.length >= raw.length) return null
+  return distinct
 }
 // Same idea applied to a Dropdown Reference Sheet's actual cell values —
 // "Select…", "Choose an option", "N/A", "--", "TBD" are instruction/filler
@@ -218,6 +238,9 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
   // safe no-op for simple sheets that don't have a group-label row at all.
   const groupRowIdx = headerRowIdx - 1
   const groupRow = groupRowIdx >= 0 ? forwardFillRow(aoa[groupRowIdx] || [], rawHeaderRow.length) : []
+  // Task 3's own-column dropdown auto-detect needs the actual data rows,
+  // not just the header row.
+  const dataRows = aoa.slice(headerRowIdx + 1)
 
   const seen = new Set()
   let counter = 0
@@ -240,12 +263,16 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
     // making the user open Advanced Settings every time.
     const isUniqueKeyPart = (groupId === 'design_system' && /design|number/i.test(label))
       || (groupId === 'prefill' && /brand/i.test(label))
+    // No Dropdown Reference Sheet match — see if the Product Data Sheet's
+    // own column data looks categorical enough to auto-suggest as options.
+    const autoDetectedValues = dropdownMatch ? null : detectColumnDropdownValues(dataRows, colIdx)
+    const dataType = dropdownMatch || autoDetectedValues ? 'dropdown' : detectDataType(label)
     fields.push({
       id: `hdr_${slugify(label)}_${counter}`,
       label,
       description,
       groupId,
-      dataType: dropdownMatch ? 'dropdown' : detectDataType(label),
+      dataType,
       dropdownColumn: dropdownMatch || '',
       // This column's 0-based position in the original Product Data Sheet —
       // carried through to save so exports can write filled data back into
@@ -253,13 +280,73 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
       sourceColIndex: colIdx,
       // The field's own editable copy of the option list — seeded from the
       // matched column so it shows real values immediately, but from here
-      // on it's independent per field (adding/removing a value on one
-      // header never touches another header sharing the same source column).
-      dropdownValues: dropdownMatch ? [...(dropdownColumns[dropdownMatch]?.values || [])] : [],
+      // on it's independent per field. Falls back to the auto-detected
+      // column values when there was no Dropdown Reference Sheet match.
+      dropdownValues: dropdownMatch ? [...(dropdownColumns[dropdownMatch]?.values || [])] : (autoDetectedValues || []),
       isUniqueKeyPart,
+      // Connected-headers (components/listing/linkedHeaders.js) — unset by
+      // default, configured later in Advanced Settings.
+      linkedGroup: null,
+      linkedHeaderId: null,
     })
   })
   return fields
+}
+
+// Task 1: every new template's Product Details group is guaranteed these 12
+// baseline columns, matching the real master-sheet convention, and Prefill
+// always gets its own "Product Number" — pre-linked to Product Details' own
+// Product Number (see linkedHeaders.js) — so a freshly-created template is
+// immediately usable with the connected-headers feature without the user
+// having to add and wire that column by hand first. Called only from the
+// create-mode upload flow (buildFields' caller below) — never applied to an
+// existing template on reload, per the confirmed "new templates only" scope.
+const DEFAULT_PRODUCT_DETAILS_HEADERS = [
+  'Product Number', 'Size', 'Cost', 'Highlights', 'Brand',
+  'Image 1', 'Image 2', 'Image 3', 'Image 4', 'Image 5', 'Image 6', 'Image 7',
+]
+function withDefaultHeaders(fields) {
+  const next = [...fields]
+  let counter = next.length
+  const hasLabel = (groupId, label) =>
+    next.some((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase())
+
+  function addDefault(groupId, label, extra = {}) {
+    if (hasLabel(groupId, label)) return
+    counter += 1
+    next.push({
+      id: `hdr_${slugify(label)}_default_${counter}`,
+      label,
+      description: '',
+      groupId,
+      dataType: detectDataType(label),
+      dropdownColumn: '',
+      dropdownValues: [],
+      sourceColIndex: undefined,
+      isUniqueKeyPart: /design|number/i.test(label),
+      linkedGroup: null,
+      linkedHeaderId: null,
+      ...extra,
+    })
+  }
+
+  for (const label of DEFAULT_PRODUCT_DETAILS_HEADERS) addDefault('design_system', label)
+
+  if (!hasLabel('prefill', 'Product Number')) {
+    const targetHeader = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'product number')
+    addDefault('prefill', 'Brand', {
+      isUniqueKeyPart: true,
+      linkedGroup: targetHeader ? 'design_system' : null,
+      linkedHeaderId: targetHeader ? targetHeader.id : null,
+    });
+     addDefault('optional', 'Product Number', {
+      isUniqueKeyPart: true,
+      linkedGroup: targetHeader ? 'design_system' : null,
+      linkedHeaderId: targetHeader ? targetHeader.id : null,
+    })
+  }
+
+  return next
 }
 
 // Flattens an existing template's per-group sheets/headers (loaded from
@@ -288,6 +375,8 @@ function fieldsFromContent(content) {
         // Undefined on templates saved before this existed — handled as
         // "not format-preservable" downstream, never crashes.
         sourceColIndex: h.sourceColIndex,
+        linkedGroup: h.linkedGroup || null,
+        linkedHeaderId: h.linkedHeaderId || null,
       })
     }
   }
@@ -473,7 +562,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       const cols = buildDropdownColumns(XLSX, workbook, dropdownSheetName)
       const built = buildFields(XLSX, workbook, dataSheetName, cols)
       setDropdownColumns(cols)
-      setFields(built)
+      setFields(withDefaultHeaders(built))
       setShowGroups(true)
       setBulkTargetId(UNMAPPED_TAB_ID)
     })
@@ -503,8 +592,13 @@ export default function TemplateSettingsWizard({ templateId }) {
   }
   // Removes a header entirely — not a move to Unselected, gone from `fields`
   // for good (until Save, nothing's persisted either way).
+  // Removing a header also clears any *other* header's link that pointed at
+  // it (components/listing/linkedHeaders.js) — otherwise that other header
+  // would keep a linkedHeaderId referencing an id that no longer exists.
   function deleteHeader(fieldId) {
-    setFields((prev) => prev.filter((f) => f.id !== fieldId))
+    setFields((prev) => prev
+      .filter((f) => f.id !== fieldId)
+      .map((f) => (f.linkedHeaderId === fieldId ? { ...f, linkedGroup: null, linkedHeaderId: null } : f)))
   }
   function renameTab(id, label) {
     setTabLabels((prev) => ({ ...prev, [id]: label }))
@@ -602,6 +696,8 @@ export default function TemplateSettingsWizard({ templateId }) {
         dataType: f.dataType,
         isUniqueKeyPart: f.isUniqueKeyPart,
         sourceColIndex: f.sourceColIndex,
+        linkedGroup: f.linkedGroup || null,
+        linkedHeaderId: f.linkedHeaderId || null,
         // Saves the field's own (possibly hand-edited via +/- in the card)
         // value list, not blindly the shared sheet column's raw values.
         dropdownSource: f.dataType === 'dropdown'
@@ -650,6 +746,7 @@ export default function TemplateSettingsWizard({ templateId }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             templateName: finalTemplateName,
+            description: presetData.description,
             sourceFileName: fileName,
             sourceFileUrl: sourceFileUrl || null,
             sourceSheetName: sourceFileUrl ? dataSheetName : null,
@@ -855,10 +952,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       </div>
 
       {/* Section 5 — AI Rules & Template Generation (source/11.html §5) */}
-      <div className={groupsLocked ? 'opacity-50 pointer-events-none select-none' : ''}>
-        {groupsLocked && <LockedNote>Complete Section 3 to unlock.</LockedNote>}
-        <AiRulesSection value={aiRulesData} onChange={setAiRulesData} latestTemplateId={savedTemplate?.id} currentPreset={currentPreset} />
-      </div>
+     
 
       {/* Save — persists the real template (sheets + Section 4/5 data) via /api/listing-tools */}
       <div className="border border-gray-200 rounded-lg bg-white p-4 space-y-4">
@@ -871,7 +965,7 @@ export default function TemplateSettingsWizard({ templateId }) {
               <p className="text-[12px] text-gray-500 mt-0.5">Section 5 above now shows this template&apos;s saved rules.</p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href={`/listing-tools/templates/${savedTemplate.id}`}>
+              <Link href={`/listing-tools/auto-details?template=${savedTemplate.id}`}>
                 <PillButton variant="ghost">View Template</PillButton>
               </Link>
               {isEditMode ? (
@@ -899,7 +993,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                 Will be saved as <span className="font-semibold text-gray-700">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
               </p>
               <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0} onClick={handleSave}>
-                {isEditMode ? 'Save Changes' : 'Save Template & AI Rules'}
+                {isEditMode ? 'Save Changes' : 'Save Template'}
               </PillButton>
             </div>
           </div>

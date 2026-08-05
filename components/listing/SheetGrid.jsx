@@ -25,11 +25,25 @@ export default function SheetGrid({
   filterValue = '',
   onFilterChange,
   readOnly = false,
+  // Connected-headers support (components/listing/linkedHeaders.js) — both
+  // optional, SheetGrid stays ignorant of what "linked" actually means:
+  // `onCellChange` lets a caller react to one cell's edit with more edits in
+  // the same row (e.g. auto-filling other columns once a product is
+  // matched); `pickerOptions` is a plain {[headerId]: string[]} map of
+  // suggested values rendered as a native <datalist> on that column's text
+  // input — browsable, but (unlike ComboboxCell) still free-typeable, since
+  // a picker header must stay usable for entering a brand-new value too.
+  onCellChange,
+  pickerOptions = {},
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   function updateCell(rowIndex, headerId, value) {
-    const next = rows.map((r, i) => (i === rowIndex ? { ...r, [headerId]: value } : r))
+    let next = rows.map((r, i) => (i === rowIndex ? { ...r, [headerId]: value } : r))
+    if (onCellChange) {
+      const extra = onCellChange(headerId, value, rowIndex, next[rowIndex])
+      if (extra) next = next.map((r, i) => (i === rowIndex ? { ...r, ...extra } : r))
+    }
     const isLastRow = rowIndex === rows.length - 1
     if (isLastRow && !isRowEmpty(next[rowIndex])) {
       next.push(Object.fromEntries(sortedHeaders.map((h) => [h.id, ''])))
@@ -107,6 +121,7 @@ export default function SheetGrid({
                   ) : (
                     <input
                       type="text"
+                      list={pickerOptions[h.id]?.length ? `dl-${h.id}` : undefined}
                       value={row[h.id] ?? ''}
                       onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
                       disabled={readOnly}
@@ -119,6 +134,17 @@ export default function SheetGrid({
           ))}
         </tbody>
       </table>
+      {/* One shared <datalist> per column with suggestions — a native
+          browsable dropdown that still lets you type a value that isn't in
+          the list yet (a brand-new product), unlike ComboboxCell which only
+          ever commits a clicked option. */}
+      {Object.entries(pickerOptions).map(([headerId, options]) => (
+        options?.length ? (
+          <datalist key={headerId} id={`dl-${headerId}`}>
+            {options.map((v) => <option key={v} value={v} />)}
+          </datalist>
+        ) : null
+      ))}
     </div>
   )
 }

@@ -1,25 +1,42 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
-import { Download, UploadCloud, Loader2 } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import {Search, Download, UploadCloud, ArrowLeft, PlusCircle } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
+import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
 import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
-// The "Auto Listing" fill workspace — every sheet (Product Details included)
-// visible and editable on one screen at once, each block with its own
-// independent group tab-strip (matches the source screenshot's stacked
-// layout). Product Details stays a first-class block here (not hidden) —
-// its own unique-key header (e.g. "Product Number") doubles as a picker of
-// already-saved products; picking one, or picking one via any other
-// group's header linked to it, auto-fills the rest of that row. See
-// components/listing/linkedHeaders.js for the mechanism.
+// Landing state is a picker over the user's assigned templates — same list
+// as the Auto Listing sidebar dropdown (ListingToolsSidebar.jsx, whose
+// "Auto Listing" section already links here via ?template=) — nothing loads
+// until one is clicked.
+export default function AutoDetailsPage() {
+  const searchParams = useSearchParams()
+  const templateId = searchParams.get('template')
+
+  if (!templateId) return <AssignedTemplatePicker basePath="/listing-tools/auto-details" />
+  return <ScopedAutoDetails key={templateId} templateId={templateId} />
+}
+
+// The Auto Listing fill/export workspace — every sheet (Product Details
+// included) visible and editable on one screen at once, each block with its
+// own independent group tab-strip. This page is a *fresh* entry form every
+// visit — it never displays rows already saved from a previous session
+// (that's what Product Details/Prefill Details are for). `content` is still
+// fetched in full and kept around, but only as: (a) the lookup source for
+// the connected-headers picks below (Product Details' own unique-key header
+// doubles as a picker of already-saved products — picking one, or picking
+// one via any other group's header linked to it, auto-fills the rest of
+// that row, see components/listing/linkedHeaders.js), and (b) something to
+// merge new rows into on save/export, so a save from this blank screen can
+// never wipe out data that was already on the server.
 const ALL_GROUPS = ['design_system', 'compulsory', 'prefill', 'optional']
 // "Upload Old Sheet" only ever matches into these three — Product Details'
 // own data comes from Template Settings' Product Data Sheet at creation
@@ -32,18 +49,15 @@ function isRowEmpty(row) {
 function blankRow(headers) {
   return Object.fromEntries(headers.map((h) => [h.id, '']))
 }
+function blankSessionFor(sheets) {
+  return Object.fromEntries((sheets || []).map((s) => [s.group, [blankRow(s.headers)]]))
+}
 
-// This page is a *fresh* entry form every visit — it never displays rows
-// already saved from a previous session (that's what Product Details/
-// Prefill Details are for, including their History panel). `content` is
-// still fetched in full and kept around, but only as: (a) the lookup source
-// for the connected-headers picks below, and (b) something to merge new
-// rows into on save/export, so a save from this blank screen can never wipe
-// out data that was already on the server.
-export default function TemplateWorkspacePage() {
-  const { templateId } = useParams()
+function ScopedAutoDetails({ templateId }) {
   const { addToast } = useToast()
-  const [template, setTemplate] = useState(null)
+  const router = useRouter()
+  const [template, setTemplate] = useState(null);
+   const [search, setSearch] = useState('')
   const [content, setContent] = useState(null)
   const [sessionRows, setSessionRows] = useState({})
   const [blockGroups, setBlockGroups] = useState(ALL_GROUPS)
@@ -59,7 +73,7 @@ export default function TemplateWorkspacePage() {
         if (cancelled) return
         setTemplate(d.template)
         setContent(d.content)
-        setSessionRows(Object.fromEntries((d.content.sheets || []).map((s) => [s.group, [blankRow(s.headers)]])))
+        setSessionRows(blankSessionFor(d.content.sheets))
       })
     return () => { cancelled = true }
   }, [templateId])
@@ -96,6 +110,15 @@ export default function TemplateWorkspacePage() {
     saveGroup(group, headers, mergedRowsFor(group, nextSessionRows))
   }
 
+  // Clears every block back to a single blank row — a manual "start over"
+  // for the next listing, independent of SheetGrid's own automatic
+  // one-trailing-blank-row behavior. Whatever was already typed has already
+  // autosaved (saveGroup is debounced, not tied to leaving the page), so
+  // this only clears what's on screen, never discards saved data.
+  function handleCreateNew() {
+    setSessionRows(blankSessionFor(content?.sheets))
+  }
+
   async function handleUploadOldSheet(file) {
     if (!file || !content) return
     setUploading(true)
@@ -122,18 +145,22 @@ export default function TemplateWorkspacePage() {
     }
   }
 
-  if (!content) {
-    return <div className="min-h-full bg-gray-50 flex items-center justify-center"><Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /></div>
-  }
-
   return (
-    <div className="min-h-full bg-gray-50 px-6 py-6 space-y-4">
+    <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">{template?.templateName}</h1>
-          {template?.description && <p className="text-[13px] text-gray-500">{template.description}</p>}
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
         </div>
         <div className="flex items-center gap-2">
+          <PillButton variant="ghost" icon={PlusCircle} onClick={handleCreateNew} disabled={!content}>
+            Create New
+          </PillButton>
           <PillButton variant="upload" icon={UploadCloud} loading={uploading} onClick={() => uploadInputRef.current?.click()}>
             Upload Old Sheet
           </PillButton>
@@ -148,6 +175,7 @@ export default function TemplateWorkspacePage() {
             variant="download"
             icon={Download}
             loading={exporting}
+            disabled={!content}
             onClick={() => runExport({ template: buildExportTemplate(), groups: ALL_GROUPS, format: 'excel', meta: template })}
           >
             Download Final Sheet
@@ -155,7 +183,9 @@ export default function TemplateWorkspacePage() {
         </div>
       </div>
 
-      {blockGroups.map((group, blockIndex) => {
+      {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
+
+      {[blockGroups[0]].map((group, blockIndex) => {
         const sheet = sheetsByGroup[group]
         if (!sheet) return null
         const rows = sessionRows[group] || [blankRow(sheet.headers)]

@@ -7,6 +7,8 @@ import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
+import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
+import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
 
@@ -40,6 +42,11 @@ function ScopedPrefillDetails({ templateId }) {
   }, [templateId])
 
   const sheet = content?.sheets.find((s) => s.group === 'prefill')
+
+  const sheetsByGroup = useMemo(
+    () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
+    [content]
+  )
 
   const filteredRows = useMemo(() => {
     if (!sheet) return []
@@ -75,13 +82,13 @@ function ScopedPrefillDetails({ templateId }) {
   return (
     <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
       <div className="flex items-center gap-3">
-        <button
+        {/* <button
           type="button"
           onClick={() => router.replace('/listing-tools/prefill-details')}
           className="flex items-center gap-1.5 text-[13px] font-medium text-gray-500 hover:text-gray-800 flex-shrink-0"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> {template?.templateName}
-        </button>
+        </button> */}
 
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -94,6 +101,7 @@ function ScopedPrefillDetails({ templateId }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <TemplateHistoryPanel templateId={templateId} />
           <PillButton variant="upload" icon={UploadCloud} onClick={() => uploadInputRef.current?.click()}>
             Upload Sheet
           </PillButton>
@@ -124,6 +132,8 @@ function ScopedPrefillDetails({ templateId }) {
             rows={filteredRows}
             onRowsChange={saveRows}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
+            pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
+            onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
           />
         )}
       </div>

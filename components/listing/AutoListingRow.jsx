@@ -71,7 +71,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
         <td className="px-4 py-3 text-gray-800 font-medium">{template.templateName}</td>
         <td className="px-4 py-3 text-gray-500">{template.description || '—'}</td>
         <td className="px-4 py-3 text-right">
-          <Link href={`/listing-tools/templates/${template.id}`}>
+          <Link href={`/listing-tools/auto-details?template=${template.id}`}>
             <PillButton variant="view">View Details</PillButton>
           </Link>
         </td>

@@ -439,7 +439,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       )}
 
                       {advancedOpenIds.has(field.id) && (
-                        <div className="flex flex-col gap-1.5 rounded-md border border-gray-100 bg-gray-50 p-2">
+                        <div className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Advanced Settings</p>
                           <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-gray-600 select-none">
                             <input
@@ -450,6 +450,41 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                             />
                             <Key className="w-3 h-3" /> Unique key part
                           </label>
+
+                          {/* Connect this header to a header in a different
+                              group — at fill time, picking an existing
+                              record via that group's own unique-key header
+                              auto-fills this one. See
+                              components/listing/linkedHeaders.js. */}
+                          <div className="flex flex-col gap-1">
+                            <label className={fieldLabelCls}>Auto-fill from</label>
+                            <div className="flex gap-1.5">
+                              <select
+                                value={field.linkedGroup || ''}
+                                onChange={(e) => onUpdateField(field.id, { linkedGroup: e.target.value || null, linkedHeaderId: null })}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                className="min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              >
+                                <option value="">Not connected</option>
+                                {tabs.filter((t) => t.id !== field.groupId && t.id !== UNMAPPED_TAB_ID).map((t) => (
+                                  <option key={t.id} value={t.id}>{t.label}</option>
+                                ))}
+                              </select>
+                              {field.linkedGroup && (
+                                <select
+                                  value={field.linkedHeaderId || ''}
+                                  onChange={(e) => onUpdateField(field.id, { linkedHeaderId: e.target.value || null })}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  className="min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                >
+                                  <option value="">Pick a header…</option>
+                                  {fields.filter((f) => f.groupId === field.linkedGroup).map((f) => (
+                                    <option key={f.id} value={f.id}>{f.label}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

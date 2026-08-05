@@ -1,13 +1,15 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Download, UploadCloud, ArrowLeft } from 'lucide-react'
+import { Search,Download, UploadCloud, ArrowLeft } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
+import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
+import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 
 // Landing state is a picker over the user's assigned templates — same list
@@ -29,6 +31,7 @@ function ScopedProductDetails({ templateId }) {
   const router = useRouter()
   const [template, setTemplate] = useState(null)
   const [content, setContent] = useState(null)
+   const [search, setSearch] = useState('')
   const [activeGroup, setActiveGroup] = useState('design_system')
   const [activeFilterKey, setActiveFilterKey] = useState(null)
   const [filterValue, setFilterValue] = useState('')
@@ -45,6 +48,11 @@ function ScopedProductDetails({ templateId }) {
 
   const sheet = content?.sheets.find((s) => s.group === activeGroup)
   const keyHeaderId = sheet?.headers.find((h) => h.isUniqueKeyPart)?.id
+
+  const sheetsByGroup = useMemo(
+    () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
+    [content]
+  )
 
   const filteredRows = useMemo(() => {
     if (!sheet) return []
@@ -105,14 +113,17 @@ function ScopedProductDetails({ templateId }) {
   return (
     <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => router.replace('/listing-tools/product-details')}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-gray-500 hover:text-gray-800"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> {template?.templateName}
-        </button>
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+        </div>
         <div className="flex items-center gap-2">
+          <TemplateHistoryPanel templateId={templateId} />
           <PillButton variant="upload" icon={UploadCloud} onClick={() => uploadInputRef.current?.click()}>
             Upload Old Sheet
           </PillButton>
@@ -147,6 +158,8 @@ function ScopedProductDetails({ templateId }) {
             activeFilterHeaderId={activeFilterKey}
             filterValue={filterValue}
             onFilterChange={keyHeaderId ? onFilterChange : undefined}
+            pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
+            onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
           />
         )}
       </div>
