@@ -5,12 +5,11 @@ import { Search, Download, UploadCloud, PlusCircle } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
-import BulkImageDropZone from '@/components/listing/BulkImageDropZone'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
-import { resolveLinkedFill, buildPickerOptions, propagateFromDesignSystem } from '@/components/listing/linkedHeaders'
+import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
@@ -120,27 +119,55 @@ function ScopedAutoDetails({ templateId }) {
     }
   }, 1000)
 
-  function handleRowsChange(group, nextSessionRows) {
-    setSessionRows((prev) => ({ ...prev, [group]: nextSessionRows }))
-    const headers = sheetsByGroup[group]?.headers || []
-    saveGroup(group, headers, mergedRowsFor(group, nextSessionRows))
+  // Pads `rows` with blank rows up to `length`, using `group`'s own headers
+  // for the blanks — used both to keep every group row-count-synced with
+  // Product Details (handleRowsChange below) and to make sure a
+  // cross-group update always has somewhere to land (applyCrossGroupUpdates).
+  function extendRows(group, rows, length) {
+    if (rows.length >= length) return rows
+    const groupHeaders = sheetsByGroup[group]?.headers || []
+    return [...rows, ...Array.from({ length: length - rows.length }, () => blankRow(groupHeaders))]
   }
 
-  // Product Details' own row is the one true picker (its other connector
-  // headers elsewhere — Compulsory/Optional's Product Number, Prefill's
-  // Brand — are disabled/read-only mirrors, see withDefaultHeaders in
-  // TemplateSettingsWizard.jsx). Once picking/typing there resolves an
-  // existing product, fan that resolved row out into every other group's
-  // own current row and persist each one — this is a side effect of the
-  // Product Details pick, not something the user will separately go type
-  // into those other groups to trigger.
-  function applyCrossGroupUpdates(updates) {
+  // Every group is one logical sheet of the same set of products — row i in
+  // Product Details, Compulsory, Prefill and Optional is all one product,
+  // no matter which of them you're actually typing in ("every group is
+  // based on one sheet[s]"). So the moment *any* group grows a new row
+  // (SheetGrid's own always-one-trailing-blank-row behavior, once its
+  // current last row stops being empty), every other group grows to match
+  // too, blank rows ready to receive whatever propagates into them next —
+  // not just whichever tab you happen to be on staying ahead while the
+  // others lag behind at fewer rows.
+  function handleRowsChange(group, nextSessionRows) {
+    const nextAll = { ...sessionRows, [group]: nextSessionRows }
+    const headers = sheetsByGroup[group]?.headers || []
+    saveGroup(group, headers, mergedRowsFor(group, nextSessionRows))
+
+    const targetLength = nextSessionRows.length
+    for (const g of ALL_GROUPS) {
+      if (g === group) continue
+      const rows = sessionRows[g] || []
+      if (rows.length < targetLength) {
+        const extended = extendRows(g, rows, targetLength)
+        nextAll[g] = extended
+        saveGroup(g, sheetsByGroup[g]?.headers || [], mergedRowsFor(g, extended))
+      }
+    }
+    setSessionRows(nextAll)
+  }
+
+  // Fans a source group's row out into the *same row index* in every other
+  // group whose headers are connected to it (row i everywhere is the same
+  // product — see handleRowsChange above) and persists each one — this is
+  // always a side effect of editing the source header itself, never
+  // something the user separately goes and types into the connected
+  // (often disabled/read-only, see withDefaultHeaders in
+  // TemplateSettingsWizard.jsx) fields elsewhere to trigger by hand.
+  function applyCrossGroupUpdates(rowIndex, updates) {
     const nextSessionRows = { ...sessionRows }
     for (const [group, fields] of Object.entries(updates)) {
-      const rows = sessionRows[group] || []
-      if (rows.length === 0) continue
-      const lastIdx = rows.length - 1
-      const nextRows = rows.map((r, i) => (i === lastIdx ? { ...r, ...fields } : r))
+      const rows = extendRows(group, sessionRows[group] || [], rowIndex + 1)
+      const nextRows = rows.map((r, i) => (i === rowIndex ? { ...r, ...fields } : r))
       nextSessionRows[group] = nextRows
       saveGroup(group, sheetsByGroup[group]?.headers || [], mergedRowsFor(group, nextRows))
     }
@@ -242,15 +269,6 @@ function ScopedAutoDetails({ templateId }) {
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
 
-      {sheet && sheet.headers.some((h) => h.dataType === 'image') && (
-        <BulkImageDropZone
-          headers={sheet.headers}
-          rows={activeSessionRows}
-          onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
-          uploadUrl={`/api/listing-tools/${templateId}/images`}
-        />
-      )}
-
       {sheet && (
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
           <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} />
@@ -260,12 +278,18 @@ function ScopedAutoDetails({ templateId }) {
             onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
-            onCellChange={(headerId, value) => {
+            onCellChange={(headerId, value, rowIndex, row) => {
               const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, sheetsByGroup)
-              if (activeGroup === 'design_system') {
-                const crossGroupUpdates = propagateFromDesignSystem(headerId, value, -1, sheetsByGroup)
-                if (crossGroupUpdates) applyCrossGroupUpdates(crossGroupUpdates)
-              }
+              // `row` already has this edit applied (see SheetGrid.jsx's
+              // resolveRow); merge in whatever Rule A just resolved too, so
+              // picking an *existing* record propagates its full row, not
+              // just the one field that was clicked. Always attempted, for
+              // whichever group is currently active — connected headers
+              // work the same regardless of which group is the source; a
+              // group with nothing linked back to it is just a no-op here.
+              const fullRow = { ...row, ...(sameGroupExtra || {}) }
+              const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, sheetsByGroup)
+              if (crossGroupUpdates) applyCrossGroupUpdates(rowIndex, crossGroupUpdates)
               return sameGroupExtra
             }}
             onHeaderChange={handleHeaderChange}

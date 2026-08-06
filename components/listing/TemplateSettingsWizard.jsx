@@ -126,10 +126,27 @@ function detectColumnDropdownValues(dataRows, colIdx) {
 // "Select…", "Choose an option", "N/A", "--", "TBD" are instruction/filler
 // text a validation sheet sometimes has sitting in with the real options,
 // not real values to offer in a dropdown.
-function isPlaceholderValue(value) {
-  // "select"/"choose" cover short instruction phrases too ("Select an
-  // option", "Choose one") — up to 3 trailing words, not just one.
-  return /^(select|choose)(\s+\S+){0,3}$/i.test(value) || /^(none|null|undefined|n\/?a|tbd|--+|\.+)$/i.test(value)
+function isPlaceholderValue(value, headerName = '') {
+  if (value === undefined || value === null) return true;
+  
+  const str = String(value).trim();
+  if (str === '') return true;
+
+  // 1. Check if the value is literally identical to the column header itself
+  if (headerName && str.toLowerCase() === headerName.trim().toLowerCase()) {
+    return true;
+  }
+
+  // 2. Instruction phrases (e.g., "Select the HSN ID from the dropdown", "Enter Product GST %")
+  const isInstruction = /^(select|choose|enter|type|pick)(\s+\S+)*$/i.test(str);
+  
+  // 3. Header-like defaults (e.g., "Product GST %", "Item Category", "Default Value")
+  const isHeaderDefault = /^product\s+.*%$/i.test(str); 
+
+  // 4. Standard null/empty markers
+  const isNullMarker = /^(none|null|undefined|n[\/\s-]?a|tbd|-+|\.+)$/i.test(str);
+
+  return isInstruction || isHeaderDefault || isNullMarker;
 }
 // Real master sheets are often named things like "Blouses-Fill this" —
 // smart-select the Product Data Sheet by name instead of always defaulting
@@ -190,6 +207,24 @@ function matchGroupLabel(label) {
   return null
 }
 
+// A Dropdown Reference / Validations sheet almost never shares the master
+// sheet's fixed 3-row (title / group-label / header) layout that
+// findHeaderRowIndex assumes — it's typically a plain sheet with real
+// column headers on its first row and option values directly beneath.
+// Reusing HEADER_ROW_INDEX here used to read row 3 as the header row on
+// sheets whose real headers sit at row 1, silently treating option *values*
+// as bogus "header names" and breaking auto-match/auto-extract entirely.
+// Scans the first few rows for the first one with 2+ filled cells (a real
+// multi-column header row — a lone title cell in a merged row only ever
+// fills its first column), falling back to row 0 for a single-column sheet.
+function findDropdownHeaderRowIndex(aoa) {
+  for (let i = 0; i < Math.min(aoa.length, 5); i++) {
+    const filled = (aoa[i] || []).filter((v) => String(v ?? '').trim() !== '').length
+    if (filled >= 2) return i
+  }
+  return 0
+}
+
 // Section 2 is now a single Product Data Sheet + a single (optional)
 // Dropdown Reference Sheet, matching source/11.html exactly — no more
 // multi-sheet checkbox selection.
@@ -200,7 +235,7 @@ function buildDropdownColumns(XLSX, workbook, dropdownSheetName) {
   if (!ws) return out
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
   if (!aoa.length) return out
-  const headerRowIdx = findHeaderRowIndex(aoa)
+  const headerRowIdx = findDropdownHeaderRowIndex(aoa)
   const headerRow = (aoa[headerRowIdx] || []).map((v) => String(v ?? '').trim())
   const dataRows = aoa.slice(headerRowIdx + 1)
   headerRow.forEach((col, colIdx) => {
@@ -1028,11 +1063,24 @@ export default function TemplateSettingsWizard({ templateId }) {
                 </span>
               </div>
             )}
+            {/* uploadSourceFile (Section 1) is fire-and-forget so the rest of
+                the wizard never blocks on it — but Save itself must wait: if
+                it fires while the upload is still in flight, `sourceFileUrl`
+                state is still '' and gets saved as null permanently (nothing
+                retries it afterward), silently losing format-preserving
+                export for this template's whole lifetime. Blocking Save
+                here, not the rest of the wizard, is the fix. */}
+            {!isEditMode && uploadingSource && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>Still saving your original file — wait a moment before saving, or exports won&apos;t match its exact sheet names/columns.</span>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3">
               <p className="text-[12px] text-gray-500">
                 Will be saved as <span className="font-semibold text-gray-700">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
               </p>
-              <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0} onClick={handleSave}>
+              <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0 || uploadingSource} onClick={handleSave}>
                 {isEditMode ? 'Save Changes' : 'Save Template'}
               </PillButton>
             </div>

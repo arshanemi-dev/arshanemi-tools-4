@@ -4,6 +4,7 @@ import ComboboxCell from './ComboboxCell'
 import MultiSelectCell from './MultiSelectCell'
 import ImageCell from './ImageCell'
 import { evaluateFormula, recomputeFormulas } from './formula'
+import { useBulkImageUpload } from './useBulkImageUpload'
 
 function isRowEmpty(row) {
   return Object.values(row || {}).every((v) => v === undefined || v === null || String(v).trim() === '')
@@ -45,29 +46,57 @@ export default function SheetGrid({
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
-  function updateCell(rowIndex, headerId, value) {
-    let next = rows.map((r, i) => (i === rowIndex ? { ...r, [headerId]: value } : r))
+  // One shared bulk-upload session for the whole grid — any ImageCell that
+  // receives more than one file at once delegates to this instead of its
+  // own single-file path, so a multi-select from inside a cell behaves
+  // exactly like the dedicated BulkImageDropZone toolbar above the grid:
+  // same row-by-row empty-box fill, same capacity check, same progress UI.
+  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl })
+
+  // Cascade a single cell's new value into the rest of that same row —
+  // connected-header auto-fill, then formula recompute (in that order, so a
+  // formula referencing a just-auto-filled column sees the fresh value).
+  function resolveRow(rowIndex, headerId, value, baseRow) {
+    let row = { ...baseRow, [headerId]: value }
     if (onCellChange) {
-      const extra = onCellChange(headerId, value, rowIndex, next[rowIndex])
-      if (extra) next = next.map((r, i) => (i === rowIndex ? { ...r, ...extra } : r))
+      const extra = onCellChange(headerId, value, rowIndex, row)
+      if (extra) row = { ...row, ...extra }
     }
-    // Formula-type headers recompute last, after any connected-header
-    // auto-fill above, so a formula referencing a just-auto-filled column
-    // (e.g. Selling Price off an auto-filled Cost) sees the fresh value.
-    const formulaExtra = recomputeFormulas(sortedHeaders, next[rowIndex])
-    if (formulaExtra) next = next.map((r, i) => (i === rowIndex ? { ...r, ...formulaExtra } : r))
-    const isLastRow = rowIndex === rows.length - 1
-    if (isLastRow && !isRowEmpty(next[rowIndex])) {
-      next.push(Object.fromEntries(sortedHeaders.map((h) => [h.id, ''])))
-    }
-    onRowsChange(next)
+    const formulaExtra = recomputeFormulas(sortedHeaders, row)
+    if (formulaExtra) row = { ...row, ...formulaExtra }
+    return row
+  }
+
+  // Appends one blank trailing row once the edited row (only ever the
+  // sheet's previous last row) is no longer empty — the usual
+  // always-one-trailing-blank-row invariant.
+  function withTrailingBlankRow(next, rowIndex) {
+    if (rowIndex !== rows.length - 1 || isRowEmpty(next[rowIndex])) return next
+    return [...next, Object.fromEntries(sortedHeaders.map((h) => [h.id, '']))]
+  }
+
+  // Multi Select stores every picked option as one comma-joined string in
+  // this single cell (see MultiSelectCell.jsx) — the grid stays one row per
+  // product, easy to browse/edit. That combined value only splits into one
+  // row per option at export time (see lib/exports/expandMultiSelectRows.js),
+  // never here — this cell is otherwise just a normal cell edit.
+  function updateCell(rowIndex, headerId, value) {
+    const updatedRow = resolveRow(rowIndex, headerId, value, rows[rowIndex])
+    const next = rows.map((r, i) => (i === rowIndex ? updatedRow : r))
+    onRowsChange(withTrailingBlankRow(next, rowIndex))
   }
 
   const selectableRowIndexes = rows.map((r, i) => i).filter((i) => !isRowEmpty(rows[i]))
   const allSelected = selectable && selectableRowIndexes.length > 0 && selectableRowIndexes.every((i) => selectedIds.includes(i))
 
   return (
-    <div className="overflow-auto border border-gray-200 rounded-lg bg-white">
+    <div className="border border-gray-200 rounded-lg bg-white">
+      {bulk.message && (
+        <div className="px-3 py-2 border-b border-gray-200">
+          <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-gray-500'}`}>{bulk.message.text}</p>
+        </div>
+      )}
+      <div className="overflow-auto">
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr className="bg-white">
@@ -150,18 +179,35 @@ export default function SheetGrid({
               {sortedHeaders.map((h) => (
                 <td key={h.id} className="border-b border-r border-gray-200 p-0 align-middle">
                   {h.dataType === 'image' ? (
-                    <ImageCell value={row[h.id]} onChange={(url) => updateCell(rowIndex, h.id, url)} uploadUrl={uploadUrl} disabled={readOnly || h.disabled} />
+                    <ImageCell
+                      value={row[h.id]}
+                      onChange={(url) => updateCell(rowIndex, h.id, url)}
+                      uploadUrl={uploadUrl}
+                      disabled={readOnly || h.disabled}
+                      onMultipleFiles={bulk.handleFiles}
+                      bulkStatus={bulk.slotStatus[`${rowIndex}:${h.id}`]}
+                    />
                   ) : h.dataType === 'dropdown' ? (
                     <ComboboxCell value={row[h.id] || ''} options={h.dropdownSource?.values || []} onChange={(v) => updateCell(rowIndex, h.id, v)} disabled={readOnly || h.disabled} />
                   ) : h.dataType === 'multiselect' ? (
                     <MultiSelectCell value={row[h.id] || ''} options={h.dropdownSource?.values || []} onChange={(v) => updateCell(rowIndex, h.id, v)} disabled={readOnly || h.disabled} />
                   ) : h.dataType === 'formula' ? (
-                    <div
+                    // Editable, same "fill if blank, never overwrite" rule
+                    // SKU assignment uses — auto-computes into the cell once
+                    // (via updateCell's recomputeFormulas, triggered by any
+                    // change elsewhere in this row) but the user can still
+                    // type over it here, and their value sticks. The
+                    // computed suggestion shows as a placeholder (not the
+                    // real value) whenever the cell is genuinely still blank.
+                    <input
+                      type="text"
+                      value={row[h.id] ?? ''}
+                      placeholder={String(evaluateFormula(h.formula, row, sortedHeaders) ?? '') || undefined}
+                      onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
+                      disabled={readOnly || h.disabled}
                       title={h.formula || undefined}
-                      className="w-full min-w-[110px] px-3 py-2 text-gray-500 italic bg-gray-50/60"
-                    >
-                      {evaluateFormula(h.formula, row, sortedHeaders) || '—'}
-                    </div>
+                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 italic focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400 placeholder:not-italic placeholder:text-gray-400"
+                    />
                   ) : (
                     <input
                       type="text"
@@ -178,6 +224,7 @@ export default function SheetGrid({
           ))}
         </tbody>
       </table>
+      </div>
       {/* One shared <datalist> per column with suggestions — a native
           browsable dropdown that still lets you type a value that isn't in
           the list yet (a brand-new product), unlike ComboboxCell which only

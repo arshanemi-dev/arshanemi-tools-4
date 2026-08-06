@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, Download, UploadCloud, ArrowLeft } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
-import BulkImageDropZone from '@/components/listing/BulkImageDropZone'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
@@ -144,15 +143,6 @@ function ScopedPrefillDetails({ templateId }) {
           </PillButton>
         </div>
       </div>
-
-      {sheet && sheet.headers.some((h) => h.dataType === 'image') && (
-        <BulkImageDropZone
-          headers={sheet.headers}
-          rows={sheet.rows}
-          onRowsChange={saveRows}
-          uploadUrl={`/api/listing-tools/${templateId}/images`}
-        />
-      )}
 
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
         {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}

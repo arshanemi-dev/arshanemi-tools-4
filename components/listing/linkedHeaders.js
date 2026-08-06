@@ -94,32 +94,59 @@ export function buildPickerOptions(headers, sheetsByGroup) {
 
 // Only meaningful in a workspace where multiple groups' "current" rows are
 // being filled in side-by-side for one new listing (see
-// app/listing-tools/auto-details/page.js) — Product Details' own unique-key
-// header is the one true picker (Rule A); every other group's own copy of
-// that connector (e.g. Compulsory/Optional's "Product Number", Prefill's
-// "Brand") is a disabled, read-only mirror (see the `disabled` header flag)
-// that only ever gets its value from here, never from being clicked into
-// directly. Call this alongside resolveLinkedFill whenever the *design_system*
-// group's own row changes — once its own row resolves against an existing
-// product (Rule A), this fans that resolved row out to every other group's
-// headers linked to design_system, returning `{[group]: {[headerId]: value}}`
-// to merge into each of their own current rows.
-export function propagateFromDesignSystem(changedHeaderId, changedValue, rowIndex, sheetsByGroup) {
-  const designSheet = sheetsByGroup.design_system
-  if (!designSheet) return null
-  const resolved = resolveLinkedFill(designSheet.headers, changedHeaderId, changedValue, rowIndex, sheetsByGroup)
-  if (!resolved) return null
-  const fullRow = { [changedHeaderId]: changedValue, ...resolved }
+// app/listing-tools/auto-details/page.js) — every group is one logical
+// sheet of the same set of products, so filling in a header that other
+// headers are connected to should always fan out to every one of those
+// children, the same way, regardless of which group happens to be the
+// source. Product Details is the most common source (every default
+// connector — Compulsory/Optional's Product Number, Prefill's Brand — links
+// back to it), but nothing here assumes that: pass whichever group's row
+// just changed as `sourceGroup` and this finds every header in every
+// *other* group connected to it — either explicitly (`linkedGroup`/
+// `linkedHeaderId`, Rule B) or, for a header with no explicit connection at
+// all, implicitly by sharing the exact same label as one of the source
+// group's own headers (e.g. both groups happening to have their own
+// "Highlights" column) — "all Headers fields" auto-fill without needing
+// every single matching field wired up by hand in Advanced Settings first.
+// An explicit link always wins over the implicit label fallback for a
+// given header; the fallback only ever looks at headers with no
+// `linkedGroup` set at all, so it can never silently override an
+// intentional connection to some *other* group.
+//
+// Takes `sourceRow`'s *current full state* directly — not a separate
+// lookup — and fans out whatever's already filled in it. This deliberately
+// does NOT require that row to match an already-saved record (an earlier
+// version called resolveLinkedFill internally and bailed out unless it
+// did, which meant a brand-new product being typed for the first time —
+// the normal case in Auto Listing — never propagated anywhere, since
+// there's nothing existing yet to "match"). Whatever's typed right now —
+// new or a re-picked existing record — is what gets propagated; call this
+// with the row *after* Rule A's own same-sheet resolution has already been
+// merged in, so a picked existing record's full resolved row (not just the
+// one field that changed) propagates too. Returns
+// `{[group]: {[headerId]: value}}` to merge into each other group's own
+// current row, or `null` if there's nothing (yet) to send.
+export function propagateFromGroup(sourceGroup, sourceRow, sheetsByGroup) {
+  const sourceHeaders = sheetsByGroup[sourceGroup]?.headers || []
+  const sourceByLabel = new Map(
+    sourceHeaders.map((h) => [h.label?.trim().toLowerCase(), h]).filter(([label]) => label)
+  )
 
   const updates = {}
   for (const [group, sheet] of Object.entries(sheetsByGroup)) {
-    if (group === 'design_system') continue
+    if (group === sourceGroup) continue
     for (const h of sheet.headers) {
-      if (h.linkedGroup !== 'design_system' || !h.linkedHeaderId) continue
-      if (h.linkedHeaderId in fullRow) {
-        updates[group] = updates[group] || {}
-        updates[group][h.id] = fullRow[h.linkedHeaderId]
+      let sourceHeaderId = null
+      if (h.linkedGroup === sourceGroup && h.linkedHeaderId) {
+        sourceHeaderId = h.linkedHeaderId
+      } else if (!h.linkedGroup) {
+        sourceHeaderId = sourceByLabel.get(h.label?.trim().toLowerCase())?.id || null
       }
+      if (!sourceHeaderId) continue
+      const value = sourceRow?.[sourceHeaderId]
+      if (value === undefined || value === null || String(value).trim() === '') continue
+      updates[group] = updates[group] || {}
+      updates[group][h.id] = value
     }
   }
   return Object.keys(updates).length ? updates : null
