@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ChevronDown, ChevronUp, Download, Trash2 } from 'lucide-react'
 import PillButton from './PillButton'
 import SheetGrid from './SheetGrid'
+import BulkImageDropZone from './BulkImageDropZone'
 import SheetUploadButton from './SheetUploadButton'
 import useTemplateExport from './useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
@@ -94,6 +95,14 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
                   </PillButton>
                   <PillButton variant="delete" icon={Trash2} onClick={handleDelete}>Delete Brand</PillButton>
                 </div>
+                {prefillSheet.headers.some((h) => h.dataType === 'image') && (
+                  <BulkImageDropZone
+                    headers={prefillSheet.headers}
+                    rows={prefillSheet.rows}
+                    onRowsChange={handleRowsChange}
+                    uploadUrl={`/api/listing-tools/${template.id}/images`}
+                  />
+                )}
                 <SheetGrid
                   headers={prefillSheet.headers}
                   rows={prefillSheet.rows}

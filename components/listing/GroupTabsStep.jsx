@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Image as ImageIcon, Type, ListFilter, ListChecks, Calculator, Key, Lock, Pencil, Layers, Plus, Settings, X, Trash2 } from 'lucide-react'
+import { Image as ImageIcon, Type, ListFilter, ListChecks, Calculator, Key, Lock, Pencil, Layers, Plus, Settings, X, Trash2, Copy, ClipboardPaste } from 'lucide-react'
 
 export const UNMAPPED_TAB_ID = 'unmapped'
 
@@ -45,6 +45,20 @@ const DEFAULT_TAB_COLOR = {
 
 const fieldLabelCls = 'text-[11px] font-semibold text-gray-500 uppercase tracking-wide'
 
+// Identity badge (per the user's ask: "some identity mentioned this is
+// default headers... this is created... this is by sheets") — where a
+// header actually came from: a built-in default (defaultHeaders.json), the
+// uploaded Product Data Sheet, or hand-added via "+ Add Header". Set on
+// every field by TemplateSettingsWizard.jsx (buildFields/addHeaderToGroup/
+// withDefaultHeaders), read-only here — purely informational, never edited
+// from the card itself.
+const SOURCE_LABEL = { default: 'Default', upload: 'From Sheet', manual: 'Manual' }
+const SOURCE_BADGE_CLS = {
+  default: 'bg-purple-100 text-purple-700',
+  upload: 'bg-gray-100 text-gray-600',
+  manual: 'bg-emerald-100 text-emerald-700',
+}
+
 // Section 3 of Template Settings — a Kanban board (source/11.html's "CRM
 // Kanban Multi-Column View"): every group renders as its own column,
 // side-by-side, instead of one active tab at a time. Cards move between
@@ -64,6 +78,12 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
   const [advancedOpenIds, setAdvancedOpenIds] = useState(() => new Set())
   const [tabColors, setTabColors] = useState({}) // { [tabId]: colorKey } — overrides DEFAULT_TAB_COLOR, UI-only
   const [colorPickerOpenId, setColorPickerOpenId] = useState(null)
+  // Copy/Paste dropdown options across fields — a plain array of strings,
+  // not the OS clipboard, so it works the same regardless of browser
+  // clipboard permissions and never leaves this board. Shared across every
+  // card/column so "Copy" on one field's options and "Paste" on any other
+  // dropdown-like field (same or different group) just works.
+  const [copiedValues, setCopiedValues] = useState(null)
 
   const unmappedFields = fields.filter((f) => f.groupId === UNMAPPED_TAB_ID)
 
@@ -331,9 +351,12 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           onMouseDown={(e) => e.stopPropagation()}
                           className="min-w-0 flex-1 border-0 bg-transparent px-0 py-0.5 text-[13px] font-semibold text-gray-800 focus:outline-none focus:ring-0"
                         />
-                        {/* <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClassFor(field.groupId)}`}>
-                          {tab.label}
-                        </span> */}
+                        <span
+                          title="Where this header came from"
+                          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${SOURCE_BADGE_CLS[field.source] || SOURCE_BADGE_CLS.upload}`}
+                        >
+                          {SOURCE_LABEL[field.source] || 'From Sheet'}
+                        </span>
                         {/* Advanced settings toggle — right side of the card.
                             Unique key part lives behind this now instead of
                             always taking up card space; the small key icon
@@ -414,7 +437,37 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           re-pickable here. */}
                       {DROPDOWN_LIKE_TYPES.includes(field.dataType) && (
                         <div className="flex flex-col gap-1.5">
-                          <label className={fieldLabelCls}>Dropdown Values</label>
+                          <div className="flex items-center justify-between gap-2">
+                            <label className={fieldLabelCls}>Dropdown Values</label>
+                            {/* Copy this field's whole option list, Paste it
+                                onto any other dropdown-like field — saves
+                                retyping the same values (e.g. Size options)
+                                across several headers by hand. Paste
+                                replaces the target's current list outright,
+                                same as a normal copy/paste would. */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setCopiedValues(field.dropdownValues || [])}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                disabled={!(field.dropdownValues || []).length}
+                                title="Copy these options"
+                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-gray-500 hover:bg-gray-100 hover:text-indigo-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                              >
+                                <Copy className="w-3 h-3" /> Copy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onUpdateField(field.id, { dropdownValues: [...copiedValues] })}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                disabled={!copiedValues}
+                                title={copiedValues ? `Paste ${copiedValues.length} value${copiedValues.length === 1 ? '' : 's'}` : 'Copy a dropdown\'s values first'}
+                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-gray-500 hover:bg-gray-100 hover:text-indigo-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                              >
+                                <ClipboardPaste className="w-3 h-3" /> Paste
+                              </button>
+                            </div>
+                          </div>
                           <div className="rounded-md border border-gray-200 bg-gray-50 p-1.5">
                             <input
                               type="text"

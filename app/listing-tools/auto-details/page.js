@@ -5,6 +5,7 @@ import { Search, Download, UploadCloud, PlusCircle } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
+import BulkImageDropZone from '@/components/listing/BulkImageDropZone'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
@@ -83,12 +84,15 @@ function ScopedAutoDetails({ templateId }) {
   )
 
   const sheet = sheetsByGroup[activeGroup]
+  const activeSessionRows = useMemo(
+    () => sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : []),
+    [sessionRows, activeGroup, sheet]
+  )
   const filteredRows = useMemo(() => {
-    const activeRows = sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : [])
-    if (!search.trim()) return activeRows
+    if (!search.trim()) return activeSessionRows
     const q = search.toLowerCase()
-    return activeRows.filter((r, i) => i === activeRows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
-  }, [sessionRows, activeGroup, sheet, search])
+    return activeSessionRows.filter((r, i) => i === activeSessionRows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
+  }, [activeSessionRows, search])
 
   function onChangeGroup(g) {
     setActiveGroup(g)
@@ -237,6 +241,15 @@ function ScopedAutoDetails({ templateId }) {
       </div>
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
+
+      {sheet && sheet.headers.some((h) => h.dataType === 'image') && (
+        <BulkImageDropZone
+          headers={sheet.headers}
+          rows={activeSessionRows}
+          onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
+          uploadUrl={`/api/listing-tools/${templateId}/images`}
+        />
+      )}
 
       {sheet && (
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">

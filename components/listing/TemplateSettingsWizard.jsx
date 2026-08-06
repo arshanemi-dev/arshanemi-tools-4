@@ -9,6 +9,7 @@ import GroupTabsStep, { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import PresetExportSection from './PresetExportSection'
 import AiRulesSection from './AiRulesSection'
 import { HEADER_ROW_INDEX } from '@/lib/listingSheetLayout'
+import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
 
 // Same 4 groups every other Listing Tools screen renders against (see
 // SheetTabs.jsx's TABS / lib/listingTemplates.js GROUPS) — kept as its own
@@ -292,92 +293,86 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
       // an upload, only ever set by hand via the Formula field type.
       formula: '',
       disabled: false,
+      // Identity — extracted from the uploaded Product Data Sheet, not a
+      // built-in default (source: 'default') or hand-added (source: 'manual').
+      source: 'upload',
     })
   })
   return fields
 }
 
-// Task 1: every new template's Product Details group is guaranteed these 12
-// baseline columns, matching the real master-sheet convention, and Prefill
-// always gets its own "Product Number" — pre-linked to Product Details' own
-// Product Number (see linkedHeaders.js) — so a freshly-created template is
-// immediately usable with the connected-headers feature without the user
-// having to add and wire that column by hand first. Called only from the
-// create-mode upload flow (buildFields' caller below) — never applied to an
-// existing template on reload, per the confirmed "new templates only" scope.
-// "Variations" (was "Size") and "Selling Price" are handled separately below
-// this list — the first needs a forced Multi Select type, the second a
-// Formula — everything else here just takes the plain text/image defaults
-// detectDataType() already infers from the label.
-const DEFAULT_PRODUCT_DETAILS_HEADERS = [
-  'Product Number', 'Cost', 'Highlights', 'Brand', 'MRP',
-  'Image 1', 'Image 2', 'Image 3', 'Image 4', 'Image 5', 'Image 6', 'Image 7',
-]
+// Task 1: every new template's Product Details group is guaranteed a set of
+// baseline columns, and every other group gets its own connector field
+// pre-linked back to Product Details (see linkedHeaders.js) — so a
+// freshly-created template is immediately usable with the connected-headers
+// feature without the user having to add and wire those columns by hand
+// first. Called only from the create-mode upload flow (buildFields' caller
+// below) — never applied to an existing template on reload, per the
+// confirmed "new templates only" scope.
+//
+// The actual field list/types/links live in ONE place —
+// components/listing/defaultHeaders.json — not scattered across this file,
+// so "what are the defaults" is answerable by reading one JSON object
+// instead of tracing through JS. Shape: `{ [groupId]: [{ label, dataType,
+// isUniqueKeyPart?, disabled?, formula?, linkedGroup?, linkedLabel? }] }`.
+// `linkedGroup`/`linkedLabel` (a label, not an id — ids don't exist until
+// generated below) get resolved to a real `linkedHeaderId` at generation
+// time, which is why design_system's own entries are always added first.
+//
+// Column order: default headers always come first (index 0+) within each
+// group, with whatever the uploaded sheet itself contributes following
+// after — `fields` (the upload) is appended *after* the generated defaults,
+// never merged in place, so every new template's baseline columns land in
+// the same predictable position regardless of what a given upload happens
+// to contain. This only runs once, at creation time — a user manually
+// reordering/renaming/dragging afterward is a later, separate edit to
+// `fields` state and is naturally preserved as-is, not fought by this.
 function withDefaultHeaders(fields) {
-  const next = [...fields]
-  let counter = next.length
+  const added = []
+  let counter = fields.length
   const hasLabel = (groupId, label) =>
-    next.some((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase())
+    fields.some((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase()) ||
+    added.some((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase())
+  const findByLabel = (groupId, label) =>
+    added.find((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase()) ||
+    fields.find((f) => f.groupId === groupId && f.label.trim().toLowerCase() === label.toLowerCase())
 
-  function addDefault(groupId, label, extra = {}) {
+  function addDefault(groupId, config) {
+    const { label, linkedGroup, linkedLabel, ...rest } = config
     if (hasLabel(groupId, label)) return
     counter += 1
-    next.push({
+    const linkedHeader = linkedGroup && linkedLabel ? findByLabel(linkedGroup, linkedLabel) : null
+    added.push({
       id: `hdr_${slugify(label)}_default_${counter}`,
       label,
       description: '',
       groupId,
-      dataType: detectDataType(label),
+      dataType: 'text',
       dropdownColumn: '',
       dropdownValues: [],
       sourceColIndex: undefined,
-      isUniqueKeyPart: /design|number/i.test(label),
-      linkedGroup: null,
-      linkedHeaderId: null,
+      isUniqueKeyPart: false,
+      linkedGroup: linkedHeader ? linkedGroup : null,
+      linkedHeaderId: linkedHeader ? linkedHeader.id : null,
       formula: '',
       disabled: false,
-      ...extra,
+      // Identity — this header exists because it's a built-in default, not
+      // because it came off an uploaded sheet or was hand-added. See
+      // buildFields (source: 'upload') and addHeaderToGroup below
+      // (source: 'manual'); shown as a badge on the card in GroupTabsStep.
+      source: 'default',
+      ...rest,
     })
   }
 
-  for (const label of DEFAULT_PRODUCT_DETAILS_HEADERS) addDefault('design_system', label)
-
-  // Variations (renamed from Size) is a Multi Select — a product can come
-  // in more than one variation at once, unlike the old single-value Size.
-  addDefault('design_system', 'Variations', { dataType: 'multiselect' })
-
-  // Selling Price is computed from MRP, not typed by hand — seeded with the
-  // simplest defensible formula (a direct passthrough); flagged to the user
-  // to confirm the actual markup/discount they want instead of guessing one.
-  addDefault('design_system', 'Selling Price', { dataType: 'formula', formula: '[MRP]' })
-
-  const designProductNumber = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'product number')
-  const designBrand = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'brand')
-
-  // Every non-Product-Details group gets its own "Product Number" connector
-  // by default, linked back to Product Details' own — disabled (read-only)
-  // since Product Details' own Product Number is the one true picker; these
-  // are synced mirrors, filled by the cross-group cascade in
-  // app/listing-tools/auto-details/page.js, not clicked into directly.
-  // Prefill's equivalent default is named "Brand" (its own natural identity
-  // field, not a repeated "Product Number") and links to Product Details'
-  // own "Brand" header instead.
-  for (const groupId of ['compulsory', 'optional']) {
-    addDefault(groupId, 'Product Number', {
-      isUniqueKeyPart: true,
-      disabled: true,
-      linkedGroup: designProductNumber ? 'design_system' : null,
-      linkedHeaderId: designProductNumber ? designProductNumber.id : null,
-    })
+  // design_system first — every other group's connectors resolve their
+  // linkedHeaderId against these by label, so order matters here.
+  for (const config of DEFAULT_HEADERS_CONFIG.design_system || []) addDefault('design_system', config)
+  for (const groupId of ['compulsory', 'prefill', 'optional']) {
+    for (const config of DEFAULT_HEADERS_CONFIG[groupId] || []) addDefault(groupId, config)
   }
-  addDefault('prefill', 'Brand', {
-    isUniqueKeyPart: true,
-    disabled: true,
-    linkedGroup: designBrand ? 'design_system' : null,
-    linkedHeaderId: designBrand ? designBrand.id : null,
-  })
 
-  return next
+  return [...added, ...fields]
 }
 
 // Flattens an existing template's per-group sheets/headers (loaded from
@@ -410,6 +405,10 @@ function fieldsFromContent(content) {
         linkedHeaderId: h.linkedHeaderId || null,
         formula: h.formula || '',
         disabled: !!h.disabled,
+        // Templates saved before this existed have no `source` at all —
+        // 'upload' is the closest honest guess (most pre-existing headers
+        // came from a parsed sheet, not the newer default/manual paths).
+        source: h.source || 'upload',
       })
     }
   }
@@ -621,6 +620,9 @@ export default function TemplateSettingsWizard({ templateId }) {
       dropdownColumn: '',
       dropdownValues: [],
       isUniqueKeyPart: false,
+      // Identity — hand-added via "+ Add Header", not extracted from an
+      // upload (source: 'upload') or a built-in default (source: 'default').
+      source: 'manual',
     }])
   }
   // Removes a header entirely — not a move to Unselected, gone from `fields`
@@ -733,6 +735,7 @@ export default function TemplateSettingsWizard({ templateId }) {
         linkedHeaderId: f.linkedHeaderId || null,
         formula: f.formula || '',
         disabled: !!f.disabled,
+        source: f.source || 'upload',
         // Saves the field's own (possibly hand-edited via +/- in the card)
         // value list, not blindly the shared sheet column's raw values.
         // Multi Select shares this same option list — only the fill-time

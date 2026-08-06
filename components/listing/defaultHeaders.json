@@ -1,0 +1,56 @@
+{
+  "design_system": [
+    { "label": "Product Number", "dataType": "text", "isUniqueKeyPart": true },
+    { "label": "Cost", "dataType": "text" },
+    { "label": "Highlights", "dataType": "text" },
+    { "label": "Brand", "dataType": "text" },
+     { "label": "Variations", "dataType": "multiselect" },
+    { "label": "Selling Price", "dataType": "formula", "formula": "[Cost+250]" },
+    { "label": "SKU", "dataType": "formula", "formula": "[Product Number]-[Variations]" },
+    { "label": "Image 1", "dataType": "image" },
+    { "label": "Image 2", "dataType": "image" },
+    { "label": "Image 3", "dataType": "image" },
+    { "label": "Image 4", "dataType": "image" },
+    { "label": "Image 5", "dataType": "image" },
+    { "label": "Image 6", "dataType": "image" },
+    { "label": "Image 7", "dataType": "image" }
+  ],
+  "compulsory": [
+    {
+      "label": "Product Number",
+      "dataType": "text",
+      "isUniqueKeyPart": true,
+      "disabled": true,
+      "linkedGroup": "design_system",
+      "linkedLabel": "Product Number"
+    }
+  ],
+  "prefill": [
+    {
+      "label": "Brand",
+      "dataType": "text",
+      "isUniqueKeyPart": true,
+      "disabled": false,
+      "linkedGroup": "design_system",
+      "linkedLabel": "Brand"
+    },
+     {
+      "label": "Product Number",
+      "dataType": "text",
+      "isUniqueKeyPart": true,
+      "disabled": false,
+      "linkedGroup": "design_system",
+      "linkedLabel": "Product Number"
+    }
+  ],
+  "optional": [
+    {
+      "label": "Product Number",
+      "dataType": "text",
+      "isUniqueKeyPart": true,
+      "disabled": true, 
+      "linkedGroup": "design_system",
+      "linkedLabel": "Product Number"
+    }
+  ]
+}
