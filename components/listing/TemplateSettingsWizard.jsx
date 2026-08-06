@@ -288,6 +288,10 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
       // default, configured later in Advanced Settings.
       linkedGroup: null,
       linkedHeaderId: null,
+      // Formula (components/listing/formula.js) — never auto-detected from
+      // an upload, only ever set by hand via the Formula field type.
+      formula: '',
+      disabled: false,
     })
   })
   return fields
@@ -301,8 +305,12 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
 // having to add and wire that column by hand first. Called only from the
 // create-mode upload flow (buildFields' caller below) — never applied to an
 // existing template on reload, per the confirmed "new templates only" scope.
+// "Variations" (was "Size") and "Selling Price" are handled separately below
+// this list — the first needs a forced Multi Select type, the second a
+// Formula — everything else here just takes the plain text/image defaults
+// detectDataType() already infers from the label.
 const DEFAULT_PRODUCT_DETAILS_HEADERS = [
-  'Product Number', 'Size', 'Cost', 'Highlights', 'Brand',
+  'Product Number', 'Cost', 'Highlights', 'Brand', 'MRP',
   'Image 1', 'Image 2', 'Image 3', 'Image 4', 'Image 5', 'Image 6', 'Image 7',
 ]
 function withDefaultHeaders(fields) {
@@ -326,25 +334,48 @@ function withDefaultHeaders(fields) {
       isUniqueKeyPart: /design|number/i.test(label),
       linkedGroup: null,
       linkedHeaderId: null,
+      formula: '',
+      disabled: false,
       ...extra,
     })
   }
 
   for (const label of DEFAULT_PRODUCT_DETAILS_HEADERS) addDefault('design_system', label)
 
-  if (!hasLabel('prefill', 'Product Number')) {
-    const targetHeader = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'product number')
-    addDefault('prefill', 'Brand', {
+  // Variations (renamed from Size) is a Multi Select — a product can come
+  // in more than one variation at once, unlike the old single-value Size.
+  addDefault('design_system', 'Variations', { dataType: 'multiselect' })
+
+  // Selling Price is computed from MRP, not typed by hand — seeded with the
+  // simplest defensible formula (a direct passthrough); flagged to the user
+  // to confirm the actual markup/discount they want instead of guessing one.
+  addDefault('design_system', 'Selling Price', { dataType: 'formula', formula: '[MRP]' })
+
+  const designProductNumber = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'product number')
+  const designBrand = next.find((f) => f.groupId === 'design_system' && f.label.trim().toLowerCase() === 'brand')
+
+  // Every non-Product-Details group gets its own "Product Number" connector
+  // by default, linked back to Product Details' own — disabled (read-only)
+  // since Product Details' own Product Number is the one true picker; these
+  // are synced mirrors, filled by the cross-group cascade in
+  // app/listing-tools/auto-details/page.js, not clicked into directly.
+  // Prefill's equivalent default is named "Brand" (its own natural identity
+  // field, not a repeated "Product Number") and links to Product Details'
+  // own "Brand" header instead.
+  for (const groupId of ['compulsory', 'optional']) {
+    addDefault(groupId, 'Product Number', {
       isUniqueKeyPart: true,
-      linkedGroup: targetHeader ? 'design_system' : null,
-      linkedHeaderId: targetHeader ? targetHeader.id : null,
-    });
-     addDefault('optional', 'Product Number', {
-      isUniqueKeyPart: true,
-      linkedGroup: targetHeader ? 'design_system' : null,
-      linkedHeaderId: targetHeader ? targetHeader.id : null,
+      disabled: true,
+      linkedGroup: designProductNumber ? 'design_system' : null,
+      linkedHeaderId: designProductNumber ? designProductNumber.id : null,
     })
   }
+  addDefault('prefill', 'Brand', {
+    isUniqueKeyPart: true,
+    disabled: true,
+    linkedGroup: designBrand ? 'design_system' : null,
+    linkedHeaderId: designBrand ? designBrand.id : null,
+  })
 
   return next
 }
@@ -377,6 +408,8 @@ function fieldsFromContent(content) {
         sourceColIndex: h.sourceColIndex,
         linkedGroup: h.linkedGroup || null,
         linkedHeaderId: h.linkedHeaderId || null,
+        formula: h.formula || '',
+        disabled: !!h.disabled,
       })
     }
   }
@@ -698,9 +731,13 @@ export default function TemplateSettingsWizard({ templateId }) {
         sourceColIndex: f.sourceColIndex,
         linkedGroup: f.linkedGroup || null,
         linkedHeaderId: f.linkedHeaderId || null,
+        formula: f.formula || '',
+        disabled: !!f.disabled,
         // Saves the field's own (possibly hand-edited via +/- in the card)
         // value list, not blindly the shared sheet column's raw values.
-        dropdownSource: f.dataType === 'dropdown'
+        // Multi Select shares this same option list — only the fill-time
+        // cell (single- vs multi-pick) differs, see SheetGrid.jsx.
+        dropdownSource: (f.dataType === 'dropdown' || f.dataType === 'multiselect')
           ? {
               sheetName: dropdownColumns[f.dropdownColumn]?.sheetName || f.dropdownSheetName || null,
               columnName: f.dropdownColumn || null,

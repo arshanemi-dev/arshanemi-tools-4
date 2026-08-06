@@ -68,6 +68,26 @@ function ScopedPrefillDetails({ templateId }) {
     }
   }
 
+  // Formula headers are editable right from the grid (see SheetGrid.jsx's
+  // header-row formula box) — persists the same way a row edit does, via
+  // the sheet's PATCH route, just with an updated `headers` array instead
+  // of `rows`.
+  function handleHeaderChange(headerId, patch) {
+    if (!sheet) return
+    const nextHeaders = sheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, headers: nextHeaders } : s)) }))
+    fetch(`/api/listing-tools/${templateId}/sheets/prefill`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: nextHeaders, rows: sheet.rows }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        addToast(data.message || 'Could not save formula', 'error')
+      }
+    })
+  }
+
   async function handleUploadSheet(file) {
     if (!file || !sheet) return
     try {
@@ -134,6 +154,7 @@ function ScopedPrefillDetails({ templateId }) {
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
             onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
+            onHeaderChange={handleHeaderChange}
           />
         )}
       </div>

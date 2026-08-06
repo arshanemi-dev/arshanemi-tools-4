@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import {Search, Download, UploadCloud, ArrowLeft, PlusCircle } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import { Search, Download, UploadCloud, PlusCircle } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
@@ -9,7 +9,7 @@ import useTemplateExport from '@/components/listing/useTemplateExport'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
-import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
+import { resolveLinkedFill, buildPickerOptions, propagateFromDesignSystem } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
@@ -55,12 +55,11 @@ function blankSessionFor(sheets) {
 
 function ScopedAutoDetails({ templateId }) {
   const { addToast } = useToast()
-  const router = useRouter()
-  const [template, setTemplate] = useState(null);
-   const [search, setSearch] = useState('')
+  const [template, setTemplate] = useState(null)
+  const [search, setSearch] = useState('')
   const [content, setContent] = useState(null)
   const [sessionRows, setSessionRows] = useState({})
-  const [blockGroups, setBlockGroups] = useState(ALL_GROUPS)
+  const [activeGroup, setActiveGroup] = useState(ALL_GROUPS[0])
   const [uploading, setUploading] = useState(false)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
@@ -82,6 +81,19 @@ function ScopedAutoDetails({ templateId }) {
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
     [content]
   )
+
+  const sheet = sheetsByGroup[activeGroup]
+  const filteredRows = useMemo(() => {
+    const activeRows = sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : [])
+    if (!search.trim()) return activeRows
+    const q = search.toLowerCase()
+    return activeRows.filter((r, i) => i === activeRows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
+  }, [sessionRows, activeGroup, sheet, search])
+
+  function onChangeGroup(g) {
+    setActiveGroup(g)
+    setSearch('')
+  }
 
   // Existing (already-saved, fetched once) rows for a group, blanks
   // dropped, plus whatever's currently in this session, also blanks
@@ -110,6 +122,27 @@ function ScopedAutoDetails({ templateId }) {
     saveGroup(group, headers, mergedRowsFor(group, nextSessionRows))
   }
 
+  // Product Details' own row is the one true picker (its other connector
+  // headers elsewhere — Compulsory/Optional's Product Number, Prefill's
+  // Brand — are disabled/read-only mirrors, see withDefaultHeaders in
+  // TemplateSettingsWizard.jsx). Once picking/typing there resolves an
+  // existing product, fan that resolved row out into every other group's
+  // own current row and persist each one — this is a side effect of the
+  // Product Details pick, not something the user will separately go type
+  // into those other groups to trigger.
+  function applyCrossGroupUpdates(updates) {
+    const nextSessionRows = { ...sessionRows }
+    for (const [group, fields] of Object.entries(updates)) {
+      const rows = sessionRows[group] || []
+      if (rows.length === 0) continue
+      const lastIdx = rows.length - 1
+      const nextRows = rows.map((r, i) => (i === lastIdx ? { ...r, ...fields } : r))
+      nextSessionRows[group] = nextRows
+      saveGroup(group, sheetsByGroup[group]?.headers || [], mergedRowsFor(group, nextRows))
+    }
+    setSessionRows(nextSessionRows)
+  }
+
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
   // one-trailing-blank-row behavior. Whatever was already typed has already
@@ -117,6 +150,26 @@ function ScopedAutoDetails({ templateId }) {
   // this only clears what's on screen, never discards saved data.
   function handleCreateNew() {
     setSessionRows(blankSessionFor(content?.sheets))
+  }
+
+  // Formula headers are editable right from the grid (see SheetGrid.jsx's
+  // header-row formula box) — persists via the same sheet PATCH route,
+  // sending the merged (existing + this session's) rows alongside the
+  // updated headers so an in-progress session's rows aren't dropped.
+  function handleHeaderChange(headerId, patch) {
+    if (!sheet) return
+    const nextHeaders = sheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, headers: nextHeaders } : s)) }))
+    fetch(`/api/listing-tools/${templateId}/sheets/${activeGroup}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: nextHeaders, rows: mergedRowsFor(activeGroup, sessionRows[activeGroup]) }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        addToast(data.message || 'Could not save formula', 'error')
+      }
+    })
   }
 
   async function handleUploadOldSheet(file) {
@@ -185,28 +238,27 @@ function ScopedAutoDetails({ templateId }) {
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
 
-      {[blockGroups[0]].map((group, blockIndex) => {
-        const sheet = sheetsByGroup[group]
-        if (!sheet) return null
-        const rows = sessionRows[group] || [blankRow(sheet.headers)]
-        return (
-          <div key={blockIndex} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-            <SheetTabs
-              variant="dark"
-              active={group}
-              onChange={(g) => setBlockGroups((prev) => prev.map((x, i) => (i === blockIndex ? g : x)))}
-            />
-            <SheetGrid
-              headers={sheet.headers}
-              rows={rows}
-              onRowsChange={(nextRows) => handleRowsChange(group, nextRows)}
-              uploadUrl={`/api/listing-tools/${templateId}/images`}
-              pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
-              onCellChange={(headerId, value) => resolveLinkedFill(sheet.headers, headerId, value, -1, sheetsByGroup)}
-            />
-          </div>
-        )
-      })}
+      {sheet && (
+        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+          <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} />
+          <SheetGrid
+            headers={sheet.headers}
+            rows={filteredRows}
+            onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
+            uploadUrl={`/api/listing-tools/${templateId}/images`}
+            pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
+            onCellChange={(headerId, value) => {
+              const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, sheetsByGroup)
+              if (activeGroup === 'design_system') {
+                const crossGroupUpdates = propagateFromDesignSystem(headerId, value, -1, sheetsByGroup)
+                if (crossGroupUpdates) applyCrossGroupUpdates(crossGroupUpdates)
+              }
+              return sameGroupExtra
+            }}
+            onHeaderChange={handleHeaderChange}
+          />
+        </div>
+      )}
 
       <BillingGateModal
         gate={gate}

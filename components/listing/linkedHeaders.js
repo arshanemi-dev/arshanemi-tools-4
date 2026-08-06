@@ -91,3 +91,36 @@ export function buildPickerOptions(headers, sheetsByGroup) {
   }
   return out
 }
+
+// Only meaningful in a workspace where multiple groups' "current" rows are
+// being filled in side-by-side for one new listing (see
+// app/listing-tools/auto-details/page.js) — Product Details' own unique-key
+// header is the one true picker (Rule A); every other group's own copy of
+// that connector (e.g. Compulsory/Optional's "Product Number", Prefill's
+// "Brand") is a disabled, read-only mirror (see the `disabled` header flag)
+// that only ever gets its value from here, never from being clicked into
+// directly. Call this alongside resolveLinkedFill whenever the *design_system*
+// group's own row changes — once its own row resolves against an existing
+// product (Rule A), this fans that resolved row out to every other group's
+// headers linked to design_system, returning `{[group]: {[headerId]: value}}`
+// to merge into each of their own current rows.
+export function propagateFromDesignSystem(changedHeaderId, changedValue, rowIndex, sheetsByGroup) {
+  const designSheet = sheetsByGroup.design_system
+  if (!designSheet) return null
+  const resolved = resolveLinkedFill(designSheet.headers, changedHeaderId, changedValue, rowIndex, sheetsByGroup)
+  if (!resolved) return null
+  const fullRow = { [changedHeaderId]: changedValue, ...resolved }
+
+  const updates = {}
+  for (const [group, sheet] of Object.entries(sheetsByGroup)) {
+    if (group === 'design_system') continue
+    for (const h of sheet.headers) {
+      if (h.linkedGroup !== 'design_system' || !h.linkedHeaderId) continue
+      if (h.linkedHeaderId in fullRow) {
+        updates[group] = updates[group] || {}
+        updates[group][h.id] = fullRow[h.linkedHeaderId]
+      }
+    }
+  }
+  return Object.keys(updates).length ? updates : null
+}

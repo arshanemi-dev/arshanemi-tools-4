@@ -56,9 +56,17 @@ function ScopedProductDetails({ templateId }) {
 
   const filteredRows = useMemo(() => {
     if (!sheet) return []
-    if (!activeFilterKey || !filterValue.trim()) return sheet.rows
-    return sheet.rows.filter((r, i) => i === sheet.rows.length - 1 || String(r[activeFilterKey] ?? '').toLowerCase().includes(filterValue.toLowerCase()))
-  }, [sheet, activeFilterKey, filterValue])
+    let out = sheet.rows
+    if (activeFilterKey && filterValue.trim()) {
+      const fq = filterValue.toLowerCase()
+      out = out.filter((r, i) => i === sheet.rows.length - 1 || String(r[activeFilterKey] ?? '').toLowerCase().includes(fq))
+    }
+    if (search.trim()) {
+      const sq = search.toLowerCase()
+      out = out.filter((r, i) => i === out.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(sq)))
+    }
+    return out
+  }, [sheet, activeFilterKey, filterValue, search])
 
   function onFilterChange(headerId, value) {
     if (value === undefined) {
@@ -86,6 +94,26 @@ function ScopedProductDetails({ templateId }) {
       const data = await res.json().catch(() => ({}))
       addToast(data.message || 'Could not save changes', 'error')
     }
+  }
+
+  // Formula headers are editable right from the grid (see SheetGrid.jsx's
+  // header-row formula box) — persists the same way a row edit does, via
+  // the sheet's PATCH route, just with an updated `headers` array instead
+  // of `rows`.
+  function handleHeaderChange(headerId, patch) {
+    if (!sheet) return
+    const nextHeaders = sheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, headers: nextHeaders } : s)) }))
+    fetch(`/api/listing-tools/${templateId}/sheets/${activeGroup}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: nextHeaders, rows: sheet.rows }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        addToast(data.message || 'Could not save formula', 'error')
+      }
+    })
   }
 
   async function handleUploadOldSheet(file) {
@@ -160,6 +188,7 @@ function ScopedProductDetails({ templateId }) {
             onFilterChange={keyHeaderId ? onFilterChange : undefined}
             pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
             onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
+            onHeaderChange={handleHeaderChange}
           />
         )}
       </div>

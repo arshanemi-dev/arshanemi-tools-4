@@ -1,14 +1,20 @@
 'use client'
 import { useState } from 'react'
-import { Image as ImageIcon, Type, ListFilter, Key, Pencil, Layers, Plus, Settings, X, Trash2 } from 'lucide-react'
+import { Image as ImageIcon, Type, ListFilter, ListChecks, Calculator, Key, Lock, Pencil, Layers, Plus, Settings, X, Trash2 } from 'lucide-react'
 
 export const UNMAPPED_TAB_ID = 'unmapped'
 
 const TYPE_OPTIONS = [
   { value: 'text', label: 'Text', icon: Type },
   { value: 'dropdown', label: 'Dropdown', icon: ListFilter },
+  { value: 'multiselect', label: 'Multi Select', icon: ListChecks },
+  { value: 'formula', label: 'Formula', icon: Calculator },
   { value: 'image', label: 'Image', icon: ImageIcon },
 ]
+// Dropdown and Multi Select both edit the same `dropdownValues` option list
+// (see the "Dropdown Values" card section below) — Multi Select just lets
+// the fill-time cell hold more than one of them at once.
+const DROPDOWN_LIKE_TYPES = ['dropdown', 'multiselect']
 
 // Every class string below is written out in full (never built with
 // template-string interpolation) so Tailwind's build actually generates it —
@@ -325,9 +331,9 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           onMouseDown={(e) => e.stopPropagation()}
                           className="min-w-0 flex-1 border-0 bg-transparent px-0 py-0.5 text-[13px] font-semibold text-gray-800 focus:outline-none focus:ring-0"
                         />
-                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClassFor(field.groupId)}`}>
+                        {/* <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClassFor(field.groupId)}`}>
                           {tab.label}
-                        </span>
+                        </span> */}
                         {/* Advanced settings toggle — right side of the card.
                             Unique key part lives behind this now instead of
                             always taking up card space; the small key icon
@@ -341,6 +347,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           className={`flex shrink-0 items-center gap-0.5 rounded p-1 ${advancedOpenIds.has(field.id) ? 'bg-gray-100 text-indigo-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
                         >
                           {field.isUniqueKeyPart && <Key className="w-3 h-3 text-indigo-500" />}
+                          {field.disabled && <Lock className="w-3 h-3 text-indigo-500" />}
                           <Settings className="w-3.5 h-3.5" />
                         </button>
 
@@ -371,31 +378,41 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
 
                       <div className="flex flex-col gap-1">
                         <label className={fieldLabelCls}>Field Type</label>
-                        <div className="flex w-fit items-center gap-0.5 rounded-md bg-gray-100 p-0.5">
+                        {/* Grid, not a single flex row — 5 types (was 3) no
+                            longer fit on one line inside a fixed 300px card
+                            without wrapping/overflowing, so each button gets
+                            its own cell and wraps to more rows instead. */}
+                        <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-100 p-1">
                           {TYPE_OPTIONS.map((t) => (
                             <button
                               key={t.value}
                               type="button"
-                              onClick={() => onUpdateField(field.id, { dataType: t.value, ...(t.value !== 'dropdown' ? { dropdownColumn: '' } : {}) })}
+                              onClick={() => onUpdateField(field.id, {
+                                dataType: t.value,
+                                ...(DROPDOWN_LIKE_TYPES.includes(t.value) ? {} : { dropdownColumn: '' }),
+                                ...(t.value === 'formula' ? {} : { formula: '' }),
+                              })}
                               title={t.label}
-                              className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors ${
+                              className={`flex items-center justify-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors truncate ${
                                 field.dataType === t.value ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                               }`}
                             >
-                              <t.icon className="w-3 h-3" /> {t.label}
+                              <t.icon className="w-3 h-3 flex-shrink-0" /> <span className="truncate">{t.label}</span>
                             </button>
                           ))}
                         </div>
                       </div>
 
-                      {/* Only shown for dropdown-type fields — hidden entirely
-                          otherwise, instead of a dashed "—" placeholder. No
-                          source-column picker — just the values themselves,
-                          editable per field: type + Enter adds a value, the
-                          × on any chip removes it. Still auto-seeded from a
-                          matched Dropdown Reference Sheet column on upload
-                          (see buildFields), just not re-pickable here. */}
-                      {field.dataType === 'dropdown' && (
+                      {/* Shown for both dropdown-like types (plain Dropdown
+                          and Multi Select share the same option list) —
+                          hidden entirely otherwise, instead of a dashed "—"
+                          placeholder. No source-column picker — just the
+                          values themselves, editable per field: type + Enter
+                          adds a value, the × on any chip removes it. Still
+                          auto-seeded from a matched Dropdown Reference Sheet
+                          column on upload (see buildFields), just not
+                          re-pickable here. */}
+                      {DROPDOWN_LIKE_TYPES.includes(field.dataType) && (
                         <div className="flex flex-col gap-1.5">
                           <label className={fieldLabelCls}>Dropdown Values</label>
                           <div className="rounded-md border border-gray-200 bg-gray-50 p-1.5">
@@ -438,6 +455,30 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                         </div>
                       )}
 
+                      {/* Formula fields are computed, never typed by hand at
+                          fill time — the value shown live-recalculates from
+                          [Column Label] references against that same row
+                          (components/listing/formula.js). References are by
+                          label text, not header id, so they read naturally
+                          ("[Cost] * 1.5") but silently stop resolving if the
+                          referenced column is later renamed. */}
+                      {field.dataType === 'formula' && (
+                        <div className="flex flex-col gap-1.5">
+                          <label className={fieldLabelCls}>Formula</label>
+                          <input
+                            type="text"
+                            value={field.formula || ''}
+                            onChange={(e) => onUpdateField(field.id, { formula: e.target.value })}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            placeholder="e.g. [MRP] * 1.5  or  [Col1] power [Col2]"
+                            className="w-full px-2 py-1.5 text-[12px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          />
+                          <p className="text-[11px] text-gray-400">
+                            Reference other columns by name in brackets. Supports +, -, *, /, ^ (or the word &quot;power&quot;), and parentheses.
+                          </p>
+                        </div>
+                      )}
+
                       {advancedOpenIds.has(field.id) && (
                         <div className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Advanced Settings</p>
@@ -449,6 +490,23 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                               className="h-3.5 w-3.5 rounded border-gray-300 accent-indigo-600"
                             />
                             <Key className="w-3 h-3" /> Unique key part
+                          </label>
+
+                          {/* Locks this header's cell at fill time — can't be
+                              typed/clicked into anywhere it's rendered (Auto
+                              Listing/Product Details/Prefill Details). Meant
+                              for columns that only ever get their value from
+                              elsewhere (a connected-header cascade, a
+                              cross-group sync) — never from someone directly
+                              editing this cell. */}
+                          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-gray-600 select-none">
+                            <input
+                              type="checkbox"
+                              checked={!!field.disabled}
+                              onChange={(e) => onUpdateField(field.id, { disabled: e.target.checked })}
+                              className="h-3.5 w-3.5 rounded border-gray-300 accent-indigo-600"
+                            />
+                            <Lock className="w-3 h-3" /> Disabled (read-only at fill time)
                           </label>
 
                           {/* Connect this header to a header in a different
