@@ -48,14 +48,28 @@ function tokenize(formula, headers) {
   const tokens = []
   let m
   re.lastIndex = 0
+
   while ((m = re.exec(formula))) {
-    if (m[1] !== undefined) tokens.push({ type: 'ref', label: m[1].trim() })
-    else if (m[2] !== undefined) tokens.push({ type: 'ref', label: m[2].trim() })
-    else if (m[3] !== undefined) tokens.push({ type: 'num', value: parseFloat(m[3]) })
-    else if (m[4] !== undefined) tokens.push({ type: 'op', value: '^' })
-    else if (m[5] === '(') tokens.push({ type: 'lparen' })
-    else if (m[5] === ')') tokens.push({ type: 'rparen' })
-    else if (m[5] !== undefined) tokens.push({ type: 'op', value: m[5] })
+    const matchedText = m[0]
+    const isBracketed = matchedText.startsWith('[') && matchedText.endsWith(']')
+
+    if (m[1] !== undefined) {
+      // [Label] bracketed reference
+      tokens.push({ type: 'ref', label: m[1].trim(), bracketed: true })
+    } else if (m[2] !== undefined) {
+      // Bare label reference
+      tokens.push({ type: 'ref', label: m[2].trim(), bracketed: false })
+    } else if (m[3] !== undefined) {
+      tokens.push({ type: 'num', value: parseFloat(m[3]), raw: m[3] })
+    } else if (m[4] !== undefined) {
+      tokens.push({ type: 'op', value: '^', raw: m[4] })
+    } else if (m[5] === '(') {
+      tokens.push({ type: 'lparen', raw: '(' })
+    } else if (m[5] === ')') {
+      tokens.push({ type: 'rparen', raw: ')' })
+    } else if (m[5] !== undefined) {
+      tokens.push({ type: 'op', value: m[5], raw: m[5] })
+    }
   }
   return tokens
 }
@@ -124,6 +138,68 @@ function findHeaderByLabel(label, headers) {
   return headers.find((h) => h.label?.trim().toLowerCase() === label.toLowerCase())
 }
 
+function splitMultiValue(raw) {
+  return String(raw ?? '').split(',').map((v) => v.trim()).filter(Boolean)
+}
+
+// The first Multi Select reference in this formula whose current row value holds more than one
+// option — the "fan out" driver for evaluateFormula below. At most one such header drives the
+// fan-out (the real use case, matching expandMultiSelectRows.js's own scope, is one such column
+// at a time); any other multi-valued Multi Select reference in the same formula is left as its
+// raw comma-joined string on every pass.
+function findMultiValueRef(formula, row, headers) {
+  const tokens = tokenize(formula, headers || [])
+  for (const t of tokens) {
+    if (t.type !== 'ref') continue
+    const header = findHeaderByLabel(t.label, headers || [])
+    if (header?.dataType !== 'multiselect') continue
+    const options = splitMultiValue(row?.[header.id])
+    if (options.length > 1) return { header, options }
+  }
+  return null
+}
+
+// Whether `formula` references `targetHeader` at all (bracketed or bare) — used by
+// expandMultiSelectRows.js to find which Formula headers need to fan out in lockstep with a
+// Multi Select column's own per-option row expansion at export time.
+export function formulaReferencesHeader(formula, targetHeader, headers) {
+  if (!formula || !targetHeader) return false
+  return tokenize(formula, headers || []).some(
+    (t) => t.type === 'ref' && findHeaderByLabel(t.label, headers || [])?.id === targetHeader.id
+  )
+}
+
+
+// Evaluates internal arithmetic inside a single bracket if present
+function evaluateInnerBracket(label, row, headers) {
+  // First, try direct match against actual header label
+  const directHeader = findHeaderByLabel(label, headers)
+  if (directHeader) {
+    const raw = row?.[directHeader.id]
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null
+    return String(raw).trim()
+  }
+
+  // If no literal header match, tokenize & parse the inner string as an arithmetic formula
+  try {
+    const innerTokens = tokenize(label, headers)
+    const resolved = []
+    for (const t of innerTokens) {
+      if (t.type !== 'ref') { resolved.push(t); continue }
+      const h = findHeaderByLabel(t.label, headers)
+      if (!h) return null
+      const raw = row?.[h.id]
+      if (raw === undefined || raw === null || String(raw).trim() === '') return null
+      const str = String(raw).trim()
+      resolved.push({ type: 'num', value: parseFloat(str) })
+    }
+    const result = parse(resolved)
+    return Number.isFinite(result) ? Math.round(result * 100) / 100 : null
+  } catch {
+    return null
+  }
+}
+
 // Evaluates one formula string against one row. Returns a number (rounded
 // to 2 decimals, arithmetic mode), a string (text-join mode), or '' when
 // unresolvable — missing/blank reference, or malformed syntax — never
@@ -131,65 +207,69 @@ function findHeaderByLabel(label, headers) {
 // filled in and a half-typed formula/row is the normal case, not an error.
 export function evaluateFormula(formula, row, headers) {
   if (!formula || !String(formula).trim()) return ''
+
+  // 0. A referenced Multi Select column with more than one option picked fans this formula out —
+  // computed once per option (e.g. Variations "34, 35, 36" against "[Product Number]-
+  // [Variations]" evaluates three times, Variations standing in for just "34", then "35", then
+  // "36" each pass) and comma-joins the results — same separator MultiSelectCell.jsx itself
+  // writes — so a formula header built from a Multi Select column becomes multi-valued too, in
+  // the same order. That's what lets expandMultiSelectRows.js fan this header out in lockstep
+  // with the Multi Select column driving it, instead of every expanded row repeating the same
+  // (wrong) computed value. Recurses at most one level deep: the substituted row carries a
+  // single option for that header, so the recursive call finds nothing left to fan out.
+  const multiRef = findMultiValueRef(formula, row, headers)
+  if (multiRef) {
+    const results = multiRef.options.map((opt) => evaluateFormula(formula, { ...row, [multiRef.header.id]: opt }, headers))
+    return results.some((r) => r === '') ? '' : results.join(', ')
+  }
+
+  // 1. Check if the ENTIRE formula is enclosed in a single bracket pair e.g., "[Cost + 250]"
+  const trimmed = formula.trim()
+  const isPureSingleBracket = trimmed.startsWith('[') && trimmed.endsWith(']') && 
+                              trimmed.indexOf(']', 1) === trimmed.length - 1
+
+  // If it's a single arithmetic bracket, calculate arithmetic result
+  if (isPureSingleBracket) {
+    const innerContent = trimmed.slice(1, -1).trim()
+    const innerResult = evaluateInnerBracket(innerContent, row, headers)
+    return innerResult !== null ? innerResult : ''
+  }
+
+  // 2. Otherwise, treat outer tokens as literal string text and join them
   const tokens = tokenize(formula, headers || [])
   if (!tokens.length) return ''
 
-  const resolved = []
-  for (const t of tokens) {
-    if (t.type !== 'ref') { resolved.push(t); continue }
-    const header = findHeaderByLabel(t.label, headers || [])
-    if (!header) return ''
-    const raw = row?.[header.id]
-    if (raw === undefined || raw === null || String(raw).trim() === '') return ''
-    const str = String(raw).trim()
-    resolved.push({ type: 'ref', raw: str, numeric: parseFloat(str) })
-  }
+  let resultString = ''
 
-  const allNumeric = resolved.every((t) => t.type !== 'ref' || Number.isFinite(t.numeric))
-  if (allNumeric) {
-    try {
-      const arithTokens = resolved.map((t) => (t.type === 'ref' ? { type: 'num', value: t.numeric } : t))
-      const result = parse(arithTokens)
-      return Number.isFinite(result) ? Math.round(result * 100) / 100 : ''
-    } catch {
-      return ''
+  for (const t of tokens) {
+    if (t.type === 'ref') {
+      const val = evaluateInnerBracket(t.label, row, headers)
+      if (val === null) return '' // Unresolvable cell
+      resultString += val
+    } else {
+      // Anything outside brackets (+, -, *, /, numbers) becomes literal text
+      resultString += t.raw || t.value || ''
     }
   }
 
-  // Text-join mode — at least one reference is real data but not a number
-  // (e.g. a Product Number like "PN-100"), so there's nothing to compute
-  // arithmetically; join everything as literal text instead, in the order
-  // it was written.
-  return resolved.map((t) => {
-    if (t.type === 'ref') return t.raw
-    if (t.type === 'num') return String(t.value)
-    if (t.type === 'op') return t.value
-    if (t.type === 'lparen') return '('
-    if (t.type === 'rparen') return ')'
-    return ''
-  }).join('')
+  return resultString
 }
 
-function isBlank(v) {
-  return v === undefined || v === null || String(v).trim() === ''
-}
-
-// Fills every Formula-type header in `headers` for one row — but only the
-// ones currently *blank*, same "fill if missing, never overwrite" rule
-// SKU assignment already uses (lib/listingTemplates.js's assignSkusToRows:
-// `if (row.sku || isRowEmpty(row)) return row`). Once a formula cell holds a
-// value — whether this function put it there on an earlier row change, or
-// the user typed over it directly (formula cells are editable, see
-// SheetGrid.jsx) — it's sticky: further row changes never silently
-// recompute over it. Clearing the cell back to blank is what re-enables
-// auto-fill. Returns {[headerId]: value} to merge into that row — same
-// {[id]: value} shape linkedHeaders.js's resolveLinkedFill returns, so a
-// caller (SheetGrid) can chain both after any cell edit.
-export function recomputeFormulas(headers, row) {
+// Recomputes every Formula-type header in `headers` for one row — unconditionally, so a formula
+// stays in sync with whatever it references: editing Cost re-runs Selling Price, editing
+// Variations re-runs SKU, a connected-header cascade landing new values re-runs anything that
+// depends on them, and so on, every time this is called. The one exception is `changedHeaderId`
+// — the header actually being typed into right now, if any — which is left alone so a user
+// isn't fought mid-keystroke on the very formula cell they're editing (formula cells are still
+// directly editable, see SheetGrid.jsx); the next edit to *anything else* in the row recomputes
+// it again regardless. Returns {[headerId]: value} to merge into that row — same {[id]: value}
+// shape linkedHeaders.js's resolveLinkedFill returns, so a caller (SheetGrid) can chain both
+// after any cell edit.
+export function recomputeFormulas(headers, row, changedHeaderId) {
   const extra = {}
   for (const h of headers) {
     if (h.dataType !== 'formula' || !h.formula) continue
-    if (!isBlank(row?.[h.id])) continue
+    if (h.id === changedHeaderId) continue
     const computed = evaluateFormula(h.formula, row, headers)
     if (computed !== '') extra[h.id] = String(computed)
   }

@@ -3,7 +3,9 @@ import { Filter, ChevronDown, Lock } from 'lucide-react'
 import ComboboxCell from './ComboboxCell'
 import MultiSelectCell from './MultiSelectCell'
 import ImageCell from './ImageCell'
-import { evaluateFormula, recomputeFormulas } from './formula'
+import FormulaCell from './FormulaCell'
+import AutoGrowTextarea from './AutoGrowTextarea'
+import { recomputeFormulas } from './formula'
 import { useBulkImageUpload } from './useBulkImageUpload'
 
 function isRowEmpty(row) {
@@ -56,13 +58,17 @@ export default function SheetGrid({
   // Cascade a single cell's new value into the rest of that same row —
   // connected-header auto-fill, then formula recompute (in that order, so a
   // formula referencing a just-auto-filled column sees the fresh value).
+  // `headerId` is passed through as the "don't recompute this one" exception
+  // (see formula.js's recomputeFormulas) so a user typing directly into a
+  // formula cell isn't fought mid-keystroke — every other formula in the row
+  // still recalculates unconditionally, in sync with whatever just changed.
   function resolveRow(rowIndex, headerId, value, baseRow) {
     let row = { ...baseRow, [headerId]: value }
     if (onCellChange) {
       const extra = onCellChange(headerId, value, rowIndex, row)
       if (extra) row = { ...row, ...extra }
     }
-    const formulaExtra = recomputeFormulas(sortedHeaders, row)
+    const formulaExtra = recomputeFormulas(sortedHeaders, row, headerId)
     if (formulaExtra) row = { ...row, ...formulaExtra }
     return row
   }
@@ -192,26 +198,28 @@ export default function SheetGrid({
                   ) : h.dataType === 'multiselect' ? (
                     <MultiSelectCell value={row[h.id] || ''} options={h.dropdownSource?.values || []} onChange={(v) => updateCell(rowIndex, h.id, v)} disabled={readOnly || h.disabled} />
                   ) : h.dataType === 'formula' ? (
-                    // Editable, same "fill if blank, never overwrite" rule
-                    // SKU assignment uses — auto-computes into the cell once
-                    // (via updateCell's recomputeFormulas, triggered by any
-                    // change elsewhere in this row) but the user can still
-                    // type over it here, and their value sticks. The
-                    // computed suggestion shows as a placeholder (not the
-                    // real value) whenever the cell is genuinely still blank.
+                    <FormulaCell
+                      value={row[h.id]}
+                      formula={h.formula}
+                      headers={sortedHeaders}
+                      row={row}
+                      disabled={readOnly || h.disabled}
+                      onChange={(v) => updateCell(rowIndex, h.id, v)}
+                    />
+                  ) : pickerOptions[h.id]?.length ? (
+                    // Datalist-driven suggestion needs a real <input> — <textarea> has no `list`
+                    // attribute — so picker headers (connected-header suggestions, typically
+                    // short key values like a Product Number) stay single-line.
                     <input
                       type="text"
+                      list={`dl-${h.id}`}
                       value={row[h.id] ?? ''}
-                      placeholder={String(evaluateFormula(h.formula, row, sortedHeaders) ?? '') || undefined}
                       onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
                       disabled={readOnly || h.disabled}
-                      title={h.formula || undefined}
-                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 italic focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400 placeholder:not-italic placeholder:text-gray-400"
+                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400"
                     />
                   ) : (
-                    <input
-                      type="text"
-                      list={pickerOptions[h.id]?.length ? `dl-${h.id}` : undefined}
+                    <AutoGrowTextarea
                       value={row[h.id] ?? ''}
                       onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
                       disabled={readOnly || h.disabled}

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, PlusCircle } from 'lucide-react'
+import { Search, Download, UploadCloud, PlusCircle, Save } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
@@ -10,8 +10,9 @@ import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
 import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/components/listing/linkedHeaders'
+import { findGroupKeyMatch, backfillEmptyFields } from '@/components/listing/historyFill'
+import { recomputeFormulas } from '@/components/listing/formula'
 import { useToast } from '@/components/admin/Toast'
-import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown (ListingToolsSidebar.jsx, whose
@@ -61,6 +62,8 @@ function ScopedAutoDetails({ templateId }) {
   const [sessionRows, setSessionRows] = useState({})
   const [activeGroup, setActiveGroup] = useState(ALL_GROUPS[0])
   const [uploading, setUploading] = useState(false)
+  const [persisting, setPersisting] = useState(false)
+  const [saving, setSaving] = useState(false)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
 
@@ -107,7 +110,11 @@ function ScopedAutoDetails({ templateId }) {
     return [...existing, ...session]
   }
 
-  const saveGroup = useDebouncedCallback(async (group, headers, rows) => {
+  // Auto Listing is frontend-only until Download: typing here never hits the backend — every
+  // group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
+  // always starts fresh, matching this page's own "fresh entry form every visit" contract.
+  // Persistence happens once, right before a download is generated (see persistAllGroups below).
+  async function persistGroup(group, headers, rows) {
     const res = await fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -115,14 +122,20 @@ function ScopedAutoDetails({ templateId }) {
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      addToast(data.message || 'Could not save changes', 'error')
+      addToast(data.message || `Could not save ${group.replace('_', ' ')} data`, 'error')
     }
-  }, 1000)
+  }
+
+  // Best-effort, like the billing gate itself — a save hiccup still lets the file (built from
+  // local session state, not a server round trip) generate and download.
+  async function persistAllGroups() {
+    await Promise.all(ALL_GROUPS.map((group) => persistGroup(group, sheetsByGroup[group]?.headers || [], mergedRowsFor(group, sessionRows[group]))))
+  }
 
   // Pads `rows` with blank rows up to `length`, using `group`'s own headers
   // for the blanks — used both to keep every group row-count-synced with
   // Product Details (handleRowsChange below) and to make sure a
-  // cross-group update always has somewhere to land (applyCrossGroupUpdates).
+  // cross-group update always has somewhere to land (handleCellReconciliation).
   function extendRows(group, rows, length) {
     if (rows.length >= length) return rows
     const groupHeaders = sheetsByGroup[group]?.headers || []
@@ -138,47 +151,98 @@ function ScopedAutoDetails({ templateId }) {
   // too, blank rows ready to receive whatever propagates into them next —
   // not just whichever tab you happen to be on staying ahead while the
   // others lag behind at fewer rows.
+  // Functional update — composes correctly with handleCellReconciliation below, which (now that
+  // there's no debounce separating them into different ticks) always runs first, synchronously,
+  // inside the very same cell edit. Building `nextAll` off `prev` instead of the outer
+  // `sessionRows` closure is what makes that composition safe rather than one silently
+  // discarding the other's work.
   function handleRowsChange(group, nextSessionRows) {
-    const nextAll = { ...sessionRows, [group]: nextSessionRows }
-    const headers = sheetsByGroup[group]?.headers || []
-    saveGroup(group, headers, mergedRowsFor(group, nextSessionRows))
-
-    const targetLength = nextSessionRows.length
-    for (const g of ALL_GROUPS) {
-      if (g === group) continue
-      const rows = sessionRows[g] || []
-      if (rows.length < targetLength) {
-        const extended = extendRows(g, rows, targetLength)
-        nextAll[g] = extended
-        saveGroup(g, sheetsByGroup[g]?.headers || [], mergedRowsFor(g, extended))
+    setSessionRows((prev) => {
+      const nextAll = { ...prev, [group]: nextSessionRows }
+      const targetLength = nextSessionRows.length
+      for (const g of ALL_GROUPS) {
+        if (g === group) continue
+        const rows = nextAll[g] || []
+        if (rows.length < targetLength) {
+          nextAll[g] = extendRows(g, rows, targetLength)
+        }
       }
-    }
-    setSessionRows(nextAll)
+      return nextAll
+    })
   }
 
-  // Fans a source group's row out into the *same row index* in every other
-  // group whose headers are connected to it (row i everywhere is the same
-  // product — see handleRowsChange above) and persists each one — this is
-  // always a side effect of editing the source header itself, never
-  // something the user separately goes and types into the connected
-  // (often disabled/read-only, see withDefaultHeaders in
-  // TemplateSettingsWizard.jsx) fields elsewhere to trigger by hand.
-  function applyCrossGroupUpdates(rowIndex, updates) {
-    const nextSessionRows = { ...sessionRows }
-    for (const [group, fields] of Object.entries(updates)) {
-      const rows = extendRows(group, sessionRows[group] || [], rowIndex + 1)
-      const nextRows = rows.map((r, i) => (i === rowIndex ? { ...r, ...fields } : r))
-      nextSessionRows[group] = nextRows
-      saveGroup(group, sheetsByGroup[group]?.headers || [], mergedRowsFor(group, nextRows))
-    }
-    setSessionRows(nextSessionRows)
+  // Runs synchronously on every cell edit — no debounce. One functional setSessionRows commit
+  // per edit, so it composes correctly with handleRowsChange's own update right after it (see
+  // that function's comment) instead of either one silently clobbering the other.
+  //
+  // `crossGroupUpdates` is whatever propagateFromGroup(activeGroup, ...) found for the header
+  // just edited (fanning the *active* group's row out to every other group, same as before).
+  // Then, always, regardless of which group is active: Product Details first, then Prefill —
+  // for each, a same-group "history" match (that group's own already-saved rows in this
+  // template, keyed by whichever header(s) are isUniqueKeyPart) backfills only its still-blank
+  // fields, formulas recompute (last, so they see whatever backfill/cascade just landed —
+  // unconditionally, every time, per formula.js's recomputeFormulas — not just once while
+  // blank), then a cross-group cascade fans the now-resolved row out to every *other* group.
+  // When a history match was found, that cascade runs a second time fed the full matched record
+  // instead of the live row, so Compulsory/Optional get compulsorily filled in full — while
+  // Product Details'/Prefill's own row only ever gets its blank fields filled, never
+  // overwritten (Rule 1).
+  function handleCellReconciliation(rowIndex, changedHeaderId, crossGroupUpdates) {
+    setSessionRows((prevSessionRows) => {
+      const working = { ...prevSessionRows }
+
+      function getRow(group, idx) {
+        const rows = extendRows(group, working[group] || prevSessionRows[group] || [], idx + 1)
+        working[group] = rows
+        return rows[idx]
+      }
+      function setRow(group, idx, nextRow) {
+        const rows = [...(working[group] || [])]
+        rows[idx] = nextRow
+        working[group] = rows
+      }
+      function applyUpdates(updates, idx) {
+        if (!updates) return
+        for (const [group, fields] of Object.entries(updates)) {
+          setRow(group, idx, { ...getRow(group, idx), ...fields })
+        }
+      }
+
+      applyUpdates(crossGroupUpdates, rowIndex)
+
+      function resolveGroup(group) {
+        const headers = sheetsByGroup[group]?.headers || []
+        let row = getRow(group, rowIndex)
+
+        // Always looked up, not just when this group's own row still has a blank field — Rule
+        // 1's cross-group cascade below needs `match` even when Product Details'/Prefill's own
+        // row is already fully typed, so a Product Number/Brand match still compulsorily fills
+        // Compulsory/Optional every time, not just the first time this row had gaps.
+        // backfillEmptyFields still only ever touches this group's own still-blank cells.
+        const match = findGroupKeyMatch(group, row, sheetsByGroup)
+        if (match) {
+          const backfill = backfillEmptyFields(headers, row, match)
+          if (backfill) { row = { ...row, ...backfill }; setRow(group, rowIndex, row) }
+        }
+
+        const formulaExtra = recomputeFormulas(headers, row, changedHeaderId)
+        if (formulaExtra) { row = { ...row, ...formulaExtra }; setRow(group, rowIndex, row) }
+
+        applyUpdates(propagateFromGroup(group, row, sheetsByGroup), rowIndex)
+        if (match) applyUpdates(propagateFromGroup(group, match, sheetsByGroup), rowIndex)
+      }
+
+      resolveGroup('design_system')
+      resolveGroup('prefill')
+      return working
+    })
   }
 
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
-  // one-trailing-blank-row behavior. Whatever was already typed has already
-  // autosaved (saveGroup is debounced, not tied to leaving the page), so
-  // this only clears what's on screen, never discards saved data.
+  // one-trailing-blank-row behavior. Since this session never autosaves
+  // (see persistAllGroups above), this discards whatever wasn't downloaded
+  // yet — same as a refresh — never anything that was already downloaded.
   function handleCreateNew() {
     setSessionRows(blankSessionFor(content?.sheets))
   }
@@ -229,6 +293,34 @@ function ScopedAutoDetails({ templateId }) {
     }
   }
 
+  // Explicit "Save" — persists this session's typing to the backend right now, without
+  // exporting a file. Same persistAllGroups() the Download button already runs first; this just
+  // exposes that step on its own, for saving progress on a long batch without generating a
+  // download every time.
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await persistAllGroups()
+      addToast('Saved', 'success')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // The one moment this session's typing actually reaches the backend — persist every group
+  // first (SKU assignment inside runExport reads the *server's* copy, so this has to land before
+  // it runs), then export. Same best-effort spirit as the billing gate: a save hiccup is toasted
+  // but never blocks the file from generating.
+  async function handleDownload() {
+    setPersisting(true)
+    try {
+      await persistAllGroups()
+    } finally {
+      setPersisting(false)
+    }
+    runExport({ template: buildExportTemplate(), groups: ALL_GROUPS, format: 'excel', meta: template })
+  }
+
   return (
     <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -255,12 +347,15 @@ function ScopedAutoDetails({ templateId }) {
             className="hidden"
             onChange={(e) => { handleUploadOldSheet(e.target.files?.[0]); e.target.value = '' }}
           />
+          <PillButton variant="edit" icon={Save} loading={saving} disabled={!content} onClick={handleSave}>
+            Save
+          </PillButton>
           <PillButton
             variant="download"
             icon={Download}
-            loading={exporting}
+            loading={persisting || exporting}
             disabled={!content}
-            onClick={() => runExport({ template: buildExportTemplate(), groups: ALL_GROUPS, format: 'excel', meta: template })}
+            onClick={handleDownload}
           >
             Download Final Sheet
           </PillButton>
@@ -289,7 +384,7 @@ function ScopedAutoDetails({ templateId }) {
               // group with nothing linked back to it is just a no-op here.
               const fullRow = { ...row, ...(sameGroupExtra || {}) }
               const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, sheetsByGroup)
-              if (crossGroupUpdates) applyCrossGroupUpdates(rowIndex, crossGroupUpdates)
+              handleCellReconciliation(rowIndex, headerId, crossGroupUpdates)
               return sameGroupExtra
             }}
             onHeaderChange={handleHeaderChange}
@@ -297,11 +392,7 @@ function ScopedAutoDetails({ templateId }) {
         </div>
       )}
 
-      <BillingGateModal
-        gate={gate}
-        onClose={closeGate}
-        onRetry={() => runExport({ template: buildExportTemplate(), groups: ALL_GROUPS, format: 'excel', meta: template })}
-      />
+      <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
     </div>
   )
 }

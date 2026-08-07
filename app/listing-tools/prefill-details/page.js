@@ -11,6 +11,7 @@ import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
 import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
 import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
+import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
@@ -55,17 +56,23 @@ function ScopedPrefillDetails({ templateId }) {
     return sheet.rows.filter((r, i) => i === sheet.rows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
   }, [sheet, search])
 
-  async function saveRows(nextRows) {
-    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, rows: nextRows } : s)) }))
+  // Row edits persist on a short 50ms idle debounce (header/formula edits below still save
+  // immediately — those are template-structure changes, not per-listing row data).
+  const persistRows = useDebouncedCallback(async (headers, nextRows) => {
     const res = await fetch(`/api/listing-tools/${templateId}/sheets/prefill`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: sheet.headers, rows: nextRows }),
+      body: JSON.stringify({ headers, rows: nextRows }),
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       addToast(data.message || 'Could not save changes', 'error')
     }
+  }, 50)
+
+  function saveRows(nextRows) {
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, rows: nextRows } : s)) }))
+    persistRows(sheet.headers, nextRows)
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's

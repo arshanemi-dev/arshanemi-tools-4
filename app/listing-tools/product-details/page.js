@@ -11,6 +11,7 @@ import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
 import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
 import { useToast } from '@/components/admin/Toast'
+import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
@@ -83,17 +84,26 @@ function ScopedProductDetails({ templateId }) {
     setFilterValue('')
   }
 
-  async function saveRows(nextRows) {
-    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, rows: nextRows } : s)) }))
-    const res = await fetch(`/api/listing-tools/${templateId}/sheets/${activeGroup}`, {
+  // Row edits persist on a short 50ms idle debounce (unlike header/formula edits below, which
+  // still save immediately — those are template-structure changes, not per-listing row data).
+  // `group`/`headers` are passed in at call time rather than read from component state when the
+  // debounce fires, so a tab switch inside that 50ms window can't send the save to the wrong
+  // group's endpoint.
+  const persistRows = useDebouncedCallback(async (group, headers, nextRows) => {
+    const res = await fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: sheet.headers, rows: nextRows }),
+      body: JSON.stringify({ headers, rows: nextRows }),
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       addToast(data.message || 'Could not save changes', 'error')
     }
+  }, 50)
+
+  function saveRows(nextRows) {
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, rows: nextRows } : s)) }))
+    persistRows(activeGroup, sheet.headers, nextRows)
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's

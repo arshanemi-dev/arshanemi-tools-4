@@ -65,15 +65,19 @@ export function resolveLinkedFill(headers, changedHeaderId, changedValue, rowInd
   })
   if (!matchedRow) return null
 
+  // Formula-type headers are never a write target here — copying a matched row's raw (possibly
+  // stale, computed-elsewhere) value into a formula cell would bypass its own formula entirely.
+  // formula.js's recomputeFormulas recalculates it fresh from whatever this fill just resolved
+  // for its OWN referenced fields instead.
   const extra = {}
   if (target.isSelfLookup) {
     for (const h of headers) {
-      if (h.id === changedHeaderId) continue
+      if (h.id === changedHeaderId || h.dataType === 'formula') continue
       if (h.id in matchedRow) extra[h.id] = matchedRow[h.id]
     }
   } else {
     for (const h of headers) {
-      if (h.id === changedHeaderId) continue
+      if (h.id === changedHeaderId || h.dataType === 'formula') continue
       if (h.linkedGroup !== target.group || !h.linkedHeaderId) continue
       if (h.linkedHeaderId in matchedRow) extra[h.id] = matchedRow[h.linkedHeaderId]
     }
@@ -136,6 +140,9 @@ export function propagateFromGroup(sourceGroup, sourceRow, sheetsByGroup) {
   for (const [group, sheet] of Object.entries(sheetsByGroup)) {
     if (group === sourceGroup) continue
     for (const h of sheet.headers) {
+      // Same reasoning as resolveLinkedFill above — a formula-type target recomputes its own
+      // value from whatever lands in its OWN referenced fields, it's never a copy destination.
+      if (h.dataType === 'formula') continue
       let sourceHeaderId = null
       if (h.linkedGroup === sourceGroup && h.linkedHeaderId) {
         sourceHeaderId = h.linkedHeaderId
