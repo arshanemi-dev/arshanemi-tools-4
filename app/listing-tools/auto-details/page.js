@@ -1,17 +1,21 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, PlusCircle, Save } from 'lucide-react'
+import { Search, Download, UploadCloud, PlusCircle, Save, Sparkles } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
+import useAiFill from '@/components/listing/useAiFill'
+import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
+import AiFillUpModal from '@/components/listing/AiFillUpModal'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
 import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/components/listing/linkedHeaders'
 import { findGroupKeyMatch, backfillEmptyFields } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
+import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 
 // Landing state is a picker over the user's assigned templates — same list
@@ -44,8 +48,10 @@ const ALL_GROUPS = ['design_system', 'compulsory', 'prefill', 'optional']
 // time and from the Rule A/B pickers here, not from a bulk re-upload.
 const UPLOAD_MATCH_GROUPS = ['compulsory', 'prefill', 'optional']
 
+// `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded here
+// for the same reason as SheetGrid.jsx's own copy of this check.
 function isRowEmpty(row) {
-  return Object.values(row || {}).every((v) => v === undefined || v === null || String(v).trim() === '')
+  return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
 }
 function blankRow(headers) {
   return Object.fromEntries(headers.map((h) => [h.id, '']))
@@ -64,8 +70,12 @@ function ScopedAutoDetails({ templateId }) {
   const [uploading, setUploading] = useState(false)
   const [persisting, setPersisting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [fillingUpAll, setFillingUpAll] = useState(false)
+  const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
+  const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
+  const { gate: bulkGate, closeGate: closeBulkGate, runBulk } = useAiAutofillBulk(templateId)
 
   useEffect(() => {
     let cancelled = false
@@ -93,7 +103,7 @@ function ScopedAutoDetails({ templateId }) {
   const filteredRows = useMemo(() => {
     if (!search.trim()) return activeSessionRows
     const q = search.toLowerCase()
-    return activeSessionRows.filter((r, i) => i === activeSessionRows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
+    return activeSessionRows.filter((r, i) => i === activeSessionRows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
   }, [activeSessionRows, search])
 
   function onChangeGroup(g) {
@@ -109,6 +119,13 @@ function ScopedAutoDetails({ templateId }) {
     const session = (sessionRowsForGroup || []).filter((r) => !isRowEmpty(r))
     return [...existing, ...session]
   }
+
+  // "AI Fill Up" is a bulk action — with only a single real product row
+  // (already-saved OR currently being typed in this session) across every
+  // group, there's nothing to "bulk" that the per-row "Fill by AI" button
+  // doesn't already cover, so it stays disabled until there are 2+.
+  const totalFilledRowCount = ALL_GROUPS.reduce((sum, g) => sum + mergedRowsFor(g, sessionRows[g]).length, 0)
+  const hasAnyFilledRow = totalFilledRowCount > 1
 
   // Auto Listing is frontend-only until Download: typing here never hits the backend — every
   // group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
@@ -187,7 +204,7 @@ function ScopedAutoDetails({ templateId }) {
   // instead of the live row, so Compulsory/Optional get compulsorily filled in full — while
   // Product Details'/Prefill's own row only ever gets its blank fields filled, never
   // overwritten (Rule 1).
-  function handleCellReconciliation(rowIndex, changedHeaderId, crossGroupUpdates) {
+  function handleCellReconciliation(rowIndex, changedHeaderId, sourceGroup, sourceRow, crossGroupUpdates) {
     setSessionRows((prevSessionRows) => {
       const working = { ...prevSessionRows }
 
@@ -207,6 +224,17 @@ function ScopedAutoDetails({ templateId }) {
           setRow(group, idx, { ...getRow(group, idx), ...fields })
         }
       }
+
+      // Seed the edited group's own row with this keystroke's already-resolved value before
+      // anything below reads it. `prevSessionRows` is one keystroke behind — the value typed
+      // just now is still only sitting in `sourceRow`, not yet committed to sessionRows (that
+      // commit is a separate setSessionRows call from handleRowsChange, same tick, but not yet
+      // run). Without this, resolveGroup('design_system')/('prefill') below — which run
+      // unconditionally, even when one of them *is* the group being typed into — would read the
+      // stale one-character-behind row and re-propagate that instead, clobbering the correct
+      // fresh value crossGroupUpdates just applied (e.g. typing "1003-red" would fan out
+      // "1003-re" to linked fields).
+      setRow(sourceGroup, rowIndex, { ...getRow(sourceGroup, rowIndex), ...sourceRow })
 
       applyUpdates(crossGroupUpdates, rowIndex)
 
@@ -245,6 +273,74 @@ function ScopedAutoDetails({ templateId }) {
   // yet — same as a refresh — never anything that was already downloaded.
   function handleCreateNew() {
     setSessionRows(blankSessionFor(content?.sheets))
+  }
+
+  // Merges AI-generated fields into the active group's current session row
+  // and marks them `aiFilled` (plan §14) — goes through the same
+  // handleRowsChange every manual edit in this group uses, so it stays
+  // subject to the always-one-trailing-blank-row/row-count-sync behavior.
+  // Defense in depth: see product-details/page.js's own copy of this
+  // comment — a field that already has a value is never overwritten here,
+  // no matter what the response contained.
+  function handleAiFillRow(rowIndex, fields) {
+    const nextRows = activeSessionRows.map((r, i) => {
+      if (i !== rowIndex) return r
+      const toApply = Object.fromEntries(Object.entries(fields).filter(([k]) => !String(r[k] ?? '').trim()))
+      if (Object.keys(toApply).length === 0) return r
+      const nextAiFilled = Array.from(new Set([...(r.aiFilled || []), ...Object.keys(toApply)]))
+      return { ...r, ...toApply, aiFilled: nextAiFilled }
+    })
+    handleRowsChange(activeGroup, nextRows)
+  }
+
+  // Auto-triggered the moment an image cell gets a usable value (plan §6) —
+  // only actually calls the AI route when the row has an empty
+  // Brand/Highlights header to fill, so it's never a wasted coin.
+  function handleImageUploaded(rowIndex, headerId, url) {
+    const row = activeSessionRows[rowIndex]
+    if (!row || !sheet) return
+    const targets = computeVisionTargets({ headers: sheet.headers, row: { ...row, [headerId]: url } })
+    if (targets.length === 0) return
+    fillRowFromImage(activeGroup, rowIndex, headerId, handleAiFillRow)
+  }
+
+  // "AI Fill Up" — runs whatever scope the AiFillUpModal picker confirmed
+  // (`selections` = [{group, headerIds}]). The bulk route only ever acts on
+  // already-persisted Blob content (it has no notion of this page's
+  // client-only session state), so this first persists the current session
+  // exactly like Save/Download already do, runs the fill against what just
+  // landed on the server, then reloads and re-slices each group's saved
+  // rows back into `sessionRows` — the grid here only ever renders session
+  // state, so without this step the fill would succeed on the server but
+  // never appear on screen.
+  async function handleAiFillUp(selections) {
+    if (!content || fillingUpAll || !selections?.length) return
+    setFillingUpAll(true)
+    try {
+      await persistAllGroups()
+      await runBulk(selections, {
+        onDone: async () => {
+          const res = await fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
+          const d = await res.json()
+          setContent(d.content)
+          const nextSessionRows = {}
+          for (const group of ALL_GROUPS) {
+            const savedRows = d.content.sheets.find((s) => s.group === group)?.rows || []
+            // The tail of the freshly saved sheet is exactly what this
+            // session just contributed (persistAllGroups appends session
+            // rows after whatever already existed) — same length as this
+            // session's own non-blank rows, plus the one trailing blank
+            // every sheet always carries.
+            const sessionLen = (sessionRows[group] || []).filter((r) => !isRowEmpty(r)).length
+            const tailLen = sessionLen + 1
+            nextSessionRows[group] = savedRows.slice(Math.max(0, savedRows.length - tailLen))
+          }
+          setSessionRows(nextSessionRows)
+        },
+      })
+    } finally {
+      setFillingUpAll(false)
+    }
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's
@@ -334,6 +430,16 @@ function ScopedAutoDetails({ templateId }) {
           />
         </div>
         <div className="flex items-center gap-2">
+          <PillButton
+            variant="ai"
+            icon={Sparkles}
+            loading={fillingUpAll}
+            disabled={!content || !hasAnyFilledRow}
+            title={!content || hasAnyFilledRow ? undefined : 'Add at least 2 product rows before running AI Fill Up'}
+            onClick={() => setShowAiFillUpModal(true)}
+          >
+            AI Fill Up
+          </PillButton>
           <PillButton variant="ghost" icon={PlusCircle} onClick={handleCreateNew} disabled={!content}>
             Create New
           </PillButton>
@@ -384,15 +490,35 @@ function ScopedAutoDetails({ templateId }) {
               // group with nothing linked back to it is just a no-op here.
               const fullRow = { ...row, ...(sameGroupExtra || {}) }
               const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, sheetsByGroup)
-              handleCellReconciliation(rowIndex, headerId, crossGroupUpdates)
+              handleCellReconciliation(rowIndex, headerId, activeGroup, fullRow, crossGroupUpdates)
               return sameGroupExtra
             }}
             onHeaderChange={handleHeaderChange}
+            onImageUploaded={handleImageUploaded}
           />
         </div>
       )}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
+      <BillingGateModal gate={aiGate} onClose={closeAiGate} />
+      <BillingGateModal gate={bulkGate} onClose={closeBulkGate} />
+      {showAiFillUpModal && (
+        <AiFillUpModal
+          onClose={() => setShowAiFillUpModal(false)}
+          // Merged (existing + session) rows so the preview reflects what
+          // will actually be processed — handleAiFillUp persists this same
+          // session before running the fill, so a row you're mid-typing
+          // right now still counts toward the scope shown here.
+          sheets={ALL_GROUPS.map((group) => ({
+            group,
+            sheetName: sheetsByGroup[group]?.sheetName,
+            headers: sheetsByGroup[group]?.headers || [],
+            rows: mergedRowsFor(group, sessionRows[group]),
+          }))}
+          defaultGroup={activeGroup}
+          onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}
+        />
+      )}
     </div>
   )
 }

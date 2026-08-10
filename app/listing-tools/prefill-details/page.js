@@ -1,14 +1,18 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, ArrowLeft } from 'lucide-react'
+import { Search, Download, UploadCloud, ArrowLeft, Sparkles } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
+import useAiFill from '@/components/listing/useAiFill'
+import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
+import AiFillUpModal from '@/components/listing/AiFillUpModal'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
 import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
+import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
@@ -33,6 +37,9 @@ function ScopedPrefillDetails({ templateId }) {
   const [search, setSearch] = useState('')
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
+  const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
+  const { submitting: bulkSubmitting, gate: bulkGate, closeGate: closeBulkGate, runBulk } = useAiAutofillBulk(templateId)
+  const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -49,11 +56,22 @@ function ScopedPrefillDetails({ templateId }) {
     [content]
   )
 
+  // "AI Fill Up" fills every group in the template (not just Prefill), and
+  // is a bulk action — with only a single real product row across the whole
+  // template there's nothing to "bulk" that the per-row "Fill by AI" button
+  // doesn't already cover, so it stays disabled until there are 2+. See
+  // product-details/page.js's own copy of this check.
+  const filledRowCount = (content?.sheets || []).reduce(
+    (sum, s) => sum + s.rows.filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length,
+    0
+  )
+  const hasAnyFilledRow = filledRowCount > 1
+
   const filteredRows = useMemo(() => {
     if (!sheet) return []
     if (!search.trim()) return sheet.rows
     const q = search.toLowerCase()
-    return sheet.rows.filter((r, i) => i === sheet.rows.length - 1 || Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)))
+    return sheet.rows.filter((r, i) => i === sheet.rows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
   }, [sheet, search])
 
   // Row edits persist on a short 50ms idle debounce (header/formula edits below still save
@@ -73,6 +91,51 @@ function ScopedPrefillDetails({ templateId }) {
   function saveRows(nextRows) {
     setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, rows: nextRows } : s)) }))
     persistRows(sheet.headers, nextRows)
+  }
+
+  // Merges AI-generated fields into one row and marks them `aiFilled` (plan
+  // §14) — reuses the same debounced sheet save every other row edit goes
+  // through. Defense in depth: see product-details/page.js's own copy of
+  // this comment — a field that already has a value is never overwritten
+  // here, no matter what the response contained.
+  function handleAiFillRow(rowIndex, fields) {
+    if (!sheet) return
+    const nextRows = sheet.rows.map((r, i) => {
+      if (i !== rowIndex) return r
+      const toApply = Object.fromEntries(Object.entries(fields).filter(([k]) => !String(r[k] ?? '').trim()))
+      if (Object.keys(toApply).length === 0) return r
+      const nextAiFilled = Array.from(new Set([...(r.aiFilled || []), ...Object.keys(toApply)]))
+      return { ...r, ...toApply, aiFilled: nextAiFilled }
+    })
+    saveRows(nextRows)
+  }
+
+  // Auto-triggered the moment an image cell gets a usable value (plan §6) —
+  // only actually calls the AI route when the row has an empty
+  // Brand/Highlights header to fill, so it's never a wasted coin.
+  function handleImageUploaded(rowIndex, headerId, url) {
+    const row = sheet?.rows[rowIndex]
+    if (!row) return
+    const targets = computeVisionTargets({ headers: sheet.headers, row: { ...row, [headerId]: url } })
+    if (targets.length === 0) return
+    fillRowFromImage('prefill', rowIndex, headerId, handleAiFillRow)
+  }
+
+  // Bulk route persists server-side directly (plan §11) — refetch afterward
+  // so the grid reflects what actually landed in Blob storage.
+  async function refetchContent() {
+    const res = await fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
+    const d = await res.json()
+    setTemplate(d.template)
+    setContent(d.content)
+  }
+
+  // "AI Fill Up" — runs whatever scope the AiFillUpModal picker confirmed
+  // (`selections` = [{group, headerIds}]), refetching afterward since the
+  // bulk route persists server-side directly (plan §11).
+  function handleAiFillUp(selections) {
+    if (!content || !selections?.length) return
+    runBulk(selections, { onDone: refetchContent })
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's
@@ -140,6 +203,16 @@ function ScopedPrefillDetails({ templateId }) {
             onChange={(e) => { handleUploadSheet(e.target.files?.[0]); e.target.value = '' }}
           />
           <PillButton
+            variant="ai"
+            icon={Sparkles}
+            loading={bulkSubmitting}
+            disabled={!content || !hasAnyFilledRow}
+            title={!content || hasAnyFilledRow ? undefined : 'Add at least 2 product rows before running AI Fill Up'}
+            onClick={() => setShowAiFillUpModal(true)}
+          >
+            AI Fill Up
+          </PillButton>
+          <PillButton
             variant="download"
             icon={Download}
             loading={exporting}
@@ -162,11 +235,22 @@ function ScopedPrefillDetails({ templateId }) {
             pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
             onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
             onHeaderChange={handleHeaderChange}
+            onImageUploaded={handleImageUploaded}
           />
         )}
       </div>
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })} />
+      <BillingGateModal gate={aiGate} onClose={closeAiGate} />
+      <BillingGateModal gate={bulkGate} onClose={closeBulkGate} />
+      {showAiFillUpModal && (
+        <AiFillUpModal
+          onClose={() => setShowAiFillUpModal(false)}
+          sheets={content?.sheets}
+          defaultGroup="prefill"
+          onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}
+        />
+      )}
     </div>
   )
 }

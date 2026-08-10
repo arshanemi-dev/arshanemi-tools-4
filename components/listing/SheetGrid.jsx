@@ -8,8 +8,11 @@ import AutoGrowTextarea from './AutoGrowTextarea'
 import { recomputeFormulas } from './formula'
 import { useBulkImageUpload } from './useBulkImageUpload'
 
+// `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded
+// here so a row with a stale AI-filled marker but every real header cleared
+// still reads as empty, same reasoning as lib/listingTemplates.js's own copy.
 function isRowEmpty(row) {
-  return Object.values(row || {}).every((v) => v === undefined || v === null || String(v).trim() === '')
+  return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
 }
 
 // Dense spreadsheet grid over `headers`/`rows` — the one component every
@@ -45,6 +48,12 @@ export default function SheetGrid({
   // at real data — optional, since not every SheetGrid caller wants to
   // persist a header edit (e.g. a read-only view).
   onHeaderChange,
+  // AI Auto-Fill support (plan/gemini-ai-plan.md §6/§14) — optional,
+  // SheetGrid stays ignorant of billing/Gemini specifics: fires right after
+  // an image cell gets a new non-empty value, so a caller can auto-trigger
+  // vision-fill with no extra click. (No per-row action column — bulk
+  // "AI Fill Up" in each page's toolbar replaced that.)
+  onImageUploaded,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -53,7 +62,7 @@ export default function SheetGrid({
   // own single-file path, so a multi-select from inside a cell behaves
   // exactly like the dedicated BulkImageDropZone toolbar above the grid:
   // same row-by-row empty-box fill, same capacity check, same progress UI.
-  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl })
+  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl, onImageUploaded })
 
   // Cascade a single cell's new value into the rest of that same row —
   // connected-header auto-fill, then formula recompute (in that order, so a
@@ -87,9 +96,21 @@ export default function SheetGrid({
   // row per option at export time (see lib/exports/expandMultiSelectRows.js),
   // never here — this cell is otherwise just a normal cell edit.
   function updateCell(rowIndex, headerId, value) {
-    const updatedRow = resolveRow(rowIndex, headerId, value, rows[rowIndex])
+    const header = sortedHeaders.find((h) => h.id === headerId)
+    const prevValue = rows[rowIndex]?.[headerId]
+    let updatedRow = resolveRow(rowIndex, headerId, value, rows[rowIndex])
+    // Manual edit clears this cell's AI-filled marker (plan §14) — once a
+    // human has touched the value it's no longer purely AI output, so the
+    // highlight disappears immediately rather than lingering as a stale
+    // signal. Other AI-filled cells on the same row are untouched.
+    if (updatedRow.aiFilled?.includes(headerId)) {
+      updatedRow = { ...updatedRow, aiFilled: updatedRow.aiFilled.filter((id) => id !== headerId) }
+    }
     const next = rows.map((r, i) => (i === rowIndex ? updatedRow : r))
     onRowsChange(withTrailingBlankRow(next, rowIndex))
+    if (header?.dataType === 'image' && value && value !== prevValue) {
+      onImageUploaded?.(rowIndex, headerId, value)
+    }
   }
 
   const selectableRowIndexes = rows.map((r, i) => i).filter((i) => !isRowEmpty(rows[i]))
@@ -183,7 +204,13 @@ export default function SheetGrid({
                 </td>
               )}
               {sortedHeaders.map((h) => (
-                <td key={h.id} className="border-b border-r border-gray-200 p-0 align-middle">
+                <td
+                  key={h.id}
+                  title={row.aiFilled?.includes(h.id) ? 'Filled by AI' : undefined}
+                  className={`border-b border-r border-gray-200 p-0 align-middle ${
+                    row.aiFilled?.includes(h.id) ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : ''
+                  }`}
+                >
                   {h.dataType === 'image' ? (
                     <ImageCell
                       value={row[h.id]}

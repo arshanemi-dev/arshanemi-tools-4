@@ -9,8 +9,10 @@ async function authorize(req) {
   return { payload }
 }
 
+// `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded so
+// it can never make an otherwise-blank row count as "filled".
 function countFilledRows(rows) {
-  return rows.filter((r) => Object.values(r).some((v) => String(v ?? '').trim())).length
+  return rows.filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
 }
 
 // master_admin sees every template, from every user — the only role with a

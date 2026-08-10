@@ -11,6 +11,10 @@ const VARIANTS = {
   edit: 'bg-amber-500 hover:bg-amber-600 text-white',
   view: 'bg-teal-500 hover:bg-teal-600 text-white',
   ghost: 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50',
+  // AI Auto-Fill actions (plan/gemini-ai-plan.md §5/§10) — reuses the app's
+  // existing indigo accent (SheetGrid/ComboboxCell focus rings, "download"
+  // pill) rather than inventing a new color.
+  ai: 'bg-indigo-600 hover:bg-indigo-700 text-white',
 }
 
 export default function PillButton({ icon: Icon, children, variant = 'download', loading, className = '', ...props }) {

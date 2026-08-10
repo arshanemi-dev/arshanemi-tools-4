@@ -2,8 +2,10 @@
 import { useRef, useState } from 'react'
 import { useListingImageUpload } from '@/hooks/useListingImageUpload'
 
+// `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded here
+// for the same reason as SheetGrid.jsx's own copy of this check.
 function isRowEmpty(row) {
-  return Object.values(row || {}).every((v) => v === undefined || v === null || String(v).trim() === '')
+  return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
 }
 
 // Ordered list of open Image-column boxes across every filled-in row (the
@@ -36,7 +38,7 @@ export function buildEmptySlots(rows, imageHeaders) {
 // `slots` it was matched to into `slotStatus`, a `{rowIndex:headerId}` →
 // upload-status map, so every affected cell can show its own queued /
 // uploading / retrying / error state directly in its own row's box.
-export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl }) {
+export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl, onImageUploaded }) {
   const [message, setMessage] = useState(null) // { text, warning }
   const [activeSlots, setActiveSlots] = useState([])
   const rowsRef = useRef(rows)
@@ -70,6 +72,11 @@ export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl }) {
         rowsRef.current[slot.rowIndex] = { ...rowsRef.current[slot.rowIndex], [slot.headerId]: result.url }
         filled++
         onRowsChange([...rowsRef.current])
+        // Mirrors SheetGrid's own updateCell trigger (plan §6) — a bulk
+        // drop bypasses updateCell entirely (it writes rows directly), so
+        // without this a multi-image drop would silently never auto-fire
+        // vision-fill the way a single-cell upload does.
+        onImageUploaded?.(slot.rowIndex, slot.headerId, result.url)
       },
     })
 
