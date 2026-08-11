@@ -1,27 +1,20 @@
 'use client'
-import { useEffect, useRef } from 'react'
 
-// A <textarea> that grows to fit its own content instead of scrolling or truncating a single
-// line — used anywhere a grid cell's plain text needs to wrap and show in full, with the table
-// row growing to match (the normal way a table row already grows for any taller cell). Starts at
-// `rows={1}` and resizes to its own `scrollHeight` on every value change.
+// A fixed-height <textarea> for grid cells — every row, in every sheet
+// group, on every Listing Tools page, stays the same 140px height
+// regardless of how much text a cell holds (a long AI-generated description
+// used to auto-grow this box, and the whole table row, to match — one long
+// cell made every column in that row balloon). Text still wraps normally
+// inside the box; only content taller than the fixed height scrolls, via a
+// plain native scrollbar within the cell. 140px is also what SheetGrid.jsx
+// sets on every <td> itself, so non-text cell types (dropdown, image, ...)
+// come out the same row height too — the two must stay in sync.
 export default function AutoGrowTextarea({ value, onChange, className = '', ...props }) {
-  const ref = useRef(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value])
-
   return (
     <textarea
-      ref={ref}
-      rows={1}
       value={value}
       onChange={onChange}
-      className={`resize-none overflow-hidden whitespace-pre-wrap break-words ${className}`}
+      className={`h-[140px] resize-none overflow-y-auto whitespace-pre-wrap break-words ${className}`}
       {...props}
     />
   )

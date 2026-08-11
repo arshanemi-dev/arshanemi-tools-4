@@ -17,7 +17,7 @@ export default function useAiAutofillBulk(templateId) {
   const [gate, setGate] = useState(null)
   const [lastSummary, setLastSummary] = useState(null)
 
-  async function runBulk(selections, { onDone } = {}) {
+  async function runBulk(selections, { onDone, persist = true } = {}) {
     if (submitting || !selections?.length) return
     setSubmitting(true)
     setLastSummary(null)
@@ -49,10 +49,12 @@ export default function useAiAutofillBulk(templateId) {
       }
 
       // Step 2 — both gates cleared (or nothing needed gating): run for real.
+      // `persist: false` (Auto Listing only) tells the route to never touch
+      // Blob storage — see the route's own comment for why.
       const res = await fetch(`/api/listing-tools/${templateId}/ai-fill-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selections }),
+        body: JSON.stringify({ selections, persist }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { addToast(data.error || 'AI Autofill failed', 'error'); return }

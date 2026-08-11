@@ -120,12 +120,11 @@ function ScopedAutoDetails({ templateId }) {
     return [...existing, ...session]
   }
 
-  // "AI Fill Up" is a bulk action — with only a single real product row
-  // (already-saved OR currently being typed in this session) across every
-  // group, there's nothing to "bulk" that the per-row "Fill by AI" button
-  // doesn't already cover, so it stays disabled until there are 2+.
-  const totalFilledRowCount = ALL_GROUPS.reduce((sum, g) => sum + mergedRowsFor(g, sessionRows[g]).length, 0)
-  const hasAnyFilledRow = totalFilledRowCount > 1
+  // "AI Fill Up" only ever fills this session's own in-progress rows (never
+  // already-saved data — see handleAiFillUp below), so the "is there enough
+  // to bulk" check counts session rows specifically, not merged/saved ones.
+  const sessionRowCount = ALL_GROUPS.reduce((sum, g) => sum + (sessionRows[g] || []).filter((r) => !isRowEmpty(r)).length, 0)
+  const hasAnyFilledRow = sessionRowCount > 1
 
   // Auto Listing is frontend-only until Download: typing here never hits the backend — every
   // group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
@@ -305,37 +304,47 @@ function ScopedAutoDetails({ templateId }) {
   }
 
   // "AI Fill Up" — runs whatever scope the AiFillUpModal picker confirmed
-  // (`selections` = [{group, headerIds}]). The bulk route only ever acts on
-  // already-persisted Blob content (it has no notion of this page's
-  // client-only session state), so this first persists the current session
-  // exactly like Save/Download already do, runs the fill against what just
-  // landed on the server, then reloads and re-slices each group's saved
-  // rows back into `sessionRows` — the grid here only ever renders session
-  // state, so without this step the fill would succeed on the server but
-  // never appear on screen.
+  // (`selections` = [{group, headerIds}]), against this session's own
+  // in-progress rows only. Per explicit product decision: this must NEVER
+  // silently save anything to the database — Auto Listing's whole contract
+  // is "nothing reaches the server before an explicit Save/Download", and
+  // AI Fill Up doesn't get to break that. So each selection's current
+  // `sessionRows` are sent directly in the request body (`persist: false`
+  // tells the route to skip Blob entirely — see its own comment) and the
+  // returned fields are merged straight back into `sessionRows` client-side
+  // — no persist step, no refetch, no reconstructing session state from a
+  // server round trip (that reconstruction was fragile and could
+  // desync/hide rows; sending the exact rows we already have and merging
+  // the exact response we get back avoids the whole class of bug).
   async function handleAiFillUp(selections) {
     if (!content || fillingUpAll || !selections?.length) return
     setFillingUpAll(true)
     try {
-      await persistAllGroups()
-      await runBulk(selections, {
-        onDone: async () => {
-          const res = await fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
-          const d = await res.json()
-          setContent(d.content)
-          const nextSessionRows = {}
-          for (const group of ALL_GROUPS) {
-            const savedRows = d.content.sheets.find((s) => s.group === group)?.rows || []
-            // The tail of the freshly saved sheet is exactly what this
-            // session just contributed (persistAllGroups appends session
-            // rows after whatever already existed) — same length as this
-            // session's own non-blank rows, plus the one trailing blank
-            // every sheet always carries.
-            const sessionLen = (sessionRows[group] || []).filter((r) => !isRowEmpty(r)).length
-            const tailLen = sessionLen + 1
-            nextSessionRows[group] = savedRows.slice(Math.max(0, savedRows.length - tailLen))
-          }
-          setSessionRows(nextSessionRows)
+      const selectionsWithRows = selections.map((sel) => ({ ...sel, rows: sessionRows[sel.group] || [] }))
+      await runBulk(selectionsWithRows, {
+        persist: false,
+        onDone: (results) => {
+          setSessionRows((prev) => {
+            const next = { ...prev }
+            for (const groupResult of results || []) {
+              if (!groupResult.rows?.length) continue
+              const rows = [...(next[groupResult.group] || [])]
+              for (const { rowIndex, fields } of groupResult.rows) {
+                const row = rows[rowIndex]
+                if (!row || !fields) continue
+                // Defense in depth: see product-details/page.js's own copy
+                // of this comment — a field that already has a value is
+                // never overwritten here, no matter what the response
+                // contained.
+                const toApply = Object.fromEntries(Object.entries(fields).filter(([k]) => !String(row[k] ?? '').trim()))
+                if (Object.keys(toApply).length === 0) continue
+                const nextAiFilled = Array.from(new Set([...(row.aiFilled || []), ...Object.keys(toApply)]))
+                rows[rowIndex] = { ...row, ...toApply, aiFilled: nextAiFilled }
+              }
+              next[groupResult.group] = rows
+            }
+            return next
+          })
         },
       })
     } finally {
@@ -505,15 +514,14 @@ function ScopedAutoDetails({ templateId }) {
       {showAiFillUpModal && (
         <AiFillUpModal
           onClose={() => setShowAiFillUpModal(false)}
-          // Merged (existing + session) rows so the preview reflects what
-          // will actually be processed — handleAiFillUp persists this same
-          // session before running the fill, so a row you're mid-typing
-          // right now still counts toward the scope shown here.
+          // Session rows only — AI Fill Up never touches already-saved data
+          // on this page (see handleAiFillUp above), so the preview must
+          // reflect exactly that, not the merged existing+session set.
           sheets={ALL_GROUPS.map((group) => ({
             group,
             sheetName: sheetsByGroup[group]?.sheetName,
             headers: sheetsByGroup[group]?.headers || [],
-            rows: mergedRowsFor(group, sessionRows[group]),
+            rows: sessionRows[group] || [],
           }))}
           defaultGroup={activeGroup}
           onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}

@@ -85,13 +85,29 @@ async function processRow({ sheet, plan, aiRules, templateContent, group, compan
   }
 }
 
-// POST body: { selections: [{ group, headerIds }], dryRun? }.
+// POST body: { selections: [{ group, headerIds, rows? }], dryRun?, persist? }.
 // dryRun=true: no Gemini calls, no persistence — just the row counts the
 // client needs to run its two pre-flight billing-gate calls (plan §13).
-// Real run: processes every eligible row across every selected group, one
-// Gemini call per row, persisting each group's updated sheet once after all
-// its rows are processed (plan §11). A single row failing is logged and
-// skipped, never fatal to the batch.
+//
+// `rows` (optional, per selection) lets a caller hand over row data
+// directly instead of this route reading `sheet.rows` from Blob storage —
+// used by the Auto Listing workspace (app/listing-tools/auto-details), whose
+// rows live purely in client-side session state until an explicit
+// Save/Download, never auto-persisted. Headers/schema/dropdown rules always
+// come from the server's own stored sheet regardless (never trusted from
+// the client) — only the row *values* can be client-provided.
+//
+// `persist` (default true) controls whether a successful run writes back to
+// Blob JSON at all. Product Details/Prefill Details never set this (their
+// rows are already the server's own persisted copy, so filling them and
+// saving is the same "edit" every other cell edit on those pages already
+// does). Auto Listing explicitly sets `persist: false` — the whole point of
+// that page is nothing reaches the database before an explicit Save/
+// Download, and AI Fill Up must not silently violate that. Either way, the
+// response always includes each row's resolved `fields` so the caller can
+// merge them into whatever local state it's keeping (Blob-backed content or
+// client-only session rows) — persistence and "where do the results go" are
+// independent concerns.
 export async function POST(req, { params }) {
   const { templateId } = await params
   const { error, meta: initialMeta } = await authorizeForTemplate(req, templateId)
@@ -100,6 +116,7 @@ export async function POST(req, { params }) {
   const body = await req.json().catch(() => ({}))
   const selections = Array.isArray(body.selections) ? body.selections : null
   if (!selections?.length) return NextResponse.json({ error: 'selections[] is required' }, { status: 400 })
+  const persist = body.persist !== false
 
   const content = await getTemplateContent(templateId)
   const companyId = initialMeta.companyId ?? null
@@ -110,8 +127,10 @@ export async function POST(req, { params }) {
   for (const sel of selections) {
     const sheet = content.sheets.find((s) => s.group === sel.group)
     if (!sheet) continue
-    const plans = planGroup(sheet, Array.isArray(sel.headerIds) ? sel.headerIds : null)
-    if (plans.length > 0) groupPlans.push({ group: sel.group, sheet, plans })
+    const sourceRows = Array.isArray(sel.rows) ? sel.rows : sheet.rows
+    const effectiveSheet = { ...sheet, rows: sourceRows }
+    const plans = planGroup(effectiveSheet, Array.isArray(sel.headerIds) ? sel.headerIds : null)
+    if (plans.length > 0) groupPlans.push({ group: sel.group, sheet: effectiveSheet, plans })
   }
 
   if (body.dryRun) {
@@ -133,6 +152,7 @@ export async function POST(req, { params }) {
     let filledRows = 0
     let skippedRows = 0
     const errors = []
+    const rowResults = []
 
     for (const plan of plans) {
       const result = await processRow({ sheet, plan, aiRules: meta.aiRules, templateContent: content, group, companyId })
@@ -146,26 +166,32 @@ export async function POST(req, { params }) {
       // returned.
       const toApply = Object.fromEntries(Object.entries(result.fields).filter(([k]) => !String(row[k] ?? '').trim()))
       if (Object.keys(toApply).length === 0) { skippedRows++; continue }
-      const nextAiFilled = Array.from(new Set([...(row.aiFilled || []), ...Object.keys(toApply)]))
-      nextRows[result.rowIndex] = { ...row, ...toApply, aiFilled: nextAiFilled }
+      rowResults.push({ rowIndex: result.rowIndex, fields: toApply })
+      if (persist) {
+        const nextAiFilled = Array.from(new Set([...(row.aiFilled || []), ...Object.keys(toApply)]))
+        nextRows[result.rowIndex] = { ...row, ...toApply, aiFilled: nextAiFilled }
+      }
       filledRows++
     }
 
-    if (filledRows > 0) {
+    if (persist && filledRows > 0) {
       const sheetIndex = content.sheets.findIndex((s) => s.group === group)
-      content.sheets[sheetIndex] = { ...sheet, rows: nextRows }
+      content.sheets[sheetIndex] = { ...content.sheets[sheetIndex], rows: nextRows }
       await saveTemplateContent(templateId, content)
       meta = await updateTemplateMeta(templateId, {
         version: (meta.version || 1) + 1,
         rowCounts: { ...meta.rowCounts, [group]: countFilledRows(nextRows) },
       })
+    }
+    if (filledRows > 0) {
       recordTemplateHistory(req, {
-        templateId, templateName: meta.templateName, sheetGroup: group, action: 'ai_autofill_bulk',
+        templateId, templateName: meta.templateName, sheetGroup: group,
+        action: persist ? 'ai_autofill_bulk' : 'ai_autofill_bulk_preview',
         snapshotMeta: { filledRows, skippedRows, errorCount: errors.length },
       })
     }
 
-    results.push({ group, filledRows, skippedRows, errors })
+    results.push({ group, filledRows, skippedRows, errors, rows: rowResults })
   }
 
   return NextResponse.json({ results })

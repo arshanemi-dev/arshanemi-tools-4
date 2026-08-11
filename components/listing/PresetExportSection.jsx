@@ -36,12 +36,12 @@ export default function PresetExportSection({ value, onChange, onSave, currentPr
         <h2 className="text-[13px] font-semibold text-gray-800">4. Preset &amp; Export Configuration</h2>
       </div>
       <div className="p-4 flex flex-wrap items-end gap-3">
-        <div className="flex-1 min-w-[150px]">
+        <div className="flex-1 min-w-[140px]">
           <label className={labelCls}>Marketplace Name</label>
           <input value={value.marketplaceName} onChange={(e) => set('marketplaceName', e.target.value)} className={inputCls} />
         </div>
 
-        <div className="flex-1 min-w-[150px]">
+        <div className="flex-1 min-w-[140px]">
           <label className={labelCls}>Category</label>
           <input value={value.category} onChange={(e) => set('category', e.target.value)} className={inputCls} />
         </div>

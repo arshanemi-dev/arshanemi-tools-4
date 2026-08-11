@@ -128,7 +128,7 @@ export default function SheetGrid({
         <thead>
           <tr className="bg-white">
             {selectable && (
-              <th className="sticky left-0 z-10 bg-white border-b border-r border-gray-200 w-10 px-3 py-2.5">
+              <th className="h-[80px] sticky left-0 z-10 bg-white border-b border-r border-gray-200 w-10 px-3 py-2.5 align-top">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -138,7 +138,7 @@ export default function SheetGrid({
               </th>
             )}
             {sortedHeaders.map((h) => (
-              <th key={h.id} className="border-b border-r border-gray-200 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap">
+              <th key={h.id} className="h-[80px] border-b border-r border-gray-200 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap align-top">
                 <div className="flex items-center gap-1.5">
                   <span title={h.description || undefined}>{h.label}</span>
                   {(h.dataType === 'dropdown' || h.dataType === 'multiselect') && <ChevronDown className="w-3 h-3 text-gray-400" />}
@@ -207,7 +207,7 @@ export default function SheetGrid({
                 <td
                   key={h.id}
                   title={row.aiFilled?.includes(h.id) ? 'Filled by AI' : undefined}
-                  className={`border-b border-r border-gray-200 p-0 align-middle ${
+                  className={`h-[140px] border-b border-r border-gray-200 p-0 align-middle ${
                     row.aiFilled?.includes(h.id) ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : ''
                   }`}
                 >
