@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { nanoid } from 'nanoid'
 import { getAuthPayload } from '@/lib/auth'
 import { uploadFile } from '@/lib/storage/dropbox'
-import { getTemplateMeta } from '@/lib/listingTemplates'
+import { getTemplateMeta, canAccessTemplate } from '@/lib/listingTemplates'
 
 const MAX_MB = 5
 
@@ -22,8 +22,7 @@ export async function POST(req, { params }) {
 
   const meta = await getTemplateMeta(templateId)
   if (!meta) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
-  const inScope = payload.role === 'master_admin' || meta.companyId === (payload.companyId ?? null)
-  if (!inScope) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+  if (!canAccessTemplate(meta, payload)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 
   const formData = await req.formData()
   const files = formData.getAll('files').filter((f) => typeof f !== 'string')

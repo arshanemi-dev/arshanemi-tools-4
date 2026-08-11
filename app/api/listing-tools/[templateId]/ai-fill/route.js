@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, findSimilarRows } from '@/lib/listingTemplates'
+import { getTemplateMeta, getTemplateContent, findSimilarRows, canAccessTemplate } from '@/lib/listingTemplates'
 import {
   computeFillTargets, computeVisionTargets, toTargetSpec, keyLabelsAndValues,
   buildCrossGroupFacts, buildPrompt, sanitizeGeneratedFields,
@@ -13,8 +13,7 @@ async function authorizeForTemplate(req, templateId) {
   if (!payload?.userId) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   const meta = await getTemplateMeta(templateId)
   if (!meta) return { error: NextResponse.json({ error: 'Template not found' }, { status: 404 }) }
-  const inScope = payload.role === 'master_admin' || meta.companyId === (payload.companyId ?? null)
-  if (!inScope) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
+  if (!canAccessTemplate(meta, payload)) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
   return { payload, meta }
 }
 
@@ -93,7 +92,7 @@ export async function POST(req, { params }) {
 
   const fields = sanitizeGeneratedFields(raw, targetSpecs)
 
-  recordTemplateHistory(req, {
+  await recordTemplateHistory(req, {
     templateId, templateName: meta.templateName, sheetGroup: group,
     action: imageHeaderId ? 'ai_image_fill' : 'ai_fill',
     snapshotMeta: { rowIndex, fieldsFilled: Object.keys(fields) },

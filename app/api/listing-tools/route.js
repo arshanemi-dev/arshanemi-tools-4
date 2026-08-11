@@ -102,7 +102,7 @@ export async function POST(req) {
       dropdownReference: body.dropdownReference || { sheetName: null, columns: {} },
     })
 
-    recordTemplateHistory(req, {
+    await recordTemplateHistory(req, {
       templateId: meta.id,
       templateName: meta.templateName,
       sheetGroup: 'template',

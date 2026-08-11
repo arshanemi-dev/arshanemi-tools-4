@@ -16,6 +16,8 @@ import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/com
 import { findGroupKeyMatch, backfillEmptyFields } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
+import { runBillingGate } from '@/lib/toolBilling'
+import { countBillableRows } from '@/lib/exports/listingExport'
 import { useToast } from '@/components/admin/Toast'
 
 // Landing state is a picker over the user's assigned templates — same list
@@ -70,6 +72,7 @@ function ScopedAutoDetails({ templateId }) {
   const [uploading, setUploading] = useState(false)
   const [persisting, setPersisting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveGate, setSaveGate] = useState(null)
   const [fillingUpAll, setFillingUpAll] = useState(false)
   const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
   const uploadInputRef = useRef(null)
@@ -83,6 +86,10 @@ function ScopedAutoDetails({ templateId }) {
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return
+        if (!d.content) {
+          addToast(d.error || 'Could not load this template', 'error')
+          return
+        }
         setTemplate(d.template)
         setContent(d.content)
         setSessionRows(blankSessionFor(d.content.sheets))
@@ -401,12 +408,20 @@ function ScopedAutoDetails({ templateId }) {
   // Explicit "Save" — persists this session's typing to the backend right now, without
   // exporting a file. Same persistAllGroups() the Download button already runs first; this just
   // exposes that step on its own, for saving progress on a long batch without generating a
-  // download every time.
+  // download every time. Bills the same 'listing-export' feature by product count as Download —
+  // Save is the actual moment new product rows land on the server, so it has to be a billable
+  // commit in its own right, not just Download's silent prerequisite step (a batch someone types
+  // and Saves but never Downloads would otherwise never be charged at all). Same best-effort
+  // spirit as export: the save itself always succeeds regardless of what the gate returns; a
+  // `blocked` result only ever surfaces as a non-blocking modal.
   async function handleSave() {
     setSaving(true)
     try {
       await persistAllGroups()
       addToast('Saved', 'success')
+      const quantity = countBillableRows(buildExportTemplate(), ALL_GROUPS) || 1
+      const result = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier: 'listing-export', quantity })
+      if (result.status === 'blocked') setSaveGate(result)
     } finally {
       setSaving(false)
     }
@@ -509,6 +524,7 @@ function ScopedAutoDetails({ templateId }) {
       )}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
+      <BillingGateModal gate={saveGate} onClose={() => setSaveGate(null)} onRetry={handleSave} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />
       <BillingGateModal gate={bulkGate} onClose={closeBulkGate} />
       {showAiFillUpModal && (

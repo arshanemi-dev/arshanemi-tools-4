@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, saveTemplateContent, assignSkusToRows } from '@/lib/listingTemplates'
+import { getTemplateMeta, getTemplateContent, saveTemplateContent, assignSkusToRows, canAccessTemplate } from '@/lib/listingTemplates'
 
 function guessKeyHeaderIds(headers) {
   const find = (re) => headers.find((h) => re.test(h.label || ''))?.id
@@ -21,8 +21,7 @@ export async function POST(req, { params }) {
 
   const meta = await getTemplateMeta(templateId)
   if (!meta) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
-  const inScope = payload.role === 'master_admin' || meta.companyId === (payload.companyId ?? null)
-  if (!inScope) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+  if (!canAccessTemplate(meta, payload)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
   const group = body.group || 'design_system'

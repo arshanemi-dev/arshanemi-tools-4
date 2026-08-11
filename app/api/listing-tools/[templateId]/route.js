@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, updateTemplateMeta, deleteTemplate,
-  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS, templateBadgeFor,
+  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS, templateBadgeFor, canAccessTemplate,
 } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
@@ -12,8 +12,7 @@ async function authorizeForTemplate(req, templateId) {
   if (!payload?.userId) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   const meta = await getTemplateMeta(templateId)
   if (!meta) return { error: NextResponse.json({ error: 'Template not found' }, { status: 404 }) }
-  const inScope = payload.role === 'master_admin' || meta.companyId === (payload.companyId ?? null)
-  if (!inScope) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
+  if (!canAccessTemplate(meta, payload)) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
   return { payload, meta }
 }
 
@@ -94,7 +93,7 @@ export async function PATCH(req, { params }) {
 
     const updated = await updateTemplateMeta(templateId, patch)
 
-    recordTemplateHistory(req, {
+    await recordTemplateHistory(req, {
       templateId, templateName: updated.templateName, sheetGroup: 'template', action: 'save',
       snapshotMeta: { renamed: 'templateName' in body, structureEdited: Array.isArray(body.sheets) },
     })
@@ -127,7 +126,7 @@ export async function DELETE(req, { params }) {
       })
     } catch { /* non-fatal, see comment above */ }
 
-    recordTemplateHistory(req, { templateId, templateName: meta.templateName, sheetGroup: 'template', action: 'delete' })
+    await recordTemplateHistory(req, { templateId, templateName: meta.templateName, sheetGroup: 'template', action: 'delete' })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to delete template' }, { status: 500 })

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
-  ensureTrailingEmptyRow, findDuplicateKeys, GROUPS,
+  ensureTrailingEmptyRow, findDuplicateKeys, GROUPS, canAccessTemplate,
 } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
@@ -11,8 +11,7 @@ async function authorizeForTemplate(req, templateId) {
   if (!payload?.userId) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   const meta = await getTemplateMeta(templateId)
   if (!meta) return { error: NextResponse.json({ error: 'Template not found' }, { status: 404 }) }
-  const inScope = payload.role === 'master_admin' || meta.companyId === (payload.companyId ?? null)
-  if (!inScope) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
+  if (!canAccessTemplate(meta, payload)) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 403 }) }
   return { payload, meta }
 }
 
@@ -65,7 +64,7 @@ export async function PATCH(req, { params }) {
     rowCounts: { ...meta.rowCounts, [group]: countFilledRows(normalizedRows) },
   })
 
-  recordTemplateHistory(req, {
+  await recordTemplateHistory(req, {
     templateId, templateName: meta.templateName, sheetGroup: group, action: 'save',
     snapshotMeta: { rowCount: countFilledRows(normalizedRows) },
   })

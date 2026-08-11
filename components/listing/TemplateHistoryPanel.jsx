@@ -12,25 +12,31 @@ const GROUP_LABEL = { design_system: 'Product Details', compulsory: 'Compulsory'
 // recordTemplateHistory, already called on every sheet PATCH/DELETE
 // (app/api/listing-tools/[templateId]/route.js, .../sheets/[group]/route.js)
 // — this is the first UI that ever reads it back, via the new
-// app/api/listing-tools/history proxy route. Opens on demand; not fetched
-// until the button is actually clicked.
+// app/api/listing-tools/history proxy route. Opens on demand; refetches
+// every time it's opened (not just the first time) so a save made while the
+// modal was closed shows up on the next open instead of a stale snapshot.
 export default function TemplateHistoryPanel({ templateId }) {
   const [open, setOpen] = useState(false)
   const [history, setHistory] = useState(null)
 
   useEffect(() => {
-    if (!open || history !== null) return
+    if (!open) return
     let cancelled = false
     fetch(`/api/listing-tools/history?templateId=${encodeURIComponent(templateId)}`, { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { history: [] }))
       .then((data) => { if (!cancelled) setHistory(data.history || []) })
       .catch(() => { if (!cancelled) setHistory([]) })
     return () => { cancelled = true }
-  }, [open, history, templateId])
+  }, [open, templateId])
+
+  function handleOpen() {
+    setHistory(null)
+    setOpen(true)
+  }
 
   return (
     <>
-      <PillButton variant="ghost" icon={History} onClick={() => setOpen(true)}>
+      <PillButton variant="ghost" icon={History} onClick={handleOpen}>
         History
       </PillButton>
       <Modal open={open} onClose={() => setOpen(false)} title="Save History" maxWidth="max-w-lg">
