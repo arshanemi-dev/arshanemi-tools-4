@@ -1,13 +1,11 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, ArrowLeft, Sparkles } from 'lucide-react'
+import { Search, Download, UploadCloud, ArrowLeft } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
-import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
-import AiFillUpModal from '@/components/listing/AiFillUpModal'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
@@ -16,6 +14,11 @@ import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
+
+// `aiFilled` (plan §14) is a bookkeeping key, not a header id.
+function isRowEmpty(row) {
+  return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
+}
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
@@ -38,8 +41,6 @@ function ScopedPrefillDetails({ templateId }) {
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
-  const { submitting: bulkSubmitting, gate: bulkGate, closeGate: closeBulkGate, runBulk } = useAiAutofillBulk(templateId)
-  const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -51,21 +52,16 @@ function ScopedPrefillDetails({ templateId }) {
 
   const sheet = content?.sheets.find((s) => s.group === 'prefill')
 
+  // Download exports only the prefill sheet — gate it on that sheet having
+  // *more than one* real row (not the trailing empty row every sheet always
+  // carries, and not just because headers exist).
+  const filledRowCount = (sheet?.rows || []).filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
+  const hasAnyFilledRow = filledRowCount > 1
+
   const sheetsByGroup = useMemo(
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
     [content]
   )
-
-  // "AI Fill Up" fills every group in the template (not just Prefill), and
-  // is a bulk action — with only a single real product row across the whole
-  // template there's nothing to "bulk" that the per-row "Fill by AI" button
-  // doesn't already cover, so it stays disabled until there are 2+. See
-  // product-details/page.js's own copy of this check.
-  const filledRowCount = (content?.sheets || []).reduce(
-    (sum, s) => sum + s.rows.filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length,
-    0
-  )
-  const hasAnyFilledRow = filledRowCount > 1
 
   const filteredRows = useMemo(() => {
     if (!sheet) return []
@@ -90,7 +86,12 @@ function ScopedPrefillDetails({ templateId }) {
 
   function saveRows(nextRows) {
     setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, rows: nextRows } : s)) }))
-    persistRows(sheet.headers, nextRows)
+    // Local grid state keeps the always-one-trailing-blank row (so there's
+    // still somewhere to type the next entry); the server never needs it —
+    // it re-derives its own single trailing blank via ensureTrailingEmptyRow
+    // regardless of what's sent, so there's no reason to transmit a row we
+    // already know is empty.
+    persistRows(sheet.headers, nextRows.filter((r) => !isRowEmpty(r)))
   }
 
   // Merges AI-generated fields into one row and marks them `aiFilled` (plan
@@ -119,23 +120,6 @@ function ScopedPrefillDetails({ templateId }) {
     const targets = computeVisionTargets({ headers: sheet.headers, row: { ...row, [headerId]: url } })
     if (targets.length === 0) return
     fillRowFromImage('prefill', rowIndex, headerId, handleAiFillRow)
-  }
-
-  // Bulk route persists server-side directly (plan §11) — refetch afterward
-  // so the grid reflects what actually landed in Blob storage.
-  async function refetchContent() {
-    const res = await fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
-    const d = await res.json()
-    setTemplate(d.template)
-    setContent(d.content)
-  }
-
-  // "AI Fill Up" — runs whatever scope the AiFillUpModal picker confirmed
-  // (`selections` = [{group, headerIds}]), refetching afterward since the
-  // bulk route persists server-side directly (plan §11).
-  function handleAiFillUp(selections) {
-    if (!content || !selections?.length) return
-    runBulk(selections, { onDone: refetchContent })
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's
@@ -203,20 +187,11 @@ function ScopedPrefillDetails({ templateId }) {
             onChange={(e) => { handleUploadSheet(e.target.files?.[0]); e.target.value = '' }}
           />
           <PillButton
-            variant="ai"
-            icon={Sparkles}
-            loading={bulkSubmitting}
-            disabled={!content || !hasAnyFilledRow}
-            title={!content || hasAnyFilledRow ? undefined : 'Add at least 2 product rows before running AI Fill Up'}
-            onClick={() => setShowAiFillUpModal(true)}
-          >
-            AI Fill Up
-          </PillButton>
-          <PillButton
             variant="download"
             icon={Download}
             loading={exporting}
-            disabled={!content}
+            disabled={!content || !hasAnyFilledRow}
+            title={!content || hasAnyFilledRow ? undefined : 'Add more than 1 row before downloading'}
             onClick={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })}
           >
             Download Sheet
@@ -242,15 +217,6 @@ function ScopedPrefillDetails({ templateId }) {
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: ['prefill'], format: 'excel', meta: template })} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />
-      <BillingGateModal gate={bulkGate} onClose={closeBulkGate} />
-      {showAiFillUpModal && (
-        <AiFillUpModal
-          onClose={() => setShowAiFillUpModal(false)}
-          sheets={content?.sheets}
-          defaultGroup="prefill"
-          onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}
-        />
-      )}
     </div>
   )
 }

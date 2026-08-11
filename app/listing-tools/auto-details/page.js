@@ -16,8 +16,6 @@ import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/com
 import { findGroupKeyMatch, backfillEmptyFields } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
-import { runBillingGate } from '@/lib/toolBilling'
-import { countBillableRows } from '@/lib/exports/listingExport'
 import { useToast } from '@/components/admin/Toast'
 
 // Landing state is a picker over the user's assigned templates — same list
@@ -102,6 +100,27 @@ function ScopedAutoDetails({ templateId }) {
     [content]
   )
 
+  // "History" matching/auto-fill (Rule A/B, see historyFill.js and
+  // linkedHeaders.js) must only ever see the current viewer's own
+  // previously-saved rows, never a teammate's, on a template shared across a
+  // company — this is the filtered view used for matching only.
+  // `sheetsByGroup` itself stays unfiltered (every user's rows) since
+  // mergedRowsFor/persist/export below round-trip it back to the server and
+  // must never drop another user's data on save.
+  //
+  // Rows saved before per-row ownership existed have no `userId` at all —
+  // those stay visible to everyone (matches how they always behaved) rather
+  // than disappearing from every viewer's suggestions/auto-fill just because
+  // nobody can be credited as their owner. Only rows with a *real*, different
+  // owner are hidden from this viewer.
+  const viewerUserId = template?.viewerUserId
+  const ownSheetsByGroup = useMemo(() => {
+    if (!viewerUserId) return sheetsByGroup
+    return Object.fromEntries(
+      Object.entries(sheetsByGroup).map(([g, s]) => [g, { ...s, rows: (s.rows || []).filter((r) => !r.userId || r.userId === viewerUserId) }])
+    )
+  }, [sheetsByGroup, viewerUserId])
+
   const sheet = sheetsByGroup[activeGroup]
   const activeSessionRows = useMemo(
     () => sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : []),
@@ -132,6 +151,14 @@ function ScopedAutoDetails({ templateId }) {
   // to bulk" check counts session rows specifically, not merged/saved ones.
   const sessionRowCount = ALL_GROUPS.reduce((sum, g) => sum + (sessionRows[g] || []).filter((r) => !isRowEmpty(r)).length, 0)
   const hasAnyFilledRow = sessionRowCount > 1
+
+  // Save/Download gate: the design_system (Product Details) sheet — one row
+  // per product, the same sheet the /export billing route counts against —
+  // needs *more than one* real row across either this session's typing or
+  // whatever's already saved from before; trailing empty rows and
+  // header-only sheets never count.
+  const mergedProductRowCount = mergedRowsFor('design_system', sessionRows.design_system).length
+  const hasAnyMergedRow = mergedProductRowCount > 1
 
   // Auto Listing is frontend-only until Download: typing here never hits the backend — every
   // group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
@@ -253,7 +280,7 @@ function ScopedAutoDetails({ templateId }) {
         // row is already fully typed, so a Product Number/Brand match still compulsorily fills
         // Compulsory/Optional every time, not just the first time this row had gaps.
         // backfillEmptyFields still only ever touches this group's own still-blank cells.
-        const match = findGroupKeyMatch(group, row, sheetsByGroup)
+        const match = findGroupKeyMatch(group, row, ownSheetsByGroup)
         if (match) {
           const backfill = backfillEmptyFields(headers, row, match)
           if (backfill) { row = { ...row, ...backfill }; setRow(group, rowIndex, row) }
@@ -262,8 +289,8 @@ function ScopedAutoDetails({ templateId }) {
         const formulaExtra = recomputeFormulas(headers, row, changedHeaderId)
         if (formulaExtra) { row = { ...row, ...formulaExtra }; setRow(group, rowIndex, row) }
 
-        applyUpdates(propagateFromGroup(group, row, sheetsByGroup), rowIndex)
-        if (match) applyUpdates(propagateFromGroup(group, match, sheetsByGroup), rowIndex)
+        applyUpdates(propagateFromGroup(group, row, ownSheetsByGroup), rowIndex)
+        if (match) applyUpdates(propagateFromGroup(group, match, ownSheetsByGroup), rowIndex)
       }
 
       resolveGroup('design_system')
@@ -327,7 +354,12 @@ function ScopedAutoDetails({ templateId }) {
     if (!content || fillingUpAll || !selections?.length) return
     setFillingUpAll(true)
     try {
-      const selectionsWithRows = selections.map((sel) => ({ ...sel, rows: sessionRows[sel.group] || [] }))
+      // Drop the always-one-trailing-blank row every group's session state
+      // carries (same filter mergedRowsFor already applies for Save/
+      // Download) — the server-side plan builder already skips it via its
+      // own isRowEmpty check either way, but there's no reason to send a
+      // row we already know is blank over the wire at all.
+      const selectionsWithRows = selections.map((sel) => ({ ...sel, rows: (sessionRows[sel.group] || []).filter((r) => !isRowEmpty(r)) }))
       await runBulk(selectionsWithRows, {
         persist: false,
         onDone: (results) => {
@@ -408,20 +440,30 @@ function ScopedAutoDetails({ templateId }) {
   // Explicit "Save" — persists this session's typing to the backend right now, without
   // exporting a file. Same persistAllGroups() the Download button already runs first; this just
   // exposes that step on its own, for saving progress on a long batch without generating a
-  // download every time. Bills the same 'listing-export' feature by product count as Download —
-  // Save is the actual moment new product rows land on the server, so it has to be a billable
-  // commit in its own right, not just Download's silent prerequisite step (a batch someone types
-  // and Saves but never Downloads would otherwise never be charged at all). Same best-effort
-  // spirit as export: the save itself always succeeds regardless of what the gate returns; a
-  // `blocked` result only ever surfaces as a non-blocking modal.
+  // download every time. Bills the same 'listing-export' feature by product count as Download,
+  // via that same server-side /export route (see useTemplateExport.js's own comment on why
+  // billing lives there now, not in a client-side runBillingGate call) — Save is the actual
+  // moment new product rows land on the server, so it has to be a billable commit in its own
+  // right, not just Download's silent prerequisite step (a batch someone types and Saves but
+  // never Downloads would otherwise never be charged at all). Same best-effort spirit as export:
+  // the save itself always succeeds regardless of what the billing call returns; a `blocked`
+  // result only ever surfaces as a non-blocking modal, and any other billing hiccup is swallowed.
   async function handleSave() {
     setSaving(true)
     try {
       await persistAllGroups()
       addToast('Saved', 'success')
-      const quantity = countBillableRows(buildExportTemplate(), ALL_GROUPS) || 1
-      const result = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier: 'listing-export', quantity })
-      if (result.status === 'blocked') setSaveGate(result)
+      try {
+        const res = await fetch(`/api/listing-tools/${templateId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groups: ALL_GROUPS }),
+        })
+        const result = await res.json().catch(() => ({}))
+        if (!res.ok && result.blocked) setSaveGate({ reason: result.reason, data: result.data })
+      } catch {
+        // Best-effort — see comment above. The save already succeeded.
+      }
     } finally {
       setSaving(false)
     }
@@ -477,14 +519,22 @@ function ScopedAutoDetails({ templateId }) {
             className="hidden"
             onChange={(e) => { handleUploadOldSheet(e.target.files?.[0]); e.target.value = '' }}
           />
-          <PillButton variant="edit" icon={Save} loading={saving} disabled={!content} onClick={handleSave}>
+          <PillButton
+            variant="edit"
+            icon={Save}
+            loading={saving}
+            disabled={!content || !hasAnyFilledRow}
+            title={!content || hasAnyFilledRow ? undefined : 'Add more than 1 product row before saving'}
+            onClick={handleSave}
+          >
             Save
           </PillButton>
           <PillButton
             variant="download"
             icon={Download}
             loading={persisting || exporting}
-            disabled={!content}
+            disabled={!content || !hasAnyFilledRow}
+            title={!content || hasAnyFilledRow ? undefined : 'Add more than 1 product row before downloading'}
             onClick={handleDownload}
           >
             Download Final Sheet
@@ -502,9 +552,9 @@ function ScopedAutoDetails({ templateId }) {
             rows={filteredRows}
             onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
-            pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
+            pickerOptions={buildPickerOptions(sheet.headers, ownSheetsByGroup)}
             onCellChange={(headerId, value, rowIndex, row) => {
-              const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, sheetsByGroup)
+              const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, ownSheetsByGroup)
               // `row` already has this edit applied (see SheetGrid.jsx's
               // resolveRow); merge in whatever Rule A just resolved too, so
               // picking an *existing* record propagates its full row, not
@@ -513,7 +563,7 @@ function ScopedAutoDetails({ templateId }) {
               // work the same regardless of which group is the source; a
               // group with nothing linked back to it is just a no-op here.
               const fullRow = { ...row, ...(sameGroupExtra || {}) }
-              const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, sheetsByGroup)
+              const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, ownSheetsByGroup)
               handleCellReconciliation(rowIndex, headerId, activeGroup, fullRow, crossGroupUpdates)
               return sameGroupExtra
             }}

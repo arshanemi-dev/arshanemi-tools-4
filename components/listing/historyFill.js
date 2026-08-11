@@ -1,9 +1,11 @@
 // "History" backfill — a group's own already-saved rows in this same template act as its
 // history, matched by whichever header(s) are flagged `isUniqueKeyPart` (the exact same
-// composite key lib/listingTemplates.js's findDuplicateKeys() already uses to reject duplicates
-// at save time: Product Number for design_system, Product Number + Brand for prefill). No new
-// storage — `sheetsByGroup[group].rows` is the template's content as fetched once on load, so a
-// still-in-progress row from the current fill session is never matched against itself.
+// composite key lib/listingTemplates.js's upsertRowsByOwner() already uses to update-in-place
+// at save time: Product Number for design_system, Brand for prefill). No new storage —
+// `sheetsByGroup[group].rows` is the template's content as fetched once on load, so a
+// still-in-progress row from the current fill session is never matched against itself. The
+// caller (auto-details/page.js) always passes the viewer's own rows only (filtered by
+// `userId`), never a teammate's, on a template shared across a company.
 //
 // Fill-only-blank, never overwrite — same rule lib/listingTemplates.js's assignSkusToRows uses.
 // Formula-type headers are excluded entirely (see backfillEmptyFields below) — formula.js's

@@ -1,16 +1,18 @@
 'use client'
 import { useState } from 'react'
-import { runBillingGate } from '@/lib/toolBilling'
 import { useToast } from '@/components/admin/Toast'
 
 // "AI Autofill Up" bulk entry point (plan §10/§11/§13) — distinct from the
-// per-row useAiFill hook, not a replacement for it. Unlike the per-row path,
-// billing is a client-side PRE-FLIGHT: the bulk route reports back how many
-// text-fill rows and image-fill rows it's about to process, this hook then
-// fires up to two runBillingGate calls (Decision #13), and only if BOTH
-// clear does it ask the route to actually run Gemini + persist — so an
-// insufficient-coins result blocks the entire batch before any row is
-// touched, never a partial run.
+// per-row useAiFill hook, not a replacement for it. Billing is now a
+// SERVER-SIDE gate inside the ai-fill-bulk route itself (see that route's
+// own runServerBillingGate call, right before it touches any row) — this
+// hook no longer pre-flights it client-side, so every caller of that route
+// bills the same way regardless of which page/button triggered it. A dry
+// run still happens first purely for the "nothing to fill" UX early-exit
+// (no point firing a real, billable request for a no-op); the real request
+// can come back blocked (insufficient coins, not activated, etc.), which
+// this hook maps into the same `gate` state BillingGateModal already knows
+// how to render.
 export default function useAiAutofillBulk(templateId) {
   const { addToast } = useToast()
   const [submitting, setSubmitting] = useState(false)
@@ -39,16 +41,9 @@ export default function useAiAutofillBulk(templateId) {
         return
       }
 
-      if (textFillRowCount > 0) {
-        const g = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier: 'listing-ai-fill', quantity: textFillRowCount })
-        if (g.status === 'blocked') { setGate(g); return }
-      }
-      if (imageFillRowCount > 0) {
-        const g = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier: 'listing-image-fill', quantity: imageFillRowCount })
-        if (g.status === 'blocked') { setGate(g); return }
-      }
-
-      // Step 2 — both gates cleared (or nothing needed gating): run for real.
+      // Step 2 — run for real. The route bills itself before touching any
+      // row; a blocked result comes back as { blocked: true, reason, data }
+      // (402), which maps straight into BillingGateModal's expected shape.
       // `persist: false` (Auto Listing only) tells the route to never touch
       // Blob storage — see the route's own comment for why.
       const res = await fetch(`/api/listing-tools/${templateId}/ai-fill-bulk`, {
@@ -57,7 +52,11 @@ export default function useAiAutofillBulk(templateId) {
         body: JSON.stringify({ selections, persist }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) { addToast(data.error || 'AI Autofill failed', 'error'); return }
+      if (!res.ok) {
+        if (data.blocked) { setGate({ reason: data.reason, data: data.data }); return }
+        addToast(data.error || 'AI Autofill failed', 'error')
+        return
+      }
 
       setLastSummary(data.results || [])
       const filled = (data.results || []).reduce((sum, r) => sum + (r.filledRows || 0), 0)

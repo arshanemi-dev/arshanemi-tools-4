@@ -7,6 +7,7 @@ import {
 } from '@/lib/aiFillPrompt'
 import { generateListingFields, uploadImageForVision, deleteUploadedFile } from '@/lib/gemini'
 import { recordTemplateHistory } from '@/lib/listingHistory'
+import { runServerBillingGate } from '@/lib/serverBilling'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -23,6 +24,30 @@ function isRowEmpty(row) {
 }
 function countFilledRows(rows) {
   return rows.filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
+}
+
+// Shared by the dryRun response and the real run's own billing gate below —
+// one definition so the two counts can never drift apart.
+//
+// Deduplicated by rowIndex, not counted once per (group, plan) — row i is
+// the *same product* in every group (see excelTemplateEngine.js's own
+// "Row i in every requested group is the same product" comment), and
+// Auto Listing's AI Fill Up can select fields across several groups at
+// once. One product row with empty fields spread across, say, Compulsory,
+// Prefill, and Optional produces one plan per group for that same
+// rowIndex — billing must count it once, not 3 times, same "bill what the
+// user actually did, not the internal structure" rule the /export route's
+// countBillableRows follows.
+function countFillRows(groupPlans) {
+  const textRowIndexes = new Set()
+  const imageRowIndexes = new Set()
+  for (const { plans } of groupPlans) {
+    for (const p of plans) {
+      if (p.generalTargets.length > 0) textRowIndexes.add(p.rowIndex)
+      if (p.visionTargets.length > 0) imageRowIndexes.add(p.rowIndex)
+    }
+  }
+  return { textFillRowCount: textRowIndexes.size, imageFillRowCount: imageRowIndexes.size }
 }
 
 // Per-row eligibility for a whole group — computeRowFillTargets (shared
@@ -85,8 +110,11 @@ async function processRow({ sheet, plan, aiRules, templateContent, group, compan
 }
 
 // POST body: { selections: [{ group, headerIds, rows? }], dryRun?, persist? }.
-// dryRun=true: no Gemini calls, no persistence — just the row counts the
-// client needs to run its two pre-flight billing-gate calls (plan §13).
+// dryRun=true: no Gemini calls, no persistence, no billing — just the row
+// counts, so the client can show a "nothing to fill" toast without firing a
+// real (billable) request. The real run bills itself server-side (see
+// runServerBillingGate below, right before the row-processing loop) —
+// callers no longer need to pre-flight billing themselves.
 //
 // `rows` (optional, per selection) lets a caller hand over row data
 // directly instead of this route reading `sheet.rows` from Blob storage —
@@ -133,15 +161,26 @@ export async function POST(req, { params }) {
   }
 
   if (body.dryRun) {
-    let textFillRowCount = 0
-    let imageFillRowCount = 0
-    for (const { plans } of groupPlans) {
-      for (const p of plans) {
-        if (p.generalTargets.length > 0) textFillRowCount++
-        if (p.visionTargets.length > 0) imageFillRowCount++
-      }
-    }
-    return NextResponse.json({ textFillRowCount, imageFillRowCount })
+    return NextResponse.json(countFillRows(groupPlans))
+  }
+
+  // Billing gate — fires here, server-side, before any row is touched, so
+  // every caller of this route gets charged the same way regardless of
+  // which page/hook called it (this used to be a client-side pre-flight in
+  // useAiAutofillBulk.js; moving it here means a UI path that forgets to
+  // pre-flight can no longer skip billing). Two separate charges (text vs
+  // image fill) exactly like the dryRun counts imply — if either is
+  // blocked, the whole batch aborts before any Gemini call or persistence,
+  // same "never a partial run" guarantee the old client pre-flight had.
+  const { textFillRowCount, imageFillRowCount } = countFillRows(groupPlans)
+  if (textFillRowCount > 0) {
+    const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-ai-fill', quantity: textFillRowCount })
+    if (gate.status === 'blocked') return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
+  }
+console.log('---------',textFillRowCount,imageFillRowCount)
+  if (imageFillRowCount > 0) {
+    const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-image-fill', quantity: imageFillRowCount })
+    if (gate.status === 'blocked') return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
   }
 
   let meta = initialMeta

@@ -1,16 +1,17 @@
 'use client'
 import { useState } from 'react'
-import { runBillingGate } from '@/lib/toolBilling'
-import { downloadExcelSmart, downloadPdf, countBillableRows } from '@/lib/exports/listingExport'
+import { downloadExcelSmart, downloadPdf } from '@/lib/exports/listingExport'
 import { useToast } from '@/components/admin/Toast'
 
 // Shared export flow for every Download Sheet / Download Final Sheet button:
-// (1) assign SKUs to any design_system row missing one, (2) generate and
-// download the file client-side — unconditionally, (3) fire the billing
-// gate alongside for best-effort coin accounting. Per the confirmed billing
-// decision the file always finishes downloading regardless of what the
-// gate call returns; a `blocked` result only ever surfaces as a
-// non-blocking modal via `gate`/`closeGate`.
+// (1) bill server-side FIRST via this template's own /export route (see
+// app/api/listing-tools/[templateId]/export/route.js) — a blocked result
+// (coins expired) stops right here, nothing else runs; (2) only once that
+// clears: assign SKUs to any design_system row missing one, then (3)
+// generate and download the file client-side. A billing-call network
+// hiccup (not a real blocked decision — no response, or an unstructured
+// error) doesn't hold the file hostage; only an actual `blocked` decision
+// from the server does.
 export default function useTemplateExport(templateId) {
   const { addToast } = useToast()
   const [exporting, setExporting] = useState(false)
@@ -20,6 +21,17 @@ export default function useTemplateExport(templateId) {
     if (!template || exporting) return
     setExporting(true)
     try {
+      const billRes = await fetch(`/api/listing-tools/${templateId}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groups }),
+      }).catch(() => null)
+      const billResult = billRes ? await billRes.json().catch(() => ({})) : {}
+      if (billRes && !billRes.ok && billResult.blocked) {
+        setGate({ reason: billResult.reason, data: billResult.data })
+        return
+      }
+
       let effectiveTemplate = template
 
       if (groups.includes('design_system')) {
@@ -40,10 +52,7 @@ export default function useTemplateExport(templateId) {
       if (format === 'excel') await downloadExcelSmart(effectiveTemplate, meta, { groups })
       else await downloadPdf(effectiveTemplate, { groups })
 
-      const quantity = countBillableRows(effectiveTemplate, groups) || 1
-      const result = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier: 'listing-export', quantity })
-      if (result.status === 'blocked') setGate(result)
-      else addToast('Export downloaded', 'success')
+      addToast('Export downloaded', 'success')
     } catch (err) {
       addToast(err.message || 'Export failed', 'error')
     } finally {

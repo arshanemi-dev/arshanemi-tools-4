@@ -22,7 +22,7 @@ export async function GET(req, { params }) {
     const { error, meta, payload } = await authorizeForTemplate(req, templateId)
     if (error) return error
     const content = await getTemplateContent(templateId)
-    return NextResponse.json({ template: { ...meta, viewerBadge: templateBadgeFor(meta, payload) }, content })
+    return NextResponse.json({ template: { ...meta, viewerBadge: templateBadgeFor(meta, payload), viewerUserId: payload.userId }, content })
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to load template' }, { status: 500 })
   }

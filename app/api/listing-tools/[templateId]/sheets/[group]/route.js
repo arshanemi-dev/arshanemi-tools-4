@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
-  ensureTrailingEmptyRow, findDuplicateKeys, GROUPS, canAccessTemplate,
+  ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS, canAccessTemplate,
 } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
@@ -22,16 +22,18 @@ function countFilledRows(rows) {
 }
 
 // Debounced autosave target — one PATCH per sheet group (design_system /
-// compulsory / prefill / optional). Body: { headers, rows }. Rejects with
-// 409 on a duplicate templateName+designNumber (design_system) or
-// templateName+brandName (prefill) — whichever header is flagged
-// isUniqueKeyPart in that group.
+// compulsory / prefill / optional). Body: { headers, rows }. Bulk upserts by
+// whichever header is flagged isUniqueKeyPart in that group (Product Number
+// for design_system, Brand for prefill): a submitted row whose key matches
+// an already-saved row **owned by the same user** updates that row in
+// place; anything else is created new — never rejected with a 409. See
+// upsertRowsByOwner's own comment for the per-user scoping rules.
 export async function PATCH(req, { params }) {
   const { templateId, group } = await params
   if (!GROUPS.includes(group)) {
     return NextResponse.json({ error: 'Unknown sheet group' }, { status: 400 })
   }
-  const { error, meta } = await authorizeForTemplate(req, templateId)
+  const { error, meta, payload } = await authorizeForTemplate(req, templateId)
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
@@ -43,16 +45,8 @@ export async function PATCH(req, { params }) {
   const existing = content.sheets.find((s) => s.group === group)
   const effectiveHeaders = headers || existing?.headers || []
 
-  const duplicates = findDuplicateKeys(meta.templateName, effectiveHeaders, rows)
-  if (duplicates.length > 0) {
-    return NextResponse.json({
-      error: 'duplicate_key',
-      message: `"${duplicates[0].label}" already exists in this template`,
-      duplicates,
-    }, { status: 409 })
-  }
-
-  const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, rows)
+  const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, rows)
+  const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, upserted)
   const sheetIndex = content.sheets.findIndex((s) => s.group === group)
   const nextSheet = { ...(existing || {}), sheetName: existing?.sheetName, group, headers: effectiveHeaders, rows: normalizedRows }
   if (sheetIndex === -1) content.sheets.push(nextSheet)
