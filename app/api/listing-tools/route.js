@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { listTemplates, createTemplateMeta, saveTemplateContent, ensureTrailingEmptyRow, detectDataType } from '@/lib/listingTemplates'
+import {
+  listTemplates, listVisibleTemplatesForViewer, templateBadgeFor,
+  createTemplateMeta, saveTemplateContent, ensureTrailingEmptyRow, detectDataType,
+} from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
 async function authorize(req) {
@@ -16,17 +19,21 @@ function countFilledRows(rows) {
 }
 
 // master_admin sees every template, from every user — the only role with a
-// system-wide view. Every other role only ever sees templates it created
-// itself (ownerUserId match) — never another user's, and never
-// master_admin's own templates; company-wide sharing was the old model and
-// leaked templates across unrelated accounts in the same company.
+// system-wide view. Every other role sees the union of: its own templates
+// (any visibility state), master_admin's isAllowedToShow templates, and —
+// for a plain 'user' — their own admin's isAllowedToShow templates. Peer
+// 'user' templates under the same admin are never shared laterally. See
+// listVisibleTemplatesForViewer for the exact rule. Every row also gets a
+// viewerBadge (self/default/admin/null) for the UI to label who made it.
 export async function GET(req) {
   try {
     const { payload, error } = await authorize(req)
     if (error) return error
-    const ownerUserId = payload.role === 'master_admin' ? undefined : payload.userId
-    const templates = await listTemplates({ ownerUserId })
-    return NextResponse.json({ templates })
+    const templates = payload.role === 'master_admin'
+      ? await listTemplates({})
+      : await listVisibleTemplatesForViewer({ userId: payload.userId, role: payload.role, companyId: payload.companyId })
+    const badged = templates.map((t) => ({ ...t, viewerBadge: templateBadgeFor(t, payload) }))
+    return NextResponse.json({ templates: badged })
   } catch (err) {
     // Any unhandled throw here (e.g. a Blob storage/env issue) previously
     // reached the client as a body-less error response, which crashes
@@ -77,6 +84,7 @@ export async function POST(req) {
       companyId: payload.companyId ?? null,
       ownerUserId: payload.userId,
       ownerUserName: payload.name,
+      ownerRole: payload.role,
       sourceFileName: body.sourceFileName,
       sourceFileUrl: body.sourceFileUrl,
       sourceSheetName: body.sourceSheetName,

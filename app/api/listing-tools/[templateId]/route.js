@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, updateTemplateMeta, deleteTemplate,
-  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS,
+  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS, templateBadgeFor,
 } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
@@ -20,10 +20,10 @@ async function authorizeForTemplate(req, templateId) {
 export async function GET(req, { params }) {
   try {
     const { templateId } = await params
-    const { error, meta } = await authorizeForTemplate(req, templateId)
+    const { error, meta, payload } = await authorizeForTemplate(req, templateId)
     if (error) return error
     const content = await getTemplateContent(templateId)
-    return NextResponse.json({ template: meta, content })
+    return NextResponse.json({ template: { ...meta, viewerBadge: templateBadgeFor(meta, payload) }, content })
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to load template' }, { status: 500 })
   }

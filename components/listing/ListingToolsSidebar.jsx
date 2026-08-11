@@ -4,28 +4,39 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 
 // Static dark sidebar — the only nav this app has now that the local
-// /settings admin shell is gone. Every account that reaches /listing-tools
-// at all (any authenticated role, gated by the layout) sees these five
-// items; "Template Access" is appended only for master_admin (see role prop
-// below), backing app/listing-tools/template-access/page.js which enforces
-// the same gate server-side for anyone who types the URL directly.
-const NAV_ITEMS = [
+// /settings admin shell is gone. These first four items (their index
+// positions 0/1/2 drive the dropdown-vs-plain-link rendering below, so they
+// must stay first) are shown to every account that reaches /listing-tools at
+// all. "Template Settings" is appended only when the viewer is master_admin
+// or has been individually granted access (see app/listing-tools/layout.js's
+// templateSettingsAllowed prop, backed by app/listing-tools/template-settings/layout.js's
+// server-side gate). "Template Access" is appended only for master_admin,
+// backing app/listing-tools/template-access/page.js which enforces the same
+// gate server-side for anyone who types the URL directly.
+const BASE_NAV_ITEMS = [
   { href: '/listing-tools', label: 'Auto Listing' ,templateNav:`auto-details`},
   { href: '/listing-tools/product-details', label: 'Product Details',templateNav:`product-details` },
   { href: '/listing-tools/prefill-details', label: 'Prefill Details',templateNav:`prefill-details` },
   { href: '/listing-tools/templates', label: 'Choose Your template',templateNav:`templates` },
-  { href: '/listing-tools/template-settings', label: 'Template Settings'},
 ]
 
-const MASTER_ADMIN_NAV_ITEMS = [
-  // { href: '/listing-tools/template-access', label: 'Template Access' },
-]
+const TEMPLATE_SETTINGS_ITEM = { href: '/listing-tools/template-settings', label: 'Template Settings' }
+const TEMPLATE_ACCESS_ITEM = { href: '/listing-tools/template-access', label: 'Template Access' }
 
-export default function ListingToolsSidebar({ role }) {
+export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [myTemplates, setMyTemplates] = useState([])
-  const navItems = role === 'master_admin' ? [...NAV_ITEMS, ...MASTER_ADMIN_NAV_ITEMS] : NAV_ITEMS
+  const navItems = [
+    ...BASE_NAV_ITEMS,
+    ...(role === 'master_admin' || templateSettingsAllowed ? [TEMPLATE_SETTINGS_ITEM] : []),
+    ...(role === 'master_admin' ? 
+      [
+        // TEMPLATE_ACCESS_ITEM
+      ]
+      
+      : []),
+  ]
 
   // "My Template" checkboxes on Choose Your Template (app/listing-tools/templates/page.js)
   // save into this same per-user selection — refetched on every mount, i.e.
@@ -46,7 +57,7 @@ export default function ListingToolsSidebar({ role }) {
   // picking a template here opens one tab at a time, first tab selected.
   const activeTemplateId = pathname === '/listing-tools/product-details' ? searchParams.get('template') : null;
   const activateTemplateNav=pathname === '/listing-tools/product-details' ? 'product-details' : pathname === '/listing-tools/prefill-details' ? 'prefill-details' : pathname === '/listing-tools/templates' ? 'templates' : null;
-console.log(activateTemplateNav,activeTemplateId)
+
   return (
     <aside className="w-48 flex-shrink-0 h-full bg-[#0a0a0a] flex flex-col overflow-y-auto py-5
       [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:transparent

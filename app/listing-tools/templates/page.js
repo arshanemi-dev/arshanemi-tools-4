@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Search, Plus, Minus } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
+import TemplateBadge from '@/components/listing/TemplateBadge'
 import { useToast } from '@/components/admin/Toast'
 
 export default function ChooseTemplatePage() {
@@ -14,9 +15,13 @@ export default function ChooseTemplatePage() {
   useEffect(() => {
     fetch('/api/listing-tools', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { templates: [] }))
-      // Same isAllowedToShow gate as Auto Listing — a template only shows up
-      // here once someone's marked it ready from the Template Settings list.
-      .then((data) => setTemplates((data.templates || []).filter((t) => t.isAllowedToShow)))
+      // No client-side isAllowedToShow filter here — GET /api/listing-tools
+      // already returns exactly the right per-viewer-role set (master_admin:
+      // everything unfiltered; admin: itself + its sub-users unconditionally,
+      // plus toggled-on master_admin templates; user: itself unconditionally,
+      // plus toggled-on admin/master_admin templates). Re-filtering here would
+      // wrongly hide an admin's own not-yet-toggled sub-user drafts.
+      .then((data) => setTemplates(data.templates || []))
       .catch(() => setTemplates([]))
 
     fetch('/api/listing-tools/assignments/me', { credentials: 'include' })
@@ -117,17 +122,20 @@ export default function ChooseTemplatePage() {
                   {/* All Template — every template gets a badge here, always
                       with a + to add it (disabled once it's already mine). */}
                   <td className="px-4 py-3">
-                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-gray-100 pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-gray-700">
-                      <span className="truncate">{t.templateName}</span>
-                      <button
-                        type="button"
-                        onClick={() => addMine(t)}
-                        disabled={isMine}
-                        title={isMine ? 'Already in My Template' : 'Add to My Template'}
-                        className="flex-shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
+                    <span className="inline-flex max-w-full items-center gap-1.5">
+                      <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-gray-100 pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-gray-700">
+                        <span className="truncate">{t.templateName}</span>
+                        <button
+                          type="button"
+                          onClick={() => addMine(t)}
+                          disabled={isMine}
+                          title={isMine ? 'Already in My Template' : 'Add to My Template'}
+                          className="flex-shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </span>
+                      <TemplateBadge badge={t.viewerBadge} />
                     </span>
                   </td>
 

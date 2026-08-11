@@ -1,44 +1,62 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { Save } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Save, Search } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 
-const ROLE_COPY = {
-  admin: { label: 'Admin', desc: 'Company-scoped admins' },
-  user: { label: 'User', desc: 'Regular user accounts' },
-}
+const ROLE_LABEL = { admin: 'Admin', user: 'User' }
 
-// Moved here from app/settings/listing-tools-config/page.js so master_admin
-// can manage this from inside the Listing Tools app itself (see
-// app/listing-tools/template-access/page.js, which does the server-side
-// master_admin gate before this ever mounts). Backed by the same singleton
-// as before: app/api/admin/listing-tools-config/route.js. master_admin
-// itself is implicitly always allowed to create/edit templates and never
-// appears here.
+// Master_admin manages a per-user grant of Listing Tools' Template Settings
+// section (nav item + /listing-tools/template-settings/** pages) here —
+// mirrors the hub's Settings Access feature (app/settings/settings-access),
+// just a single boolean per user instead of an href array, and covering
+// both 'admin' and 'user' roles (unlike /settings/*, Listing Tools' Template
+// Settings is reachable by plain 'user' accounts too). Users/companies/access
+// each proxy to the hub via app/api/admin/{users,companies,listing-template-access}.
+// master_admin itself is implicitly always allowed and never appears below.
 export default function TemplateAccessPanel() {
   const { addToast } = useToast()
-  const [config, setConfig] = useState({ allowCreateEdit: { admin: false, user: false } })
+  const [users, setUsers] = useState(null)
+  const [companies, setCompanies] = useState({})
+  const [access, setAccess] = useState({}) // { [userId]: boolean }
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    fetch('/api/admin/listing-tools-config')
-      .then((r) => r.json())
-      .then((d) => setConfig(d))
-      .finally(() => setLoading(false))
-  }, [])
+  async function load() {
+    setError(false)
+    setLoading(true)
+    try {
+      const [usersData, companiesData, accessData] = await Promise.all([
+        fetch('/api/admin/users').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+        fetch('/api/admin/companies').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+        fetch('/api/admin/listing-template-access').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+      ])
+      setUsers(usersData)
+      const companyMap = {}
+      ;(companiesData.companies || []).forEach((c) => { companyMap[c.id] = c.name })
+      setCompanies(companyMap)
+      setAccess(accessData.access || {})
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  function toggle(role) {
-    setConfig((prev) => ({ allowCreateEdit: { ...prev.allowCreateEdit, [role]: !prev.allowCreateEdit[role] } }))
+  useEffect(() => { load() }, [])
+
+  function toggle(userId) {
+    setAccess((prev) => ({ ...prev, [userId]: !prev[userId] }))
   }
 
   async function handleSave() {
     setSaving(true)
     try {
-      const res = await fetch('/api/admin/listing-tools-config', {
+      const res = await fetch('/api/admin/listing-template-access', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify(access),
       })
       if (!res.ok) throw new Error('Failed to save')
       addToast('Saved', 'success')
@@ -49,6 +67,13 @@ export default function TemplateAccessPanel() {
     }
   }
 
+  const filteredUsers = useMemo(() => {
+    if (!users) return []
+    const q = search.trim().toLowerCase()
+    if (!q) return users
+    return users.filter((u) => u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
+  }, [users, search])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -57,40 +82,74 @@ export default function TemplateAccessPanel() {
     )
   }
 
+  if (error) {
+    return (
+      <div className="px-6 py-10 text-center text-sm text-gray-500">
+        Couldn’t load users.{' '}
+        <button type="button" onClick={load} className="text-indigo-600 font-medium hover:underline">Retry</button>
+      </div>
+    )
+  }
+
   return (
-    <div className="px-6 py-6 space-y-6">
+    <div className="px-6 py-6 space-y-6 pb-24">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Template Access</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Control which roles can create new templates and edit template details. master_admin can always create and edit.
+            Grant individual accounts access to Template Settings (create, edit, and manage templates). master_admin always has access and never needs a grant.
           </p>
         </div>
+        <div className="relative w-full max-w-xs">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search users…"
+            className="w-full pl-9 pr-3 py-2 text-[13px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
+        {filteredUsers.length === 0 && (
+          <div className="px-5 py-10 text-center text-sm text-gray-400">No users found.</div>
+        )}
+        {filteredUsers.map((u) => (
+          <div key={u.id} className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
+                <span className="inline-flex flex-shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                  {ROLE_LABEL[u.role] || u.role}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5 truncate">
+                {u.email || u.mobile}
+                {companies[u.company_id] ? ` · ${companies[u.company_id]}` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!access[u.id]}
+              onClick={() => toggle(u.id)}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${access[u.id] ? 'bg-indigo-600' : 'bg-gray-300'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${access[u.id] ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 lg:left-48 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3 z-10 shadow-sm">
         <button
           onClick={handleSave}
           disabled={saving}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
         >
-          <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : 'Save'}
+          <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : 'Save Changes'}
         </button>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
-        {Object.entries(ROLE_COPY).map(([role, copy]) => (
-          <div key={role} className="flex items-center justify-between px-5 py-4">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">{copy.label}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{copy.desc}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => toggle(role)}
-              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${config.allowCreateEdit[role] ? 'bg-indigo-600' : 'bg-gray-300'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${config.allowCreateEdit[role] ? 'translate-x-5' : ''}`} />
-            </button>
-          </div>
-        ))}
       </div>
     </div>
   )

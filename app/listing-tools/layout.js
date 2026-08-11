@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { verifyToken } from '@/lib/auth'
 import { IS_CONNECT } from '@/lib/connect'
+import { fetchTemplateSettingsAllowed } from '@/lib/listingTemplateAccess'
 import { ToastProvider } from '@/components/admin/Toast'
 import SessionManager from '@/components/admin/SessionManager'
 import ListingToolsSidebar from '@/components/listing/ListingToolsSidebar'
@@ -39,13 +40,15 @@ export default async function ListingToolsLayout({ children }) {
     )
   }
 
+  const templateSettingsAllowed = await fetchTemplateSettingsAllowed(token, payload.role)
+
   return (
     <ToastProvider>
       <SessionManager />
       <div className="flex flex-col h-screen overflow-hidden bg-background">
         <ListingToolsHeader name={payload.name} email={payload.email} />
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <ListingToolsSidebar role={payload.role} />
+          <ListingToolsSidebar role={payload.role} templateSettingsAllowed={templateSettingsAllowed} />
           <main className="flex-1 overflow-y-auto">{children}</main>
         </div>
       </div>

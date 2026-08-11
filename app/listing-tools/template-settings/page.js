@@ -18,6 +18,7 @@ import {
   CopyCheck,
 } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
+import TemplateBadge from '@/components/listing/TemplateBadge'
 import ConfirmDialog from '@/components/admin/ConfirmDialog'
 import { useToast } from '@/components/admin/Toast'
 
@@ -188,7 +189,12 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
           </button>
         </td>
 
-        <td className="px-3 py-3 text-gray-800 font-medium whitespace-nowrap">{template.templateName}</td>
+        <td className="px-3 py-3 text-gray-800 font-medium whitespace-nowrap">
+          <span className="inline-flex items-center gap-1.5">
+            {template.templateName}
+            <TemplateBadge badge={template.viewerBadge} />
+          </span>
+        </td>
          <td className="px-3 py-3 text-gray-500 whitespace-nowrap">
           {template.marketplaceName || template.category
             ? `${template.marketplaceName || '—'} / ${template.category || '—'}`
