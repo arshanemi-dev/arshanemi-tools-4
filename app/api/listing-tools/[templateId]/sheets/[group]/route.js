@@ -4,7 +4,7 @@ import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
   ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS, canAccessTemplate,
 } from '@/lib/listingTemplates'
-import { recordTemplateHistory } from '@/lib/listingHistory'
+import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory } from '@/lib/listingHistory'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -62,6 +62,29 @@ export async function PATCH(req, { params }) {
     templateId, templateName: meta.templateName, sheetGroup: group, action: 'save',
     snapshotMeta: { rowCount: countFilledRows(normalizedRows) },
   })
+
+  // Mirror this request's own rows into the hub's real Product Details /
+  // Prefill Details history tables (see lib/listingHistory.js) — only for
+  // the two groups those tables exist for, and only rows owned by this
+  // request's user (never a teammate's, even though they may sit in the
+  // same submitted/merged array).
+  if (group === 'design_system' || group === 'prefill') {
+    const keyHeader = effectiveHeaders.find((h) => h.isUniqueKeyPart)
+    if (keyHeader) {
+      const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[keyHeader.id] ?? '').trim())
+      if (group === 'design_system') {
+        await syncProductDetailsHistory(req, {
+          templateId, templateName: meta.templateName,
+          rows: ownRows.map((r) => ({ productNumber: r[keyHeader.id], rowData: r })),
+        })
+      } else {
+        await syncPrefillDetailsHistory(req, {
+          templateId, templateName: meta.templateName,
+          rows: ownRows.map((r) => ({ brand: r[keyHeader.id], rowData: r })),
+        })
+      }
+    }
+  }
 
   return NextResponse.json({ sheet: nextSheet, template: updatedMeta })
 }

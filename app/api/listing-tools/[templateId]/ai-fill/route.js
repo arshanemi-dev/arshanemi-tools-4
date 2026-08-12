@@ -5,7 +5,7 @@ import {
   computeFillTargets, computeVisionTargets, toTargetSpec, keyLabelsAndValues,
   buildCrossGroupFacts, buildPrompt, sanitizeGeneratedFields,
 } from '@/lib/aiFillPrompt'
-import { generateListingFields } from '@/lib/gemini'
+import { generateListingFieldsWithFallback } from '@/lib/aiProvider'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
 async function authorizeForTemplate(req, templateId) {
@@ -84,9 +84,9 @@ export async function POST(req, { params }) {
 
   let raw
   try {
-    raw = await generateListingFields({ systemInstruction, promptText, imagePart, targets: targetSpecs })
+    raw = await generateListingFieldsWithFallback({ systemInstruction, promptText, imagePart, targets: targetSpecs })
   } catch (err) {
-    console.error('Gemini generateListingFields failed:', err)
+    console.error('AI Auto-Fill failed (both providers):', err)
     return NextResponse.json({ error: 'AI generation failed — try again' }, { status: 502 })
   }
 

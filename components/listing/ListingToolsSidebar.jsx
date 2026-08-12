@@ -18,6 +18,7 @@ const BASE_NAV_ITEMS = [
   { href: '/listing-tools/product-details', label: 'Product Details',templateNav:`product-details` },
   { href: '/listing-tools/prefill-details', label: 'Prefill Details',templateNav:`prefill-details` },
   { href: '/listing-tools/templates', label: 'Choose Your template',templateNav:`templates` },
+  { href: '/listing-tools/history', label: 'History' },
 ]
 
 const TEMPLATE_SETTINGS_ITEM = { href: '/listing-tools/template-settings', label: 'Template Settings' }

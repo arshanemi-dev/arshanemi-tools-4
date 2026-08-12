@@ -68,7 +68,6 @@ function ScopedAutoDetails({ templateId }) {
   const [sessionRows, setSessionRows] = useState({})
   const [activeGroup, setActiveGroup] = useState(ALL_GROUPS[0])
   const [uploading, setUploading] = useState(false)
-  const [persisting, setPersisting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveGate, setSaveGate] = useState(null)
   const [fillingUpAll, setFillingUpAll] = useState(false)
@@ -160,26 +159,17 @@ function ScopedAutoDetails({ templateId }) {
   const mergedProductRowCount = mergedRowsFor('design_system', sessionRows.design_system).length
   const hasAnyMergedRow = mergedProductRowCount > 1
 
-  // Auto Listing is frontend-only until Download: typing here never hits the backend — every
-  // group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
+  // Auto Listing is frontend-only until Save/Download: typing here never hits the backend —
+  // every group's rows live purely in `sessionRows` state, so a refresh (or clicking Create New)
   // always starts fresh, matching this page's own "fresh entry form every visit" contract.
-  // Persistence happens once, right before a download is generated (see persistAllGroups below).
-  async function persistGroup(group, headers, rows) {
-    const res = await fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers, rows }),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      addToast(data.message || `Could not save ${group.replace('_', ' ')} data`, 'error')
-    }
-  }
-
-  // Best-effort, like the billing gate itself — a save hiccup still lets the file (built from
-  // local session state, not a server round trip) generate and download.
-  async function persistAllGroups() {
-    await Promise.all(ALL_GROUPS.map((group) => persistGroup(group, sheetsByGroup[group]?.headers || [], mergedRowsFor(group, sessionRows[group]))))
+  // Raw session rows only (blanks dropped) — Save/Download send this straight to the /export
+  // route, which merges it onto its own current server-side sheets and persists the result in
+  // the same request that bills and (for design_system) assigns SKUs (see
+  // app/api/listing-tools/[templateId]/export/route.js). No separate per-group PATCH round
+  // trips, and no need to carry "existing" rows from here — the server already has its own
+  // fresh copy of those.
+  function sessionRowsPayload() {
+    return Object.fromEntries(ALL_GROUPS.map((g) => [g, (sessionRows[g] || []).filter((r) => !isRowEmpty(r))]))
   }
 
   // Pads `rows` with blank rows up to `length`, using `group`'s own headers
@@ -302,8 +292,9 @@ function ScopedAutoDetails({ templateId }) {
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
   // one-trailing-blank-row behavior. Since this session never autosaves
-  // (see persistAllGroups above), this discards whatever wasn't downloaded
-  // yet — same as a refresh — never anything that was already downloaded.
+  // (Save/Download are the only things that persist it), this discards
+  // whatever wasn't saved/downloaded yet — same as a refresh — never
+  // anything that was already saved.
   function handleCreateNew() {
     setSessionRows(blankSessionFor(content?.sheets))
   }
@@ -429,58 +420,42 @@ function ScopedAutoDetails({ templateId }) {
     }
   }
 
-  // Full export = everything ever saved, not just this session's new rows.
-  function buildExportTemplate() {
-    return {
-      ...content,
-      sheets: content.sheets.map((s) => ({ ...s, rows: mergedRowsFor(s.group, sessionRows[s.group]) })),
-    }
-  }
-
   // Explicit "Save" — persists this session's typing to the backend right now, without
-  // exporting a file. Same persistAllGroups() the Download button already runs first; this just
-  // exposes that step on its own, for saving progress on a long batch without generating a
-  // download every time. Bills the same 'listing-export' feature by product count as Download,
-  // via that same server-side /export route (see useTemplateExport.js's own comment on why
-  // billing lives there now, not in a client-side runBillingGate call) — Save is the actual
-  // moment new product rows land on the server, so it has to be a billable commit in its own
-  // right, not just Download's silent prerequisite step (a batch someone types and Saves but
-  // never Downloads would otherwise never be charged at all). Same best-effort spirit as export:
-  // the save itself always succeeds regardless of what the billing call returns; a `blocked`
-  // result only ever surfaces as a non-blocking modal, and any other billing hiccup is swallowed.
+  // exporting a file. One request to the same /export route Download uses (see
+  // app/api/listing-tools/[templateId]/export/route.js) — it merges `sessionRowsPayload()` onto
+  // its own current sheets, persists that, and bills the same 'listing-export' feature by
+  // product count as Download — Save is the actual moment new product rows land on the server,
+  // so it has to be a billable commit in its own right, not just Download's silent prerequisite
+  // step (a batch someone types and Saves but never Downloads would otherwise never be charged
+  // at all). The request reaching the server means the persist half already happened (billing
+  // runs *after* the merge/save inside that route), so "Saved" fires whenever a response comes
+  // back at all — a `blocked` billing result only ever surfaces as an additional, non-blocking
+  // modal on top of that; only a real network failure (no response) counts as a save failure.
   async function handleSave() {
     setSaving(true)
     try {
-      await persistAllGroups()
-      addToast('Saved', 'success')
-      try {
-        const res = await fetch(`/api/listing-tools/${templateId}/export`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ groups: ALL_GROUPS }),
-        })
-        const result = await res.json().catch(() => ({}))
-        if (!res.ok && result.blocked) setSaveGate({ reason: result.reason, data: result.data })
-      } catch {
-        // Best-effort — see comment above. The save already succeeded.
+      const res = await fetch(`/api/listing-tools/${templateId}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groups: ALL_GROUPS, sessionRows: sessionRowsPayload() }),
+      }).catch(() => null)
+      if (!res) {
+        addToast('Could not save — check your connection', 'error')
+        return
       }
+      const result = await res.json().catch(() => ({}))
+      addToast('Saved', 'success')
+      if (!res.ok && result.blocked) setSaveGate({ reason: result.reason, data: result.data })
     } finally {
       setSaving(false)
     }
   }
 
-  // The one moment this session's typing actually reaches the backend — persist every group
-  // first (SKU assignment inside runExport reads the *server's* copy, so this has to land before
-  // it runs), then export. Same best-effort spirit as the billing gate: a save hiccup is toasted
-  // but never blocks the file from generating.
-  async function handleDownload() {
-    setPersisting(true)
-    try {
-      await persistAllGroups()
-    } finally {
-      setPersisting(false)
-    }
-    runExport({ template: buildExportTemplate(), groups: ALL_GROUPS, format: 'excel', meta: template })
+  // The one moment this session's typing actually reaches the backend — one request handles
+  // merge+persist, billing, and SKU assignment together (see useTemplateExport.js and the
+  // /export route), so there's no separate persist step to run first here anymore.
+  function handleDownload() {
+    runExport({ template: content, groups: ALL_GROUPS, format: 'excel', meta: template, sessionRows: sessionRowsPayload() })
   }
 
   return (
@@ -532,7 +507,7 @@ function ScopedAutoDetails({ templateId }) {
           <PillButton
             variant="download"
             icon={Download}
-            loading={persisting || exporting}
+            loading={exporting}
             disabled={!content || !hasAnyFilledRow}
             title={!content || hasAnyFilledRow ? undefined : 'Add more than 1 product row before downloading'}
             onClick={handleDownload}

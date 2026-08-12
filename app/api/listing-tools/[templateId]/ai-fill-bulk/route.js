@@ -5,7 +5,8 @@ import {
   computeRowFillTargets, toTargetSpec, keyLabelsAndValues,
   buildCrossGroupFacts, buildPrompt, sanitizeGeneratedFields,
 } from '@/lib/aiFillPrompt'
-import { generateListingFields, uploadImageForVision, deleteUploadedFile } from '@/lib/gemini'
+import { generateListingFieldsWithFallback } from '@/lib/aiProvider'
+import { uploadImageForVision, deleteUploadedFile } from '@/lib/gemini'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { runServerBillingGate } from '@/lib/serverBilling'
 
@@ -29,25 +30,31 @@ function countFilledRows(rows) {
 // Shared by the dryRun response and the real run's own billing gate below —
 // one definition so the two counts can never drift apart.
 //
-// Deduplicated by rowIndex, not counted once per (group, plan) — row i is
-// the *same product* in every group (see excelTemplateEngine.js's own
-// "Row i in every requested group is the same product" comment), and
-// Auto Listing's AI Fill Up can select fields across several groups at
-// once. One product row with empty fields spread across, say, Compulsory,
-// Prefill, and Optional produces one plan per group for that same
-// rowIndex — billing must count it once, not 3 times, same "bill what the
-// user actually did, not the internal structure" rule the /export route's
-// countBillableRows follows.
+// Text fields are deduplicated by rowIndex, not counted once per (group,
+// plan) — row i is the *same product* in every group (see
+// excelTemplateEngine.js's own "Row i in every requested group is the same
+// product" comment), and Auto Listing's AI Fill Up can select fields across
+// several groups at once. One product row with empty fields spread across,
+// say, Compulsory, Prefill, and Optional produces one plan per group for
+// that same rowIndex — billing must count it once, not 3 times, same "bill
+// what the user actually did, not the internal structure" rule the /export
+// route's countBillableRows follows.
+//
+// Image fields are deduplicated by the image's own URL, not by rowIndex —
+// several rows (variations of the same product, typed as separate rows)
+// commonly point at the exact same uploaded image. Billing per row used to
+// charge once per row even when it was the same picture being read over and
+// over; billing per unique URL charges once per image actually analyzed.
 function countFillRows(groupPlans) {
   const textRowIndexes = new Set()
-  const imageRowIndexes = new Set()
+  const imageUrls = new Set()
   for (const { plans } of groupPlans) {
     for (const p of plans) {
       if (p.generalTargets.length > 0) textRowIndexes.add(p.rowIndex)
-      if (p.visionTargets.length > 0) imageRowIndexes.add(p.rowIndex)
+      if (p.visionTargets.length > 0 && p.imageUrl) imageUrls.add(p.imageUrl)
     }
   }
-  return { textFillRowCount: textRowIndexes.size, imageFillRowCount: imageRowIndexes.size }
+  return { textFillRowCount: textRowIndexes.size, imageFillRowCount: imageUrls.size }
 }
 
 // Per-row eligibility for a whole group — computeRowFillTargets (shared
@@ -69,14 +76,22 @@ async function fetchImageBlob(url) {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Could not fetch image (${res.status})`)
   const mimeType = res.headers.get('content-type') || 'image/jpeg'
-  const blob = await res.blob()
-  return { blob, mimeType }
+  const buf = Buffer.from(await res.arrayBuffer())
+  return { blob: new Blob([buf], { type: mimeType }), base64: buf.toString('base64'), mimeType }
 }
 
-// One Gemini call per row — general (text/dropdown) targets and vision
+// One AI call per row — general (text/dropdown) targets and vision
 // (Brand/Highlights) targets combined into a single request when both apply
 // (plan §12), never re-uploading the image per field. The uploaded Gemini
 // file (if any) is always deleted right after, success or failure.
+//
+// The image is always base64-decoded once (fallbackImagePart) regardless of
+// provider — Gemini's File API `fileUri` is an efficiency layer on top, not
+// a replacement: it's used when the upload succeeds, and the same base64 is
+// what the second AI provider (lib/fallbackAi.js, an unrelated third-party
+// endpoint that can't resolve a Gemini-internal fileUri) always gets. If the
+// upload itself fails, Gemini also falls back to the inline base64 rather
+// than skipping the image outright.
 async function processRow({ sheet, plan, aiRules, templateContent, group, companyId }) {
   const { rowIndex, generalTargets, visionTargets, imageUrl } = plan
   const row = sheet.rows[rowIndex]
@@ -92,15 +107,21 @@ async function processRow({ sheet, plan, aiRules, templateContent, group, compan
   const { systemInstruction, promptText } = buildPrompt({ aiRules, headers: sheet.headers, row, targets: targetSpecs, similarRows, crossGroupFacts })
 
   let imagePart = null
+  let fallbackImagePart = null
   let uploadedFileName = null
   try {
     if (visionTargets.length > 0 && imageUrl) {
-      const { blob, mimeType } = await fetchImageBlob(imageUrl)
-      const file = await uploadImageForVision(blob, mimeType)
-      imagePart = { fileUri: file.uri, mimeType: file.mimeType }
-      uploadedFileName = file.name
+      const { blob, base64, mimeType } = await fetchImageBlob(imageUrl)
+      fallbackImagePart = { base64, mimeType }
+      try {
+        const file = await uploadImageForVision(blob, mimeType)
+        imagePart = { fileUri: file.uri, mimeType: file.mimeType }
+        uploadedFileName = file.name
+      } catch {
+        imagePart = fallbackImagePart
+      }
     }
-    const raw = await generateListingFields({ systemInstruction, promptText, imagePart, targets: targetSpecs })
+    const raw = await generateListingFieldsWithFallback({ systemInstruction, promptText, imagePart, fallbackImagePart, targets: targetSpecs })
     return { rowIndex, fields: sanitizeGeneratedFields(raw, targetSpecs) }
   } catch (err) {
     return { rowIndex, error: err.message || 'AI generation failed' }
