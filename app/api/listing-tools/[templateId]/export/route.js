@@ -4,7 +4,7 @@ import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
   ensureTrailingEmptyRow, upsertRowsByOwner, assignSkusToRows, canAccessTemplate, GROUPS,
 } from '@/lib/listingTemplates'
-import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory } from '@/lib/listingHistory'
+import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory, toLabelKeyedRow } from '@/lib/listingHistory'
 import { runServerBillingGate } from '@/lib/serverBilling'
 
 // One request for the entire Download/Save action: (1) merge + persist any
@@ -117,6 +117,12 @@ export async function POST(req, { params }) {
   // per group. "Existing" here is this same request's own fresh read of
   // `content` above, never a client-cached copy, so this can't resurrect a
   // row someone/something else already removed or changed.
+  // Populated alongside the merge loop below, only when `sessionRows` was sent (Auto Listing's
+  // Download/Save) — this session's own rows, deduped against each other only (never against
+  // whatever was already saved), so the file this request's caller downloads reflects exactly
+  // what was just typed, not the full accumulated history that `content` (persisted below) holds.
+  const sessionOnlyByGroup = {}
+
   if (sessionRows) {
     const rowCountPatch = {}
     const historyJobs = []
@@ -126,7 +132,9 @@ export async function POST(req, { params }) {
       const sheetIndex = content.sheets.findIndex((s) => s.group === group)
       const existingSheet = content.sheets[sheetIndex]
       const effectiveHeaders = existingSheet?.headers || []
-      const merged = [...(existingSheet?.rows || []).filter((r) => !isRowEmpty(r)), ...incoming.filter((r) => !isRowEmpty(r))]
+      const incomingFilled = incoming.filter((r) => !isRowEmpty(r))
+      sessionOnlyByGroup[group] = upsertRowsByOwner(payload.userId, effectiveHeaders, incomingFilled)
+      const merged = [...(existingSheet?.rows || []).filter((r) => !isRowEmpty(r)), ...incomingFilled]
       const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, merged)
       const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, upserted)
       const nextSheet = { ...(existingSheet || {}), sheetName: existingSheet?.sheetName, group, headers: effectiveHeaders, rows: normalizedRows }
@@ -144,9 +152,14 @@ export async function POST(req, { params }) {
         if (keyHeader) {
           const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[keyHeader.id] ?? '').trim())
           if (group === 'design_system') {
+            const groupHeader = effectiveHeaders.find((h) => h.isProductGroupField)
             historyJobs.push(syncProductDetailsHistory(req, {
               templateId, templateName: meta.templateName,
-              rows: ownRows.map((r) => ({ productNumber: r[keyHeader.id], rowData: r })),
+              rows: ownRows.map((r) => ({
+                productNumber: r[keyHeader.id],
+                rowData: toLabelKeyedRow(effectiveHeaders, r),
+                groupName: groupHeader ? r[groupHeader.id] : undefined,
+              })),
             }))
           } else {
             historyJobs.push(syncPrefillDetailsHistory(req, {
@@ -187,8 +200,28 @@ export async function POST(req, { params }) {
         sheet.rows = rows
         await saveTemplateContent(templateId, content)
       }
+      // Backfill the sku this just assigned onto this session's own rows too (see
+      // sessionOnlyByGroup above) — keyed the same way upsertRowsByOwner keys rows, so a
+      // brand-new product typed this session still shows its real sku in the exported file
+      // instead of coming up blank. Skipped when the sheet has no unique-key header at all
+      // (shouldn't happen for design_system in practice) since the key would collapse to the
+      // same value for every row.
+      const keyHeaders = (sheet.headers || []).filter((h) => h.isUniqueKeyPart)
+      if (sessionOnlyByGroup.design_system && keyHeaders.length > 0) {
+        const keyOf = (row) => (row.userId ?? 'unowned') + '::' + keyHeaders.map((h) => String(row[h.id] ?? '').trim().toLowerCase()).join('::')
+        const skuByKey = new Map(sheet.rows.map((r) => [keyOf(r), r.sku]))
+        sessionOnlyByGroup.design_system = sessionOnlyByGroup.design_system.map((r) => ({ ...r, sku: skuByKey.get(keyOf(r)) ?? r.sku }))
+      }
     }
   }
 
-  return NextResponse.json({ ok: true, quantity, content, ...gate.data })
+  // Sent alongside the full, persisted `content` (which Product Details/Prefill Details'
+  // Download still relies on, since those pages legitimately export every previously-saved row —
+  // they never send `sessionRows`) — only Auto Listing's Download uses this, since only it ever
+  // sends `sessionRows` in the first place.
+  const exportContent = sessionRows
+    ? { ...content, sheets: content.sheets.map((s) => ({ ...s, rows: sessionOnlyByGroup[s.group] || [] })) }
+    : null
+
+  return NextResponse.json({ ok: true, quantity, content, exportContent, ...gate.data })
 }

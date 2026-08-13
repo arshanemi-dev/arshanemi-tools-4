@@ -53,11 +53,15 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
   }, [])
 
   const isActive = (href) => (href === '/listing-tools' ? pathname === '/listing-tools' : pathname.startsWith(href))
-  // Destination is the Product Details page's single-template scoped view
-  // (?template=), not Choose Your Template's stacked [templateId] page —
-  // picking a template here opens one tab at a time, first tab selected.
-  const activeTemplateId = pathname === '/listing-tools/product-details' ? searchParams.get('template') : null;
-  const activateTemplateNav=pathname === '/listing-tools/product-details' ? 'product-details' : pathname === '/listing-tools/prefill-details' ? 'prefill-details' : pathname === '/listing-tools/templates' ? 'templates' : null;
+  // Which of the three dropdown-driven group pages (Auto Listing, Product Details, Prefill
+  // Details) the viewer is currently on, and which template's ?template= is open there — drives
+  // the indigo "currently open" highlight below, on both the group label and its matching
+  // template link. Previously this only ever recognized Product Details' own path, so opening a
+  // template from Prefill Details (or Auto Listing itself) never highlighted anything even
+  // though a real template was open.
+  const GROUP_PATHS = { '/listing-tools/auto-details': 'auto-details', '/listing-tools/product-details': 'product-details', '/listing-tools/prefill-details': 'prefill-details' }
+  const activateTemplateNav = GROUP_PATHS[pathname] || null
+  const activeTemplateId = activateTemplateNav ? searchParams.get('template') : null
 
   return (
     <aside className="w-48 flex-shrink-0 h-full bg-[#0a0a0a] flex flex-col overflow-y-auto py-5
@@ -69,7 +73,9 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
             // "Auto Listing" is a dropdown label only — it never navigates
             // anywhere itself, it just introduces the template list below it.
             <div key={item.href}>
-              <div className="px-5 py-2.5 text-[15px] font-semibold mb-1 text-white/75">{item.label}</div>
+              <div className={`px-5 py-2.5 text-[15px] font-semibold mb-1 transition-colors ${
+                item.templateNav === activateTemplateNav ? 'text-indigo-400' : 'text-white/75'
+              }`}>{item.label}</div>
               {myTemplates.length > 0 && (
                 <ul className="pb-2">
                   {myTemplates.map((t) => (
@@ -77,7 +83,7 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
                       <Link
                         href={`/listing-tools/${item.templateNav}?template=${t.templateId}`}
                         className={`flex items-center gap-2 pl-7 pr-5 py-1.5 text-[13px] transition-colors ${
-                          t.templateId === activeTemplateId&&item.templateNav === activateTemplateNav ? 'text-emerald-400 font-medium' : 'text-white/55 hover:text-white'
+                          t.templateId === activeTemplateId&&item.templateNav === activateTemplateNav ? 'text-indigo-400 font-medium' : 'text-white/55 hover:text-white'
                         }`}
                       >
                         <span className="w-1 h-1 rounded-full bg-current flex-shrink-0" />
@@ -93,7 +99,7 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
               key={item.href}
               href={item.href}
               className={`block px-5 py-2.5 text-[13.5px] font-medium transition-colors ${
-                isActive(item.href) ? 'bg-black text-white' : 'text-white/75 hover:text-white hover:bg-white/5'
+                isActive(item.href) ? 'bg-indigo-600/15 text-indigo-300' : 'text-white/75 hover:text-white hover:bg-white/5'
               }`}
             >
               {item.label}

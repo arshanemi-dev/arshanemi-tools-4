@@ -4,7 +4,7 @@ import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
   ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS, canAccessTemplate,
 } from '@/lib/listingTemplates'
-import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory } from '@/lib/listingHistory'
+import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory, toLabelKeyedRow } from '@/lib/listingHistory'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -73,9 +73,14 @@ export async function PATCH(req, { params }) {
     if (keyHeader) {
       const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[keyHeader.id] ?? '').trim())
       if (group === 'design_system') {
+        const groupHeader = effectiveHeaders.find((h) => h.isProductGroupField)
         await syncProductDetailsHistory(req, {
           templateId, templateName: meta.templateName,
-          rows: ownRows.map((r) => ({ productNumber: r[keyHeader.id], rowData: r })),
+          rows: ownRows.map((r) => ({
+            productNumber: r[keyHeader.id],
+            rowData: toLabelKeyedRow(effectiveHeaders, r),
+            groupName: groupHeader ? r[groupHeader.id] : undefined,
+          })),
         })
       } else {
         await syncPrefillDetailsHistory(req, {

@@ -60,3 +60,16 @@ export function backfillEmptyFields(headers, row, matchedRow) {
   }
   return Object.keys(extra).length ? extra : null
 }
+
+// Inverse of lib/listingHistory.js's toLabelKeyedRow — remaps a label-keyed snapshot
+// (possibly saved from a different template, since Product Group membership is
+// cross-template) onto THIS sheet's own header ids, by label, so backfillEmptyFields
+// above can be reused unchanged as the fill mechanism.
+export function rowFromLabelKeyed(headers, labelKeyedRow) {
+  if (!labelKeyedRow) return null
+  const out = {}
+  for (const h of headers || []) {
+    if (h.label && h.label in labelKeyedRow) out[h.id] = labelKeyedRow[h.label]
+  }
+  return out
+}

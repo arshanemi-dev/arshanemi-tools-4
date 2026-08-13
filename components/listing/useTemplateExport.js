@@ -35,10 +35,13 @@ export default function useTemplateExport(templateId) {
         return
       }
 
-      // The route returns the exact post-merge, post-SKU-assignment content — use it directly
-      // instead of re-deriving sheets client-side, so the exported file always matches what was
-      // just billed for.
-      const effectiveTemplate = billResult.content ? { ...template, sheets: billResult.content.sheets } : template
+      // `exportContent` (only present when this call sent `sessionRows`, i.e. Auto Listing) holds
+      // just this session's own rows, post-SKU-assignment — the file should show exactly what was
+      // just typed, not the full accumulated history `content` carries. Product Details/Prefill
+      // Details never send `sessionRows`, so they keep falling back to `content` (their whole
+      // point is exporting every previously-saved row).
+      const exportSource = billResult.exportContent || billResult.content
+      const effectiveTemplate = exportSource ? { ...template, sheets: exportSource.sheets } : template
 
       if (format === 'excel') await downloadExcelSmart(effectiveTemplate, meta, { groups })
       else await downloadPdf(effectiveTemplate, { groups })

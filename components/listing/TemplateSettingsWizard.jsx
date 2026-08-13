@@ -8,7 +8,7 @@ import PillButton from './PillButton'
 import GroupTabsStep, { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import PresetExportSection from './PresetExportSection'
 import AiRulesSection from './AiRulesSection'
-import { HEADER_ROW_INDEX } from '@/lib/listingSheetLayout'
+import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX } from '@/lib/listingSheetLayout'
 import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
 
 // Same 4 groups every other Listing Tools screen renders against (see
@@ -45,6 +45,15 @@ function slugify(label) {
 }
 function normalize(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+// Section 2's 4 row inputs are 1-based (matching Excel's own row numbers) —
+// converts to the 0-based index buildFields/buildDropdownColumns need,
+// falling back to fallbackIdx while the input is blank/not-a-number (e.g.
+// right after a sheet is cleared, before its default is set).
+function parseRowInput(raw, fallbackIdx) {
+  const n = Number(raw)
+  if (raw === '' || raw === null || raw === undefined || Number.isNaN(n)) return fallbackIdx
+  return Math.max(0, Math.trunc(n) - 1)
 }
 function detectDataType(label) {
   return /image|photo|img/i.test(label || '') ? 'image' : 'text'
@@ -225,19 +234,34 @@ function findDropdownHeaderRowIndex(aoa) {
   return 0
 }
 
+// Section 2's "Header Row" / "Dropdown Values Row" inputs pre-fill with
+// whatever findDropdownHeaderRowIndex's scan would have picked anyway — the
+// user only needs to touch them when a particular Dropdown Reference Sheet
+// doesn't follow that guess (e.g. an extra title row pushes the real header
+// down). Both 0-based, values row defaults to the row right under the header.
+function computeDropdownRowDefaults(XLSX, workbook, sheetName) {
+  const ws = sheetName ? workbook?.Sheets[sheetName] : null
+  if (!ws) return { header: 0, values: 1 }
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
+  const header = findDropdownHeaderRowIndex(aoa)
+  return { header, values: header + 1 }
+}
+
 // Section 2 is now a single Product Data Sheet + a single (optional)
 // Dropdown Reference Sheet, matching source/11.html exactly — no more
-// multi-sheet checkbox selection.
-function buildDropdownColumns(XLSX, workbook, dropdownSheetName) {
+// multi-sheet checkbox selection. headerRowIdx/valuesRowIdx (both 0-based)
+// come from Section 2's own "Header Row" / "Dropdown Values Row" inputs —
+// defaulted by computeDropdownRowDefaults above, but user-editable, since a
+// real Dropdown Reference Sheet doesn't always land on the guessed rows.
+function buildDropdownColumns(XLSX, workbook, dropdownSheetName, headerRowIdx, valuesRowIdx) {
   const out = {}
   if (!dropdownSheetName) return out
   const ws = workbook.Sheets[dropdownSheetName]
   if (!ws) return out
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
   if (!aoa.length) return out
-  const headerRowIdx = findDropdownHeaderRowIndex(aoa)
   const headerRow = (aoa[headerRowIdx] || []).map((v) => String(v ?? '').trim())
-  const dataRows = aoa.slice(headerRowIdx + 1)
+  const dataRows = aoa.slice(Math.max(valuesRowIdx, 0))
   headerRow.forEach((col, colIdx) => {
     if (!col) return
     // Only real, short option values — not filler/placeholder text (see
@@ -251,19 +275,28 @@ function buildDropdownColumns(XLSX, workbook, dropdownSheetName) {
         .map((v) => String(v).trim())
         .filter((v) => v.length < 70 && !isPlaceholderValue(v))
     )]
-    if (values.length) out[col] = { sheetName: dropdownSheetName, columnName: col, values }
+    // Dropdown logic: a column needs at least 2 distinct real values to
+    // count as a dropdown at all — one (or zero) values isn't a pick-list,
+    // it's a constant/empty column, so it's left out here and the header
+    // that matches it falls back to a plain text field (see buildFields'
+    // dropdownMatch/dataType below).
+    if (values.length >= 2) out[col] = { sheetName: dropdownSheetName, columnName: col, values }
   })
   return out
 }
 
-function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
+// headerRowIdx/groupRowIdx (both 0-based) come from Section 2's own "Header
+// Row" / "Group Row" inputs — defaulted to HEADER_ROW_INDEX/
+// GROUP_LABEL_ROW_INDEX (the fixed layout confirmed against the real master
+// sheet, see listingSheetLayout.js), but user-editable, since not every
+// uploaded file follows that exact layout.
+function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowIdx, groupRowIdx) {
   const fields = []
   if (!dataSheetName) return fields
   const ws = workbook.Sheets[dataSheetName]
   if (!ws) return fields
   const dropdownNames = Object.keys(dropdownColumns)
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
-  const headerRowIdx = findHeaderRowIndex(aoa)
   const rawHeaderRow = aoa[headerRowIdx] || []
 
   // The row directly above the real header row is often a group-label row
@@ -272,7 +305,6 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns) {
   // land pre-sorted on the Kanban board instead of all starting Unselected.
   // Falls back to Unselected wherever there's no row above, or no match —
   // safe no-op for simple sheets that don't have a group-label row at all.
-  const groupRowIdx = headerRowIdx - 1
   const groupRow = groupRowIdx >= 0 ? forwardFillRow(aoa[groupRowIdx] || [], rawHeaderRow.length) : []
   // Task 3's own-column dropdown auto-detect needs the actual data rows,
   // not just the header row.
@@ -433,6 +465,7 @@ function fieldsFromContent(content) {
         // doesn't drop it from dropdownSource.
         dropdownSheetName: h.dropdownSource?.sheetName || null,
         isUniqueKeyPart: !!h.isUniqueKeyPart,
+        isProductGroupField: !!h.isProductGroupField,
         // Undefined on templates saved before this existed — handled as
         // "not format-preservable" downstream, never crashes.
         sourceColIndex: h.sourceColIndex,
@@ -473,6 +506,27 @@ function LockedNote({ children }) {
   )
 }
 
+// Section 2's 4 row-position inputs — a plain 1-based number field per
+// row (Group Row / Header Row for the Product Data Sheet, Header Row /
+// Dropdown Values Row for the Dropdown Reference Sheet). Pre-filled with
+// whatever the app auto-detected, but a controlled input the user can
+// overwrite freely — see the row-default wiring in handleFile/the sheet
+// selects/the rebuild useEffect above.
+function RowNumberInput({ label, value, onChange }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-medium text-gray-500 mb-1">{label}</label>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2.5 py-1.5 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+      />
+    </div>
+  )
+}
+
 // Single-page template creation/edit flow. Create mode: upload → pick the
 // Product Data Sheet (+ optional Dropdown Reference Sheet) → group the
 // resulting fields on a Kanban board → configure export preset + AI rules →
@@ -493,6 +547,14 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [sheetMeta, setSheetMeta] = useState([]) // [{name,colCount,rowCount}]
   const [dataSheetName, setDataSheetName] = useState('')
   const [dropdownSheetName, setDropdownSheetName] = useState('')
+  // Section 2's 4 row-position inputs — all 1-based (as shown to the user,
+  // matching Excel's own row numbering), defaulted whenever their sheet is
+  // (re)selected but freely user-editable afterward. Kept blank ('') until a
+  // sheet is picked so the inputs render empty rather than a stale number.
+  const [dataGroupRow, setDataGroupRow] = useState('')
+  const [dataHeaderRow, setDataHeaderRow] = useState('')
+  const [dropdownHeaderRow, setDropdownHeaderRow] = useState('')
+  const [dropdownValuesRow, setDropdownValuesRow] = useState('')
   const [parsing, setParsing] = useState(false)
   // The raw file itself, uploaded to Blob storage alongside the client-side
   // parse so the Excel Formats tab and format-preserving exports can later
@@ -575,11 +637,21 @@ export default function TemplateSettingsWizard({ templateId }) {
       const nextDataSheetName = dataGuess || wb.SheetNames[0] || ''
       const validationGuess = wb.SheetNames.find((n) => n !== nextDataSheetName && guessIsValidationSheet(n))
       const nextDropdownSheetName = validationGuess || wb.SheetNames.find((n) => n !== nextDataSheetName) || ''
+      // Section 2's 4 row inputs default the moment a sheet is picked — Fill
+      // Sheet's Group/Header Row default to the app's fixed, confirmed
+      // layout (same constants findHeaderRowIndex used to hardcode);
+      // Validation Sheet's Header/Values Row default off an actual scan of
+      // its content, since a reference sheet's layout varies file to file.
+      const dropdownDefaults = computeDropdownRowDefaults(XLSX, wb, nextDropdownSheetName)
       setWorkbook(wb)
       setFileName(file.name)
       setSheetMeta(meta)
       setDataSheetName(nextDataSheetName)
       setDropdownSheetName(nextDropdownSheetName)
+      setDataGroupRow(nextDataSheetName ? GROUP_LABEL_ROW_INDEX + 1 : '')
+      setDataHeaderRow(nextDataSheetName ? HEADER_ROW_INDEX + 1 : '')
+      setDropdownHeaderRow(nextDropdownSheetName ? dropdownDefaults.header + 1 : '')
+      setDropdownValuesRow(nextDropdownSheetName ? dropdownDefaults.values + 1 : '')
       setShowGroups(false)
       setFields([])
       setDropdownColumns({})
@@ -626,15 +698,19 @@ export default function TemplateSettingsWizard({ templateId }) {
     let cancelled = false
     import('xlsx').then((XLSX) => {
       if (cancelled) return
-      const cols = buildDropdownColumns(XLSX, workbook, dropdownSheetName)
-      const built = buildFields(XLSX, workbook, dataSheetName, cols)
+      const headerRowIdx = parseRowInput(dataHeaderRow, HEADER_ROW_INDEX)
+      const groupRowIdx = parseRowInput(dataGroupRow, GROUP_LABEL_ROW_INDEX)
+      const dropHeaderRowIdx = parseRowInput(dropdownHeaderRow, 0)
+      const dropValuesRowIdx = parseRowInput(dropdownValuesRow, dropHeaderRowIdx + 1)
+      const cols = buildDropdownColumns(XLSX, workbook, dropdownSheetName, dropHeaderRowIdx, dropValuesRowIdx)
+      const built = buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx)
       setDropdownColumns(cols)
       setFields(withDefaultHeaders(built))
       setShowGroups(true)
       setBulkTargetId(UNMAPPED_TAB_ID)
     })
     return () => { cancelled = true }
-  }, [workbook, dataSheetName, dropdownSheetName])
+  }, [workbook, dataSheetName, dropdownSheetName, dataHeaderRow, dataGroupRow, dropdownHeaderRow, dropdownValuesRow])
 
   function updateField(id, patch) {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)))
@@ -730,6 +806,10 @@ export default function TemplateSettingsWizard({ templateId }) {
     setSheetMeta([])
     setDataSheetName('')
     setDropdownSheetName('')
+    setDataGroupRow('')
+    setDataHeaderRow('')
+    setDropdownHeaderRow('')
+    setDropdownValuesRow('')
     setSourceFileUrl('')
     setUploadingSource(false)
     setShowGroups(false)
@@ -765,6 +845,7 @@ export default function TemplateSettingsWizard({ templateId }) {
         group: g.id,
         dataType: f.dataType,
         isUniqueKeyPart: f.isUniqueKeyPart,
+        isProductGroupField: !!f.isProductGroupField,
         sourceColIndex: f.sourceColIndex,
         linkedGroup: f.linkedGroup || null,
         linkedHeaderId: f.linkedHeaderId || null,
@@ -959,6 +1040,12 @@ export default function TemplateSettingsWizard({ templateId }) {
                     onChange={(e) => {
                       const val = e.target.value
                       setDataSheetName(val)
+                      // Re-defaults to the app's fixed layout every time a
+                      // (possibly different) sheet is picked — same "fresh
+                      // read" behavior as the fields themselves, still
+                      // user-editable afterward via the inputs below.
+                      setDataGroupRow(val ? GROUP_LABEL_ROW_INDEX + 1 : '')
+                      setDataHeaderRow(val ? HEADER_ROW_INDEX + 1 : '')
                       if (!val) {
                         setShowGroups(false)
                         setFields([])
@@ -972,13 +1059,34 @@ export default function TemplateSettingsWizard({ templateId }) {
                       <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
                     ))}
                   </select>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <RowNumberInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
+                    <RowNumberInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Dropdowns Reference Sheet</label>
                   <select
                     value={dropdownSheetName}
-                    onChange={(e) => setDropdownSheetName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setDropdownSheetName(val)
+                      if (!val || !workbook) {
+                        setDropdownHeaderRow('')
+                        setDropdownValuesRow('')
+                        return
+                      }
+                      // Scans the newly-picked sheet fresh, same reasoning
+                      // as the Product Data Sheet's reset above — a
+                      // different reference sheet can have its header on a
+                      // different row entirely.
+                      import('xlsx').then((XLSX) => {
+                        const { header, values } = computeDropdownRowDefaults(XLSX, workbook, val)
+                        setDropdownHeaderRow(header + 1)
+                        setDropdownValuesRow(values + 1)
+                      })
+                    }}
                     className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
                   >
                     <option value="">-- None --</option>
@@ -986,6 +1094,10 @@ export default function TemplateSettingsWizard({ templateId }) {
                       <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
                     ))}
                   </select>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <RowNumberInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
+                    <RowNumberInput label="Dropdown Values Row" value={dropdownValuesRow} onChange={setDropdownValuesRow} />
+                  </div>
                 </div>
               </div>
             </div>

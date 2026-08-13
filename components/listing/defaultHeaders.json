@@ -1,5 +1,6 @@
 {
   "design_system": [
+    { "label": "Product Group", "dataType": "text", "isProductGroupField": true },
     { "label": "Product Number", "dataType": "text", "isUniqueKeyPart": true },
     { "label": "Cost", "dataType": "text" },
     { "label": "Highlights", "dataType": "text" },

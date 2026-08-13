@@ -13,7 +13,7 @@ import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
 import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/components/listing/linkedHeaders'
-import { findGroupKeyMatch, backfillEmptyFields } from '@/components/listing/historyFill'
+import { findGroupKeyMatch, backfillEmptyFields, rowFromLabelKeyed } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
@@ -72,6 +72,9 @@ function ScopedAutoDetails({ templateId }) {
   const [saveGate, setSaveGate] = useState(null)
   const [fillingUpAll, setFillingUpAll] = useState(false)
   const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
+  const [groupNames, setGroupNames] = useState([])
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const [applyingGroup, setApplyingGroup] = useState(false)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
@@ -93,6 +96,17 @@ function ScopedAutoDetails({ templateId }) {
       })
     return () => { cancelled = true }
   }, [templateId])
+
+  // Product Group scope is cross-template, per user (see
+  // scripts/listing_product_groups_migration.sql) — this list isn't scoped to
+  // `templateId` at all, so it's fetched once, independent of the template load above.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/listing-tools/product-details-history?groupsOnly=true', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setGroupNames(d.groups || []) })
+    return () => { cancelled = true }
+  }, [])
 
   const sheetsByGroup = useMemo(
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
@@ -289,6 +303,78 @@ function ScopedAutoDetails({ templateId }) {
     })
   }
 
+  // Product Group selector — backfills every row *already in this session's* Product Details
+  // block whose Product Number matches a member of the picked group, from that member's saved
+  // default data (join done server-side, see lib/db.js's getProductGroupMembers). Deliberately
+  // never adds a new row for a group member that isn't already typed here — "fillup all rows
+  // existing" — and reuses the exact same backfillEmptyFields/recomputeFormulas/propagateFromGroup
+  // primitives handleCellReconciliation above uses, just looped over every matching row index
+  // instead of one just-edited index, so fill-only-blank semantics (never overwrite a typed
+  // cell) and the cross-group cascade into Compulsory/Prefill/Optional both come for free.
+  async function handleGroupSelect(groupName) {
+    if (!groupName || !sheetsByGroup.design_system) return
+    setApplyingGroup(true)
+    try {
+      const res = await fetch(`/api/listing-tools/product-details-history?groupName=${encodeURIComponent(groupName)}`, { credentials: 'include' })
+      const { members = [] } = await res.json().catch(() => ({}))
+      if (!members.length) {
+        addToast('No saved data for that group yet', 'info')
+        return
+      }
+
+      const designHeaders = sheetsByGroup.design_system.headers
+      const keyHeader = designHeaders.find((h) => h.isUniqueKeyPart)
+      if (!keyHeader) return
+      const byKey = new Map(members.map((m) => [String(m.productNumber ?? '').trim().toLowerCase(), m.rowData]))
+
+      let matchedCount = 0
+      setSessionRows((prev) => {
+        const working = { ...prev }
+
+        function getRow(group, idx) {
+          const rows = working[group] || prev[group] || []
+          return rows[idx]
+        }
+        function setRow(group, idx, nextRow) {
+          const rows = [...(working[group] || [])]
+          rows[idx] = nextRow
+          working[group] = rows
+        }
+        function applyUpdates(updates, idx) {
+          if (!updates) return
+          for (const [group, fields] of Object.entries(updates)) {
+            setRow(group, idx, { ...getRow(group, idx), ...fields })
+          }
+        }
+
+        ;(working.design_system || []).forEach((row, rowIndex) => {
+          const key = String(row[keyHeader.id] ?? '').trim().toLowerCase()
+          if (!key || !byKey.has(key)) return
+          const matched = rowFromLabelKeyed(designHeaders, byKey.get(key))
+          const backfill = backfillEmptyFields(designHeaders, row, matched)
+          if (!backfill) return
+          matchedCount++
+          let nextRow = { ...row, ...backfill }
+          const formulaExtra = recomputeFormulas(designHeaders, nextRow, undefined)
+          if (formulaExtra) nextRow = { ...nextRow, ...formulaExtra }
+          setRow('design_system', rowIndex, nextRow)
+          applyUpdates(propagateFromGroup('design_system', nextRow, ownSheetsByGroup), rowIndex)
+        })
+
+        return working
+      })
+      addToast(
+        matchedCount ? `Applied "${groupName}" defaults to ${matchedCount} row(s)` : 'No rows in this sheet match that group yet',
+        matchedCount ? 'success' : 'info'
+      )
+    } finally {
+      setApplyingGroup(false)
+      // Reverts the <select> to its placeholder so re-picking the same group again later (e.g.
+      // after adding more rows) still fires onChange.
+      setSelectedGroup('')
+    }
+  }
+
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
   // one-trailing-blank-row behavior. Since this session never autosaves
@@ -471,6 +557,22 @@ function ScopedAutoDetails({ templateId }) {
           />
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedGroup}
+            disabled={!content || applyingGroup || groupNames.length === 0}
+            onChange={(e) => {
+              const groupName = e.target.value
+              setSelectedGroup(groupName)
+              if (groupName) handleGroupSelect(groupName)
+            }}
+            title={groupNames.length ? 'Fill existing rows from a saved Product Group' : 'No Product Groups saved yet'}
+            className="px-2.5 py-1.5 text-[12.5px] font-semibold text-indigo-600 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+          >
+            <option value="">{applyingGroup ? 'Applying…' : 'Product Group…'}</option>
+            {groupNames.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
           <PillButton
             variant="ai"
             icon={Sparkles}
