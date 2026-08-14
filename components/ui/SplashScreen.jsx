@@ -69,8 +69,8 @@ export default function SplashScreen() {
           >
             <div className="relative w-16 h-16 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
               <Image
-                src="/images/arshanemi-logo.png"
-                alt="Arshanemi"
+                src="/images/barmeto-logo.png"
+                alt="Barmeto"
                 width={40}
                 height={40}
                 priority

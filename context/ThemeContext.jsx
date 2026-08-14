@@ -12,7 +12,7 @@ import { defaultTheme } from '@/data/defaultTheme'
 const THEME_CACHE_KEY = 'arshanemi-theme-config'
 const THEME_CACHE_TTL = 10 * 60 * 1000 // 10 min
 
-const ThemeContext = createContext({ theme: 'dark', siteTheme: defaultTheme })
+const ThemeContext = createContext({ theme: 'light', siteTheme: defaultTheme })
 
 function hexToRgb(hex) {
   const r = parseInt(hex.slice(1, 3), 16)
@@ -71,7 +71,7 @@ function applyBorderRadius(borderRadius) {
 }
 
 function applyFullTheme(siteTheme) {
-  const mode = siteTheme.mode || 'dark'
+  const mode = siteTheme.mode || 'light'
   const colors = siteTheme[mode] || siteTheme.dark || {}
   document.documentElement.setAttribute('data-theme', mode)
   applyColors(colors)
@@ -115,7 +115,7 @@ export function ThemeProvider({ children }) {
   }, [])
 
   // mode exposed for any component that needs to read it (e.g. conditional shadow)
-  const theme = siteTheme.mode || 'dark'
+  const theme = siteTheme.mode || 'light'
 
   return (
     <ThemeContext.Provider value={{ theme, siteTheme }}>
