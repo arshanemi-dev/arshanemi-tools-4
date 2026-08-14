@@ -38,11 +38,19 @@ export default function SheetGrid({
   // `onCellChange` lets a caller react to one cell's edit with more edits in
   // the same row (e.g. auto-filling other columns once a product is
   // matched); `pickerOptions` is a plain {[headerId]: string[]} map of
-  // suggested values rendered as a native <datalist> on that column's text
-  // input — browsable, but (unlike ComboboxCell) still free-typeable, since
-  // a picker header must stay usable for entering a brand-new value too.
+  // suggested values rendered with the same ComboboxCell used for a real
+  // `dropdown` column — still free-typeable (a picker header must stay
+  // usable for entering a brand-new value, e.g. a new Product Number), just
+  // with the same searchable/clear/keyboard-nav UI everywhere else in the grid.
   onCellChange,
   pickerOptions = {},
+  // Set of `${rowIndex}:${headerId}` keys currently mid-async-fill (e.g. Auto Details' Product
+  // Group lookup+backfill, see its own `loadingCells`) — optional, only a picker-backed
+  // ComboboxCell ever reads it, and only to show/disable while its own commit's follow-up work
+  // is still in flight. Every picker commit gets its own brief local spinner flash regardless of
+  // this prop (see ComboboxCell.jsx's `justSelected`), so a caller with nothing async to report
+  // can simply omit this entirely.
+  loadingCells,
   // Formula-type headers can be authored two places: Template Settings'
   // GroupTabsStep card, or directly here in the column header while looking
   // at real data — optional, since not every SheetGrid caller wants to
@@ -56,6 +64,30 @@ export default function SheetGrid({
   onImageUploaded,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+  // Freeze-panes: the header row stays pinned while rows scroll (below, via
+  // `max-h-[70vh] overflow-auto` on the table's own wrapper — same 70vh
+  // scroll-region convention GroupTabsStep.jsx's Kanban board already uses),
+  // and whichever column is this sheet's own unique key (Product Number for
+  // design_system/compulsory/optional, Brand for prefill) stays pinned on
+  // the left while the rest of the row scrolls horizontally — so no matter
+  // how far you've scrolled in either direction, you can always see *which
+  // column* (header) and *which product* (key column) a cell belongs to.
+  // Falls back to no left-pinned column at all if nothing on this sheet is
+  // flagged `isUniqueKeyPart` (some Compulsory/Prefill/Optional sheets may
+  // not have one), rather than guessing at some other column.
+  const stickyKeyHeaderId = sortedHeaders.find((h) => h.isUniqueKeyPart)?.id
+  const stickyLeftCls = selectable ? 'left-10' : 'left-0'
+  // The checkbox column is the last (rightmost) frozen column only when there's no
+  // isUniqueKeyPart column to its right also being pinned — that's the one whose right edge is
+  // the real freeze boundary and needs the harder border below, not the (thin, normal) line
+  // between two columns that are both already frozen.
+  const checkboxIsLastSticky = selectable && !stickyKeyHeaderId
+  // Hard 2px border instead of the grid's normal 1px hairline — marks the actual freeze
+  // boundary (bottom of the pinned header row, right edge of the pinned key column) so it reads
+  // as a real seam, not just another gridline.
+  const stickyRightBorderCls = 'border-r-2 border-r-gray-300'
+  const plainRightBorderCls = 'border-r border-gray-200'
 
   // One shared bulk-upload session for the whole grid — any ImageCell that
   // receives more than one file at once delegates to this instead of its
@@ -123,12 +155,23 @@ export default function SheetGrid({
           <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-gray-500'}`}>{bulk.message.text}</p>
         </div>
       )}
-      <div className="overflow-auto">
-      <table className="w-full border-collapse text-[13px]">
+      <div className="max-h-[70vh] overflow-auto">
+      {/* `border-separate` (not `collapse`) is required for the sticky header/column borders
+          above to stay visible while scrolling — `border-collapse` shares a border between two
+          adjacent cells, and once one of them is repositioned by `position: sticky`, browsers
+          lose track of which cell owns painting that shared edge and it clips/disappears mid-scroll.
+          `border-spacing-0` keeps cells touching edge-to-edge exactly as collapse did; no visual
+          double-border risk here since every cell only ever declares its own bottom/right border,
+          never top/left, so there's nothing for a neighbor to double up against. */}
+      <table className="w-full border-separate border-spacing-0 text-[13px]">
         <thead>
           <tr className="bg-white">
             {selectable && (
-              <th className="h-[80px] sticky left-0 z-10 bg-white border-b border-r border-gray-200 w-10 px-3 py-2.5 align-top">
+              <th
+                className={`h-[80px] sticky top-0 left-0 z-30 bg-white border-b-2 border-b-gray-300 w-10 px-3 py-2.5 align-top ${
+                  checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -138,10 +181,17 @@ export default function SheetGrid({
               </th>
             )}
             {sortedHeaders.map((h) => (
-              <th key={h.id} className="h-[80px] border-b border-r border-gray-200 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap align-top">
+              <th
+                key={h.id}
+                className={`h-[80px] sticky top-0 z-20 bg-white border-b-2 border-b-gray-300 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap align-top ${
+                  h.id === stickyKeyHeaderId ? `${stickyLeftCls} z-30 ${stickyRightBorderCls}` : plainRightBorderCls
+                }`}
+              >
                 <div className="flex items-center gap-1.5">
                   <span title={h.description || undefined}>{h.label}</span>
-                  {(h.dataType === 'dropdown' || h.dataType === 'multiselect') && <ChevronDown className="w-3 h-3 text-gray-400" />}
+                  {(h.dataType === 'dropdown' || h.dataType === 'multiselect' || pickerOptions[h.id]?.length > 0) && (
+                    <ChevronDown className="w-3 h-3 text-gray-400" />
+                  )}
                   {h.disabled && <Lock className="w-3 h-3 text-gray-400" title="Read-only — filled automatically" />}
                   {onFilterChange && h.isUniqueKeyPart && (
                     <button
@@ -192,7 +242,11 @@ export default function SheetGrid({
           {rows.map((row, rowIndex) => (
             <tr key={rowIndex} className="hover:bg-gray-50/80 group">
               {selectable && (
-                <td className="sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-b border-r border-gray-200 px-3 py-2">
+                <td
+                  className={`sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-b border-gray-200 px-3 py-2 ${
+                    checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
+                  }`}
+                >
                   {!isRowEmpty(row) && (
                     <input
                       type="checkbox"
@@ -203,13 +257,16 @@ export default function SheetGrid({
                   )}
                 </td>
               )}
-              {sortedHeaders.map((h) => (
+              {sortedHeaders.map((h) => {
+                const aiFilled = row.aiFilled?.includes(h.id)
+                const isStickyKey = h.id === stickyKeyHeaderId
+                return (
                 <td
                   key={h.id}
-                  title={row.aiFilled?.includes(h.id) ? 'Filled by AI' : undefined}
-                  className={`h-[140px] border-b border-r border-gray-200 p-0 align-middle ${
-                    row.aiFilled?.includes(h.id) ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : ''
-                  }`}
+                  title={aiFilled ? 'Filled by AI' : undefined}
+                  className={`h-[140px] border-b border-gray-200 p-0 align-middle ${isStickyKey ? stickyRightBorderCls : plainRightBorderCls} ${
+                    aiFilled ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : isStickyKey ? 'bg-white group-hover:bg-gray-50' : ''
+                  } ${isStickyKey ? `sticky z-10 ${stickyLeftCls}` : ''}`}
                 >
                   {h.dataType === 'image' ? (
                     <ImageCell
@@ -234,16 +291,18 @@ export default function SheetGrid({
                       onChange={(v) => updateCell(rowIndex, h.id, v)}
                     />
                   ) : pickerOptions[h.id]?.length ? (
-                    // Datalist-driven suggestion needs a real <input> — <textarea> has no `list`
-                    // attribute — so picker headers (connected-header suggestions, typically
-                    // short key values like a Product Number) stay single-line.
-                    <input
-                      type="text"
-                      list={`dl-${h.id}`}
-                      value={row[h.id] ?? ''}
-                      onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
+                    // Picker headers (connected-header suggestions — Product Number's own
+                    // self-lookup, Product Group's cross-template name list, etc.) get the same
+                    // searchable-combobox UI as a real `dropdown` column now, not a plain native
+                    // <input list>/<datalist> — still just as free-typeable (ComboboxCell commits
+                    // whatever's typed on Enter, or on blur if it differs from the current value),
+                    // just with the same search/clear/keyboard-nav polish everywhere else in the grid.
+                    <ComboboxCell
+                      value={row[h.id] || ''}
+                      options={pickerOptions[h.id]}
+                      onChange={(v) => updateCell(rowIndex, h.id, v)}
                       disabled={readOnly || h.disabled}
-                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400"
+                      loading={loadingCells?.has(`${rowIndex}:${h.id}`)}
                     />
                   ) : (
                     <AutoGrowTextarea
@@ -254,25 +313,12 @@ export default function SheetGrid({
                     />
                   )}
                 </td>
-              ))}
+              )})}
             </tr>
           ))}
         </tbody>
       </table>
       </div>
-      {/* One shared <datalist> per column with suggestions — a native
-          browsable dropdown that lets you type a value that isn't in the
-          list yet (a brand-new product) directly into the cell itself, with
-          no extra step. ComboboxCell (the dedicated `dropdown` column type)
-          supports typing a new value too, just via its own search box +
-          Enter rather than typing straight into the trigger. */}
-      {Object.entries(pickerOptions).map(([headerId, options]) => (
-        options?.length ? (
-          <datalist key={headerId} id={`dl-${headerId}`}>
-            {options.map((v) => <option key={v} value={v} />)}
-          </datalist>
-        ) : null
-      ))}
     </div>
   )
 }

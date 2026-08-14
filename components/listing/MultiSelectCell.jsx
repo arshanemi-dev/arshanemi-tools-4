@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, X, Search } from 'lucide-react'
+import { ChevronDown, X, Search, Plus, ListX } from 'lucide-react'
 
 // Multi Select grid cell (Task: dropdown headers can be Single or Multi
 // Selection — this is the Multi Selection render) — same portal-positioned,
@@ -108,19 +108,23 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
         type="button"
         disabled={disabled}
         onClick={toggleOpen}
-        className="w-full min-w-[130px] flex items-center justify-between gap-1 px-2 py-1.5 text-left focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500 disabled:opacity-60"
+        className={`m-1 flex w-[calc(100%-8px)] items-center justify-between gap-1.5 rounded-md border px-2 py-1.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+          open
+            ? 'border-indigo-300 bg-indigo-50/50 ring-2 ring-indigo-500/20'
+            : 'border-transparent hover:border-gray-200 hover:bg-gray-50'
+        }`}
       >
-        <span className="flex flex-wrap gap-1 min-h-[20px]">
-          {selected.length === 0 && <span className="text-[13px] text-gray-400">&mdash;</span>}
+        <span className="flex min-h-[20px] flex-wrap gap-1">
+          {selected.length === 0 && <span className="text-[13px] italic text-gray-400">&mdash;</span>}
           {selected.map((v) => (
-            <span key={v} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[11.5px] text-indigo-700">
+            <span key={v} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[11.5px] font-medium text-indigo-700">
               {v}
               {!disabled && (
                 <span
                   role="button"
                   tabIndex={-1}
                   onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); removeValue(v) }}
-                  className="hover:text-indigo-900"
+                  className="rounded-full hover:bg-indigo-100 hover:text-indigo-900"
                 >
                   <X className="w-3 h-3" />
                 </span>
@@ -128,7 +132,7 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
             </span>
           ))}
         </span>
-        <span className="flex items-center gap-0.5 flex-shrink-0">
+        <span className="flex flex-shrink-0 items-center gap-0.5">
           {selected.length > 0 && !disabled && (
             <span
               role="button"
@@ -136,23 +140,23 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
               title="Clear all"
               onMouseDown={(e) => e.preventDefault()}
               onClick={clearAll}
-              className="p-0.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+              className="rounded p-0.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
             >
               <X className="w-3.5 h-3.5" />
             </span>
           )}
-          <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180 text-indigo-500' : ''}`} />
         </span>
       </button>
 
       {open && !disabled && rect && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 200) }}
-          className="z-[999] bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden"
+          style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 220) }}
+          className="dropdown-panel-in z-[999] origin-top overflow-hidden rounded-xl border border-gray-100 bg-white shadow-lg ring-1 ring-black/5"
         >
-          <div className="relative border-b border-gray-100">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <div className="relative bg-gray-50/70">
+            <Search className="pointer-events-none absolute left-3 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-gray-400" />
             <input
               ref={inputRef}
               autoFocus
@@ -160,7 +164,7 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
               onChange={(e) => { setQuery(e.target.value); setHighlighted(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search or type to add…"
-              className="w-full pl-8 pr-7 py-2 text-[12.5px] focus:outline-none"
+              className="w-full border-b border-gray-100 bg-transparent py-2.5 pl-9 pr-8 text-[12.5px] text-gray-800 placeholder:text-gray-400 focus:outline-none"
             />
             {query && (
               <button
@@ -168,29 +172,39 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
                 title="Clear search"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setQuery(''); setHighlighted(0); inputRef.current?.focus() }}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-gray-400 hover:bg-gray-200/70 hover:text-gray-600"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          <div className="max-h-48 overflow-y-auto py-1">
-            {options.length === 0 && !query.trim() && <p className="px-3 py-2.5 text-[12px] text-gray-400">No options yet</p>}
+          <div className="max-h-52 overflow-y-auto p-1.5">
+            {options.length === 0 && !query.trim() && (
+              <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
+                <ListX className="w-4 h-4 text-gray-300" />
+                <p className="text-[12px] text-gray-400">No options yet — type to add one</p>
+              </div>
+            )}
             {filtered.length === 0 && query.trim() && (
               <button
                 type="button"
                 onClick={addTyped}
-                className="w-full text-left px-3 py-2 text-[12.5px] text-indigo-600 hover:bg-indigo-50"
+                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-2.5 py-2 text-left text-[12.5px] text-indigo-700 hover:bg-indigo-50"
               >
-                Add &quot;{query.trim()}&quot; <span className="text-gray-400 font-normal">— press Enter</span>
+                <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate">
+                  Add &quot;{query.trim()}&quot; <span className="font-normal text-indigo-400">— press Enter</span>
+                </span>
               </button>
             )}
             {filtered.map((option, i) => (
               <label
                 key={option}
                 onMouseEnter={() => setHighlighted(i)}
-                className={`flex items-center gap-2 px-3 py-1.5 text-[12.5px] cursor-pointer ${i === highlighted ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] transition-colors ${
+                  selected.includes(option) ? 'bg-indigo-50/70' : i === highlighted ? 'bg-gray-100' : 'hover:bg-gray-50'
+                }`}
               >
                 <input
                   type="checkbox"
@@ -198,19 +212,23 @@ export default function MultiSelectCell({ value, options = [], onChange, disable
                   onChange={() => toggleValue(option)}
                   className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600"
                 />
-                <span className={`truncate ${i === highlighted ? 'text-indigo-700' : 'text-gray-700'}`}>{option}</span>
+                <span className={`truncate ${selected.includes(option) ? 'font-medium text-indigo-700' : i === highlighted ? 'text-gray-800' : 'text-gray-700'}`}>
+                  {option}
+                </span>
               </label>
             ))}
           </div>
 
-          {selected.length > 0 && (
-            <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-1.5">
-              <span className="text-[11px] text-gray-400">{selected.length} selected</span>
+          <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-1.5">
+            <span className="text-[10.5px] text-gray-400">
+              {selected.length > 0 ? `${selected.length} selected` : options.length > 0 ? `${options.length} option${options.length === 1 ? '' : 's'}` : ''}
+            </span>
+            {selected.length > 0 && (
               <button type="button" onClick={clearAll} className="text-[11px] font-medium text-gray-500 hover:text-red-500">
                 Clear all
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>,
         document.body
       )}

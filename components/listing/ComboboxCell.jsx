@@ -1,7 +1,7 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, X, Search, Check } from 'lucide-react'
+import { ChevronDown, X, Search, Check, Loader2, Plus, ListX } from 'lucide-react'
 
 // Dropdown grid cell — click opens a searchable option list below the cell.
 // Reads `options` straight off the header prop the caller passes in
@@ -23,24 +23,63 @@ import { ChevronDown, X, Search, Check } from 'lucide-react'
 // regardless of z-index, so a normal in-place absolutely-positioned panel
 // gets cut off near a card's bottom/right edge. Escaping via a portal
 // sidesteps that entirely instead of fighting it with a higher z-index.
-export default function ComboboxCell({ value, options = [], onChange, disabled }) {
+//
+// `loading` (optional, externally controlled) covers a caller's own real
+// async work that a commit here kicked off — Product Group's cross-template
+// lookup+backfill (see auto-details/page.js's `loadingCells`) is the one
+// case in this app slow enough to need it; the trigger disables and shows a
+// spinner for as long as the caller keeps it true. Every commit — including
+// ones with no such async follow-up, like a plain Product Number pick —
+// still gets its own brief local spinner flash regardless (`justSelected`,
+// ~300ms), so every dropdown pick in the grid gives the same "yes, that
+// registered" feedback rather than only the slow ones visibly reacting.
+export default function ComboboxCell({ value, options = [], onChange, disabled, loading = false }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState(value || '')
   const [rect, setRect] = useState(null)
   const [highlighted, setHighlighted] = useState(0)
+  const [justSelected, setJustSelected] = useState(false)
   const buttonRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
+  const flashTimeoutRef = useRef(null)
+
+  const flashSelected = useCallback(() => {
+    setJustSelected(true)
+    clearTimeout(flashTimeoutRef.current)
+    flashTimeoutRef.current = setTimeout(() => setJustSelected(false), 300)
+  }, [])
+
+  useEffect(() => () => clearTimeout(flashTimeoutRef.current), [])
+
+  const showLoader = loading || justSelected
+
+  // Closing commits whatever's typed (same as Enter) rather than silently
+  // discarding it — this cell now also backs plain free-typed fields like
+  // Product Number (see SheetGrid.jsx's `pickerOptions` branch), so losing a
+  // half-typed value just for clicking the next cell would be a real
+  // data-loss trap, not just an inconvenience. Escape (see handleKeyDown
+  // below) is the one deliberate "never mind, cancel" gesture that still
+  // reverts to the prior value instead of committing. Shared by both close
+  // paths — clicking elsewhere (below) and re-clicking the trigger itself
+  // (toggleOpen) — so neither one is the "safe" path and the other isn't.
+  const commitOnClose = useCallback(() => {
+    const trimmed = query.trim()
+    if (trimmed && trimmed !== (value || '')) {
+      onChange(trimmed)
+      flashSelected()
+    }
+  }, [query, value, onChange, flashSelected])
 
   useEffect(() => {
     function onDocClick(e) {
       if (buttonRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return
+      commitOnClose()
       setOpen(false)
-      setQuery(value || '')
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
-  }, [value])
+  }, [commitOnClose])
 
   // Closing on scroll/resize (rather than re-tracking position live) keeps
   // this simple — reopening recomputes the rect fresh, and the alternative
@@ -58,20 +97,24 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
   }, [open])
 
   function toggleOpen() {
-    if (disabled) return
-    if (!open) {
-      const r = buttonRef.current?.getBoundingClientRect()
-      if (r) setRect(r)
-      setQuery(value || '')
-      setHighlighted(0)
+    if (disabled || loading) return
+    if (open) {
+      commitOnClose()
+      setOpen(false)
+      return
     }
-    setOpen((o) => !o)
+    const r = buttonRef.current?.getBoundingClientRect()
+    if (r) setRect(r)
+    setQuery(value || '')
+    setHighlighted(0)
+    setOpen(true)
   }
 
   const filtered = options.filter((o) => String(o).toLowerCase().includes(query.toLowerCase()))
 
   function select(option) {
     onChange(option)
+    flashSelected()
     setQuery(option)
     setOpen(false)
   }
@@ -113,36 +156,44 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
       <button
         ref={buttonRef}
         type="button"
-        disabled={disabled}
+        disabled={disabled || loading}
         onClick={toggleOpen}
-        className="w-full min-w-[110px] flex items-center justify-between gap-1 px-3 py-2 text-left text-[13px] text-gray-800 hover:bg-gray-50 disabled:text-gray-400 disabled:hover:bg-transparent focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
+        className={`m-1 flex w-[calc(100%-8px)] items-center justify-between gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+          open
+            ? 'border-indigo-300 bg-indigo-50/50 ring-2 ring-indigo-500/20'
+            : 'border-transparent hover:border-gray-200 hover:bg-gray-50'
+        }`}
       >
-        <span className={`truncate ${value ? '' : 'text-gray-400'}`}>{value || 'Select…'}</span>
-        <span className="flex items-center gap-0.5 flex-shrink-0">
-          {value && !disabled && (
+        <span className={`truncate ${value ? 'text-gray-800' : 'italic text-gray-400'}`}>{value || 'Select…'}</span>
+        <span className="flex flex-shrink-0 items-center gap-0.5">
+          {value && !disabled && !loading && (
             <span
               role="button"
               tabIndex={-1}
               title="Clear"
               onMouseDown={(e) => e.preventDefault()}
               onClick={clearValue}
-              className="p-0.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+              className="rounded p-0.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
             >
               <X className="w-3.5 h-3.5" />
             </span>
           )}
-          <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          {showLoader ? (
+            <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin text-indigo-500" />
+          ) : (
+            <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180 text-indigo-500' : ''}`} />
+          )}
         </span>
       </button>
 
       {open && !disabled && rect && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 200) }}
-          className="z-[999] bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden"
+          style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 220) }}
+          className="dropdown-panel-in z-[999] origin-top overflow-hidden rounded-xl border border-gray-100 bg-white shadow-lg ring-1 ring-black/5"
         >
-          <div className="relative border-b border-gray-100">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <div className="relative bg-gray-50/70">
+            <Search className="pointer-events-none absolute left-3 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-gray-400" />
             <input
               ref={inputRef}
               autoFocus
@@ -150,7 +201,7 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
               onChange={(e) => { setQuery(e.target.value); setHighlighted(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search or type a new value…"
-              className="w-full pl-8 pr-7 py-2 text-[12.5px] focus:outline-none"
+              className="w-full border-b border-gray-100 bg-transparent py-2.5 pl-9 pr-8 text-[12.5px] text-gray-800 placeholder:text-gray-400 focus:outline-none"
             />
             {query && (
               <button
@@ -158,24 +209,30 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
                 title="Clear search"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setQuery(''); setHighlighted(0); inputRef.current?.focus() }}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-gray-400 hover:bg-gray-200/70 hover:text-gray-600"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          <div className="max-h-48 overflow-y-auto py-1">
+          <div className="max-h-52 overflow-y-auto p-1.5">
             {filtered.length === 0 && !query.trim() && (
-              <p className="px-3 py-2.5 text-[12px] text-gray-400">No options yet</p>
+              <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
+                <ListX className="w-4 h-4 text-gray-300" />
+                <p className="text-[12px] text-gray-400">No options yet — type to add one</p>
+              </div>
             )}
             {filtered.length === 0 && query.trim() && (
               <button
                 type="button"
                 onClick={commitTyped}
-                className="w-full flex items-center gap-1.5 text-left px-3 py-2 text-[12.5px] text-indigo-600 hover:bg-indigo-50"
+                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-2.5 py-2 text-left text-[12.5px] text-indigo-700 hover:bg-indigo-50"
               >
-                Use &quot;{query.trim()}&quot; <span className="text-gray-400 font-normal">— press Enter</span>
+                <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate">
+                  Use &quot;{query.trim()}&quot; <span className="font-normal text-indigo-400">— press Enter</span>
+                </span>
               </button>
             )}
             {filtered.map((option, i) => (
@@ -184,15 +241,25 @@ export default function ComboboxCell({ value, options = [], onChange, disabled }
                 type="button"
                 onMouseEnter={() => setHighlighted(i)}
                 onClick={() => select(option)}
-                className={`w-full flex items-center justify-between gap-2 text-left px-3 py-1.5 text-[12.5px] ${
-                  i === highlighted ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-50'
+                className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors ${
+                  option === value
+                    ? 'bg-indigo-50 font-medium text-indigo-700'
+                    : i === highlighted
+                    ? 'bg-gray-100 text-gray-800'
+                    : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 <span className="truncate">{option}</span>
-                {option === value && <Check className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />}
+                {option === value && <Check className="w-3.5 h-3.5 flex-shrink-0 text-indigo-500" />}
               </button>
             ))}
           </div>
+
+          {options.length > 0 && (
+            <div className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-400">
+              {filtered.length === options.length ? `${options.length} option${options.length === 1 ? '' : 's'}` : `${filtered.length} of ${options.length}`}
+            </div>
+          )}
         </div>,
         document.body
       )}

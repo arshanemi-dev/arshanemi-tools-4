@@ -73,6 +73,19 @@ function ScopedAutoDetails({ templateId }) {
   const [saveGate, setSaveGate] = useState(null)
   const [fillingUpAll, setFillingUpAll] = useState(false)
   const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
+  // Existing Product Group names, for the Product Group cell's own dropdown
+  // suggestion list (see productGroupPickerOptions below) — same "browsable
+  // but still free-typeable" datalist treatment Product Number's own cell
+  // already gets from buildPickerOptions/selectorOptionsFor in
+  // linkedHeaders.js. Cross-template, per user (see
+  // scripts/listing_product_groups_migration.sql), so it's fetched once,
+  // independent of the template load above.
+  const [groupNames, setGroupNames] = useState([])
+  // `${rowIndex}:${headerId}` keys currently mid-flight in handleGroupSelect's own fetch+backfill
+  // — passed straight through to SheetGrid/ComboboxCell as `loadingCells` so the Product Group
+  // cell someone just typed into shows a small spinner for the real span between "you picked/
+  // typed a group" and "its data actually landed," not just an instant, easy-to-miss change.
+  const [loadingCells, setLoadingCells] = useState(() => new Set())
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
@@ -94,6 +107,14 @@ function ScopedAutoDetails({ templateId }) {
       })
     return () => { cancelled = true }
   }, [templateId])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/listing-tools/product-details-history?groupsOnly=true', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setGroupNames(d.groups || []) })
+    return () => { cancelled = true }
+  }, [])
 
   const sheetsByGroup = useMemo(
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
@@ -132,6 +153,20 @@ function ScopedAutoDetails({ templateId }) {
     () => sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : []),
     [sessionRows, activeGroup, sheet]
   )
+
+  // Same "browsable but still free-typeable" datalist treatment Product
+  // Number's own cell already gets (buildPickerOptions/selectorOptionsFor,
+  // Rule A) — the Product Group column isn't a Rule A/B picker itself (it's
+  // not `isUniqueKeyPart` and has no `linkedGroup`), so it's added on
+  // separately here from the same cross-template group-name list the old
+  // toolbar dropdown used to source. Picking a suggested value fires the
+  // exact same onChange path as typing, so debouncedGroupAutoFill below
+  // still fires and backfills the rest of this sheet from it.
+  const pickerOptions = useMemo(() => {
+    const base = sheet ? buildPickerOptions(sheet.headers, ownSheetsByGroup) : {}
+    if (productGroupHeaderId && groupNames.length) base[productGroupHeaderId] = groupNames
+    return base
+  }, [sheet, ownSheetsByGroup, productGroupHeaderId, groupNames])
   const filteredRows = useMemo(() => {
     if (!search.trim()) return activeSessionRows
     const q = search.toLowerCase()
@@ -296,21 +331,20 @@ function ScopedAutoDetails({ templateId }) {
     })
   }
 
-  // Product Group auto-fill — backfills every row *already in this session's* Product Details
-  // block whose Product Number matches a member of the typed group, from that member's saved
-  // default data (join done server-side, see lib/db.js's getProductGroupMembers). Deliberately
-  // never adds a new row for a group member that isn't already typed here — "fillup all rows
-  // existing" — and reuses the exact same backfillEmptyFields/recomputeFormulas/propagateFromGroup
-  // primitives handleCellReconciliation above uses, just looped over every matching row index
-  // instead of one just-edited index, so fill-only-blank semantics (never overwrite a typed
-  // cell) and the cross-group cascade into Compulsory/Prefill/Optional both come for free.
+  // Product Group auto-fill — pulls in *every* saved member of the typed group, not just rows
+  // already typed here: an existing row whose Product Number matches a member gets its blank
+  // cells backfilled (fill-only-blank, never overwrite a typed cell — same rule as everywhere
+  // else in this app); any member with no matching row at all gets a brand-new row created for
+  // it, fully filled from that member's saved data (join done server-side, see
+  // lib/db.js's getProductGroupMembers). So picking/typing a group name is a genuine "load this
+  // whole group's roster in" action, not just a backfill-what-you-already-started helper.
   //
   // No manual dropdown anymore — this now runs automatically off the Product Group cell itself
   // (see productGroupHeaderId/debouncedGroupAutoFill below), debounced while typing. `silent`
   // covers the common "typing a brand-new group name that has no history yet" case, which isn't
   // an error and shouldn't interrupt typing with a toast every time a key pauses.
   const groupLookupRef = useRef(new Set())
-  async function handleGroupSelect(groupName, { silent = false } = {}) {
+  async function handleGroupSelect(groupName, { silent = false, triggerRowIndex = null } = {}) {
     const trimmed = String(groupName || '').trim()
     if (!trimmed || !sheetsByGroup.design_system) return
     // Same group name already has an in-flight lookup (e.g. two rows sharing it settled the
@@ -318,6 +352,10 @@ function ScopedAutoDetails({ templateId }) {
     // fetches against the same session state.
     if (groupLookupRef.current.has(trimmed)) return
     groupLookupRef.current.add(trimmed)
+    // productGroupHeaderId is always design_system's own header (see its own definition above),
+    // so this key always lines up with the ComboboxCell SheetGrid renders for that exact cell.
+    const loadingKey = triggerRowIndex != null && productGroupHeaderId ? `${triggerRowIndex}:${productGroupHeaderId}` : null
+    if (loadingKey) setLoadingCells((prev) => new Set(prev).add(loadingKey))
     try {
       const res = await fetch(`/api/listing-tools/product-details-history?groupName=${encodeURIComponent(trimmed)}`, { credentials: 'include' })
       const { members = [] } = await res.json().catch(() => ({}))
@@ -329,54 +367,130 @@ function ScopedAutoDetails({ templateId }) {
       const designHeaders = sheetsByGroup.design_system.headers
       const keyHeader = designHeaders.find((h) => h.isUniqueKeyPart)
       if (!keyHeader) return
-      const byKey = new Map(members.map((m) => [String(m.productNumber ?? '').trim().toLowerCase(), m.rowData]))
 
-      let matchedCount = 0
+      let filledCount = 0
+      let addedCount = 0
       setSessionRows((prev) => {
         const working = { ...prev }
+        const prevDesignRows = prev.design_system || []
 
-        function getRow(group, idx) {
-          const rows = working[group] || prev[group] || []
-          return rows[idx]
-        }
-        function setRow(group, idx, nextRow) {
-          const rows = [...(working[group] || [])]
-          rows[idx] = nextRow
-          working[group] = rows
-        }
-        function applyUpdates(updates, idx) {
-          if (!updates) return
-          for (const [group, fields] of Object.entries(updates)) {
-            setRow(group, idx, { ...getRow(group, idx), ...fields })
-          }
-        }
-
-        ;(working.design_system || []).forEach((row, rowIndex) => {
+        // Pass 1 — rows already typed here: backfill blanks only, from whichever member shares
+        // that row's own Product Number. Never touches a cell that already has a value.
+        const backfilledDesignRows = prevDesignRows.map((row) => {
           const key = String(row[keyHeader.id] ?? '').trim().toLowerCase()
-          if (!key || !byKey.has(key)) return
-          const matched = rowFromLabelKeyed(designHeaders, byKey.get(key))
+          const member = members.find((m) => String(m.productNumber ?? '').trim().toLowerCase() === key)
+          if (!key || !member) return row
+          const matched = rowFromLabelKeyed(designHeaders, member.rowData)
           const backfill = backfillEmptyFields(designHeaders, row, matched)
-          if (!backfill) return
-          matchedCount++
+          if (!backfill) return row
+          filledCount++
           let nextRow = { ...row, ...backfill }
           const formulaExtra = recomputeFormulas(designHeaders, nextRow, undefined)
           if (formulaExtra) nextRow = { ...nextRow, ...formulaExtra }
-          setRow('design_system', rowIndex, nextRow)
-          applyUpdates(propagateFromGroup('design_system', nextRow, ownSheetsByGroup), rowIndex)
+          return nextRow
+        })
+
+        // Pass 2 — every group member with no row here at all yet needs a row.
+        const presentKeys = new Set(
+          backfilledDesignRows.map((row) => String(row[keyHeader.id] ?? '').trim().toLowerCase()).filter(Boolean)
+        )
+        const unclaimed = members.filter((m) => {
+          const key = String(m.productNumber ?? '').trim().toLowerCase()
+          return key && !presentKeys.has(key)
+        })
+
+        // The row actually being typed into (triggerRowIndex — the Product Group cell whose
+        // edit triggered this lookup) gets the *first* unclaimed member filled into it in place,
+        // via the same fill-only-blank primitive as Pass 1 — instead of being left sitting there
+        // with just a Product Group value while a whole new row gets created after it. Only
+        // reused when that row's own Product Number is still blank, so a row that already
+        // identifies a real (different) product never gets a stranger's data spliced into it.
+        if (triggerRowIndex != null && !String(backfilledDesignRows[triggerRowIndex]?.[keyHeader.id] ?? '').trim() && unclaimed.length) {
+          const first = unclaimed.shift()
+          const matched = rowFromLabelKeyed(designHeaders, first.rowData)
+          const row = backfilledDesignRows[triggerRowIndex]
+          const backfill = backfillEmptyFields(designHeaders, row, matched)
+          if (backfill) {
+            let nextRow = { ...row, ...backfill }
+            const formulaExtra = recomputeFormulas(designHeaders, nextRow, undefined)
+            if (formulaExtra) nextRow = { ...nextRow, ...formulaExtra }
+            backfilledDesignRows[triggerRowIndex] = nextRow
+            filledCount++
+          }
+        }
+
+        // Whatever's left after that (or everything, if there was no trigger row to reuse) gets
+        // real new rows appended, fully filled from its saved data (blankRow first, so every
+        // header still ends up with a real '' rather than undefined for whatever the snapshot
+        // didn't cover).
+        const newRows = []
+        for (const m of unclaimed) {
+          let nextRow = { ...blankRow(designHeaders), ...rowFromLabelKeyed(designHeaders, m.rowData) }
+          const formulaExtra = recomputeFormulas(designHeaders, nextRow, undefined)
+          if (formulaExtra) nextRow = { ...nextRow, ...formulaExtra }
+          newRows.push(nextRow)
+          addedCount++
+        }
+
+        // Blank rows (normally just the one always-there trailing row) get dropped before
+        // splicing the new rows in, then the whole thing ends with exactly one fresh blank —
+        // same always-one-trailing-blank-row invariant SheetGrid itself keeps, so there's never a
+        // stray empty row stranded in the middle of the sheet.
+        const nextDesignRows = [...backfilledDesignRows.filter((r) => !isRowEmpty(r)), ...newRows, blankRow(designHeaders)]
+        working.design_system = nextDesignRows
+
+        // Cross-group cascade — every real row (backfilled-existing or brand-new) fans its
+        // matched data out into Compulsory/Prefill/Optional at the same index, same primitive
+        // handleCellReconciliation uses elsewhere. Other groups are padded to match first so
+        // there's always somewhere for row i's update to land.
+        for (const g of ALL_GROUPS) {
+          if (g === 'design_system') continue
+          working[g] = extendRows(g, working[g] || prev[g] || [], nextDesignRows.length)
+        }
+        nextDesignRows.forEach((row, idx) => {
+          if (isRowEmpty(row)) return
+          const updates = propagateFromGroup('design_system', row, ownSheetsByGroup)
+          if (!updates) return
+          for (const [group, fields] of Object.entries(updates)) {
+            const rows = [...(working[group] || [])]
+            rows[idx] = { ...rows[idx], ...fields }
+            working[group] = rows
+          }
         })
 
         return working
       })
-      if (matchedCount) addToast(`Applied "${trimmed}" defaults to ${matchedCount} row(s)`, 'success')
-      else if (!silent) addToast('No rows in this sheet match that group yet', 'info')
+
+      if (filledCount || addedCount) {
+        const parts = []
+        if (addedCount) parts.push(`added ${addedCount} row(s)`)
+        if (filledCount) parts.push(`filled ${filledCount} existing row(s)`)
+        addToast(`"${trimmed}": ${parts.join(', ')}`, 'success')
+      } else if (!silent) {
+        addToast('No rows in this sheet match that group yet', 'info')
+      }
     } finally {
       groupLookupRef.current.delete(trimmed)
+      if (loadingKey) {
+        setLoadingCells((prev) => {
+          if (!prev.has(loadingKey)) return prev
+          const next = new Set(prev)
+          next.delete(loadingKey)
+          return next
+        })
+      }
     }
   }
 
   // Fires while typing into the Product Group cell (see the SheetGrid onCellChange callback
   // below) — idle-debounced so a lookup only actually runs once typing pauses, not per keystroke.
-  const debouncedGroupAutoFill = useDebouncedCallback((groupName) => handleGroupSelect(groupName, { silent: true }), 600)
+  // `rowIndex` is the row actually being typed into, so handleGroupSelect can fill *that* row
+  // first (see its own `triggerRowIndex` handling) instead of leaving it behind while brand-new
+  // rows get created for the rest of the group.
+  const debouncedGroupAutoFill = useDebouncedCallback(
+    (groupName, rowIndex) => handleGroupSelect(groupName, { silent: true, triggerRowIndex: rowIndex }),
+    600
+  )
 
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
@@ -616,7 +730,8 @@ function ScopedAutoDetails({ templateId }) {
             rows={filteredRows}
             onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
-            pickerOptions={buildPickerOptions(sheet.headers, ownSheetsByGroup)}
+            pickerOptions={pickerOptions}
+            loadingCells={loadingCells}
             onCellChange={(headerId, value, rowIndex, row) => {
               const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, ownSheetsByGroup)
               // `row` already has this edit applied (see SheetGrid.jsx's
@@ -634,7 +749,7 @@ function ScopedAutoDetails({ templateId }) {
               // backfill (see handleGroupSelect/debouncedGroupAutoFill) — no more manual
               // toolbar dropdown to click first.
               if (productGroupHeaderId && headerId === productGroupHeaderId) {
-                debouncedGroupAutoFill(value)
+                debouncedGroupAutoFill(value, rowIndex)
               }
 
               return sameGroupExtra
