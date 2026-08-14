@@ -261,9 +261,11 @@ export default function SheetGrid({
       </table>
       </div>
       {/* One shared <datalist> per column with suggestions — a native
-          browsable dropdown that still lets you type a value that isn't in
-          the list yet (a brand-new product), unlike ComboboxCell which only
-          ever commits a clicked option. */}
+          browsable dropdown that lets you type a value that isn't in the
+          list yet (a brand-new product) directly into the cell itself, with
+          no extra step. ComboboxCell (the dedicated `dropdown` column type)
+          supports typing a new value too, just via its own search box +
+          Enter rather than typing straight into the trigger. */}
       {Object.entries(pickerOptions).map(([headerId, options]) => (
         options?.length ? (
           <datalist key={headerId} id={`dl-${headerId}`}>

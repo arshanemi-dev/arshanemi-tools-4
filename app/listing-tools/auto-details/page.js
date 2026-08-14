@@ -17,6 +17,7 @@ import { findGroupKeyMatch, backfillEmptyFields, rowFromLabelKeyed } from '@/com
 import { recomputeFormulas } from '@/components/listing/formula'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
+import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown (ListingToolsSidebar.jsx, whose
@@ -72,9 +73,6 @@ function ScopedAutoDetails({ templateId }) {
   const [saveGate, setSaveGate] = useState(null)
   const [fillingUpAll, setFillingUpAll] = useState(false)
   const [showAiFillUpModal, setShowAiFillUpModal] = useState(false)
-  const [groupNames, setGroupNames] = useState([])
-  const [selectedGroup, setSelectedGroup] = useState('')
-  const [applyingGroup, setApplyingGroup] = useState(false)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
@@ -96,17 +94,6 @@ function ScopedAutoDetails({ templateId }) {
       })
     return () => { cancelled = true }
   }, [templateId])
-
-  // Product Group scope is cross-template, per user (see
-  // scripts/listing_product_groups_migration.sql) — this list isn't scoped to
-  // `templateId` at all, so it's fetched once, independent of the template load above.
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/listing-tools/product-details-history?groupsOnly=true', { credentials: 'include' })
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setGroupNames(d.groups || []) })
-    return () => { cancelled = true }
-  }, [])
 
   const sheetsByGroup = useMemo(
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
@@ -133,6 +120,12 @@ function ScopedAutoDetails({ templateId }) {
       Object.entries(sheetsByGroup).map(([g, s]) => [g, { ...s, rows: (s.rows || []).filter((r) => !r.userId || r.userId === viewerUserId) }])
     )
   }, [sheetsByGroup, viewerUserId])
+
+  // The design_system sheet's own "Product Group" column (defaultHeaders.json's
+  // `isProductGroupField`) — typing a value into this cell is what now drives the
+  // automatic group backfill below (handleGroupSelect), replacing the old manual
+  // toolbar dropdown. Only design_system ever carries this header.
+  const productGroupHeaderId = sheetsByGroup.design_system?.headers.find((h) => h.isProductGroupField)?.id
 
   const sheet = sheetsByGroup[activeGroup]
   const activeSessionRows = useMemo(
@@ -303,22 +296,33 @@ function ScopedAutoDetails({ templateId }) {
     })
   }
 
-  // Product Group selector — backfills every row *already in this session's* Product Details
-  // block whose Product Number matches a member of the picked group, from that member's saved
+  // Product Group auto-fill — backfills every row *already in this session's* Product Details
+  // block whose Product Number matches a member of the typed group, from that member's saved
   // default data (join done server-side, see lib/db.js's getProductGroupMembers). Deliberately
   // never adds a new row for a group member that isn't already typed here — "fillup all rows
   // existing" — and reuses the exact same backfillEmptyFields/recomputeFormulas/propagateFromGroup
   // primitives handleCellReconciliation above uses, just looped over every matching row index
   // instead of one just-edited index, so fill-only-blank semantics (never overwrite a typed
   // cell) and the cross-group cascade into Compulsory/Prefill/Optional both come for free.
-  async function handleGroupSelect(groupName) {
-    if (!groupName || !sheetsByGroup.design_system) return
-    setApplyingGroup(true)
+  //
+  // No manual dropdown anymore — this now runs automatically off the Product Group cell itself
+  // (see productGroupHeaderId/debouncedGroupAutoFill below), debounced while typing. `silent`
+  // covers the common "typing a brand-new group name that has no history yet" case, which isn't
+  // an error and shouldn't interrupt typing with a toast every time a key pauses.
+  const groupLookupRef = useRef(new Set())
+  async function handleGroupSelect(groupName, { silent = false } = {}) {
+    const trimmed = String(groupName || '').trim()
+    if (!trimmed || !sheetsByGroup.design_system) return
+    // Same group name already has an in-flight lookup (e.g. two rows sharing it settled the
+    // debounce back to back) — skip the duplicate round trip rather than racing two identical
+    // fetches against the same session state.
+    if (groupLookupRef.current.has(trimmed)) return
+    groupLookupRef.current.add(trimmed)
     try {
-      const res = await fetch(`/api/listing-tools/product-details-history?groupName=${encodeURIComponent(groupName)}`, { credentials: 'include' })
+      const res = await fetch(`/api/listing-tools/product-details-history?groupName=${encodeURIComponent(trimmed)}`, { credentials: 'include' })
       const { members = [] } = await res.json().catch(() => ({}))
       if (!members.length) {
-        addToast('No saved data for that group yet', 'info')
+        if (!silent) addToast('No saved data for that group yet', 'info')
         return
       }
 
@@ -363,17 +367,16 @@ function ScopedAutoDetails({ templateId }) {
 
         return working
       })
-      addToast(
-        matchedCount ? `Applied "${groupName}" defaults to ${matchedCount} row(s)` : 'No rows in this sheet match that group yet',
-        matchedCount ? 'success' : 'info'
-      )
+      if (matchedCount) addToast(`Applied "${trimmed}" defaults to ${matchedCount} row(s)`, 'success')
+      else if (!silent) addToast('No rows in this sheet match that group yet', 'info')
     } finally {
-      setApplyingGroup(false)
-      // Reverts the <select> to its placeholder so re-picking the same group again later (e.g.
-      // after adding more rows) still fires onChange.
-      setSelectedGroup('')
+      groupLookupRef.current.delete(trimmed)
     }
   }
+
+  // Fires while typing into the Product Group cell (see the SheetGrid onCellChange callback
+  // below) — idle-debounced so a lookup only actually runs once typing pauses, not per keystroke.
+  const debouncedGroupAutoFill = useDebouncedCallback((groupName) => handleGroupSelect(groupName, { silent: true }), 600)
 
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
@@ -557,22 +560,6 @@ function ScopedAutoDetails({ templateId }) {
           />
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={selectedGroup}
-            disabled={!content || applyingGroup || groupNames.length === 0}
-            onChange={(e) => {
-              const groupName = e.target.value
-              setSelectedGroup(groupName)
-              if (groupName) handleGroupSelect(groupName)
-            }}
-            title={groupNames.length ? 'Fill existing rows from a saved Product Group' : 'No Product Groups saved yet'}
-            className="px-2.5 py-1.5 text-[12.5px] font-semibold text-indigo-600 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
-          >
-            <option value="">{applyingGroup ? 'Applying…' : 'Product Group…'}</option>
-            {groupNames.map((g) => (
-              <option key={g} value={g}>{g}</option>
-            ))}
-          </select>
           <PillButton
             variant="ai"
             icon={Sparkles}
@@ -642,6 +629,14 @@ function ScopedAutoDetails({ templateId }) {
               const fullRow = { ...row, ...(sameGroupExtra || {}) }
               const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, ownSheetsByGroup)
               handleCellReconciliation(rowIndex, headerId, activeGroup, fullRow, crossGroupUpdates)
+
+              // Typing into the Product Group cell itself is what now triggers the group
+              // backfill (see handleGroupSelect/debouncedGroupAutoFill) — no more manual
+              // toolbar dropdown to click first.
+              if (productGroupHeaderId && headerId === productGroupHeaderId) {
+                debouncedGroupAutoFill(value)
+              }
+
               return sameGroupExtra
             }}
             onHeaderChange={handleHeaderChange}

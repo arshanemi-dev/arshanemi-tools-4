@@ -27,7 +27,21 @@ export async function POST(req) {
   // issued here also verify against this app's own proxy.js/listing-tools
   // layout gate, which still checks locally.
   if (IS_CONNECT) {
-    const { status, data } = await proxyAuthCall('/api/auth/login', { body: { identifier: id, password, otpCode } })
+    // proxyAuthCall's own fetch() throws outright (not a normal { status, data }
+    // rejection) when NEXT_PUBLIC_ADMIN_API_URL is unset/unreachable — an empty
+    // string makes fetch() throw "Failed to parse URL from /api/auth/login" (no
+    // base URL to resolve a relative path against on the server), and a
+    // misconfigured URL (e.g. still pointing at localhost after deploying) fails
+    // with a connection error. Either way that must not become an unhandled
+    // exception / bare 500 — caught here the same way the local-mode path below
+    // already handles its own failures.
+    let status, data
+    try {
+      ;({ status, data } = await proxyAuthCall('/api/auth/login', { body: { identifier: id, password, otpCode } }))
+    } catch (err) {
+      console.error('Connected-mode login proxy failed — check NEXT_PUBLIC_ADMIN_API_URL:', err)
+      return NextResponse.json({ error: 'Authentication service unavailable' }, { status: 503 })
+    }
     if (data.otpRequired) return NextResponse.json(data, { status })
     if (status !== 200 || !data.ok) {
       return NextResponse.json({ error: data.error || 'Invalid credentials' }, { status: status || 401 })
