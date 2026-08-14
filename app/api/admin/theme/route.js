@@ -8,8 +8,12 @@ import { IS_CONNECT, proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
 export async function GET(req) {
   if (IS_CONNECT) {
-    const { status, data } = await proxyAdminCall('/api/admin/theme', { authHeader: authHeaderFrom(req) })
-    return NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
+    try {
+      const { status, data } = await proxyAdminCall('/api/admin/theme', { authHeader: authHeaderFrom(req) })
+      return NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
+    } catch {
+      return NextResponse.json(defaultTheme, { headers: { 'Cache-Control': 'no-store' } })
+    }
   }
   try {
     const saved = await getSingleton('theme')
