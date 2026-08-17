@@ -59,9 +59,9 @@ export default function ProfileBanner({ profile }) {
           <span className="text-lg font-bold text-[#4a5fd9]">{(profile.name || '?').charAt(0).toUpperCase()}</span>
         </div>
         <p className="text-xl font-bold text-white">{profile.name}</p>
-        <span className="w-fit text-xs font-semibold text-white bg-white/20 rounded-full px-3 py-1.5">
+        {/* <span className="w-fit text-xs font-semibold text-white bg-white/20 rounded-full px-3 py-1.5">
           {remaining} Credits
-        </span>
+        </span> */}
       </div>
 
       <div className="flex flex-col items-start sm:items-end gap-2">
