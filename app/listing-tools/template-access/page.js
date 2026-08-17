@@ -14,7 +14,7 @@ export const metadata = {
 // link is already hidden from them (ListingToolsSidebar.jsx).
 export default async function TemplateAccessPage() {
   const cookieStore = await cookies()
-  const token = cookieStore.get('arshanemi-token')?.value || cookieStore.get('admin-token')?.value
+  const token = cookieStore.get('barmeto-token')?.value || cookieStore.get('admin-token')?.value
   const payload = token ? await verifyToken(token) : null
 
   if (payload?.role !== 'master_admin') redirect('/listing-tools')

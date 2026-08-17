@@ -4,18 +4,18 @@
 // from Admin → Profile, or a master_admin can reset either from Admin → Users).
 
 export const DEFAULT_COMPANY = {
-  name: 'Arshanemi',
-  email: 'support@arshanemi.com',
+  name: 'Barmeto',
+  email: 'support@barmeto.com',
   phone: '+91 98765 43210',
-  website: 'https://www.arshanemi.com',
-  address: 'Arshanemi HQ, Tech Park, Surat, Gujarat 395007',
+  website: 'https://www.barmeto.com',
+  address: 'Barmeto HQ, Tech Park, Surat, Gujarat 395007',
 };
 
 // Full platform access — seeded/updated only by this script (never created
 // through the admin UI).
 export const MASTER_ADMIN = {
   name: 'Master Admin',
-  email: 'arshanemi@gmail.com',
+  email: 'barmeto@gmail.com',
   password: 'Admin@1234',
 };
 

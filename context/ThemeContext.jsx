@@ -9,7 +9,7 @@ import { defaultTheme } from '@/data/defaultTheme'
 // reads before hydration — must match, or that script never finds this
 // provider's cached theme and always falls back to the hardcoded dark theme
 // for a flash before this effect runs.
-const THEME_CACHE_KEY = 'arshanemi-theme-config'
+const THEME_CACHE_KEY = 'barmeto-theme-config'
 const THEME_CACHE_TTL = 10 * 60 * 1000 // 10 min
 
 const ThemeContext = createContext({ theme: 'light', siteTheme: defaultTheme })

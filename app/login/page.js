@@ -136,7 +136,7 @@ export default function LoginPage() {
           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
             <span className="text-white font-bold">A</span>
           </div>
-          <span className="text-white font-semibold text-lg">Arshanemi</span>
+          <span className="text-white font-semibold text-lg">Barmeto</span>
         </div>
         <div>
           <div className="flex items-center gap-2 mb-6 text-orange-200 text-sm">
@@ -146,11 +146,11 @@ export default function LoginPage() {
             Your ecommerce<br />data advantage<br />starts here.
           </h1>
           <p className="text-orange-200 text-base leading-relaxed">
-            Access all Arshanemi tools — product research, competitor analysis,
+            Access all Barmeto tools — product research, competitor analysis,
             profit calculator, keyword finder, and more.
           </p>
         </div>
-        <p className="text-orange-300 text-sm">© {new Date().getFullYear()} Arshanemi. All rights reserved.</p>
+        <p className="text-orange-300 text-sm">© {new Date().getFullYear()} Barmeto. All rights reserved.</p>
       </div>
 
       {/* Right form panel */}
@@ -160,7 +160,7 @@ export default function LoginPage() {
             <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
               <span className="text-white font-bold text-sm">A</span>
             </div>
-            <span className="font-semibold text-foreground">Arshanemi</span>
+            <span className="font-semibold text-foreground">Barmeto</span>
           </div>
 
           {step === 'credentials' ? (

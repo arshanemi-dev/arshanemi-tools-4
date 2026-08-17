@@ -1,5 +1,5 @@
 /**
- * Arshanemi Tools Dashboard — Seed Script
+ * Barmeto Tools Dashboard — Seed Script
  * Seeds the theme and company singletons, the default tenant company, and
  * the default admin accounts into this app's own storage — no database.
  * Everything is written through lib/db.js, which itself only ever writes
@@ -33,7 +33,7 @@ function toCompanySlug(name) {
 const SALT_ROUNDS = 10
 
 async function main() {
-  console.log('\n🌱  Arshanemi Tools Dashboard — Seed\n')
+  console.log('\n🌱  Barmeto Tools Dashboard — Seed\n')
 
   const {
     updateSingleton,

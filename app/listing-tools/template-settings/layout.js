@@ -12,7 +12,7 @@ import { fetchTemplateSettingsAllowed } from '@/lib/listingTemplateAccess'
 // can't bypass it.
 export default async function TemplateSettingsLayout({ children }) {
   const cookieStore = await cookies()
-  const token = cookieStore.get('arshanemi-token')?.value || cookieStore.get('admin-token')?.value
+  const token = cookieStore.get('barmeto-token')?.value || cookieStore.get('admin-token')?.value
   const payload = token ? await verifyToken(token) : null
 
   if (!payload) redirect('/login')

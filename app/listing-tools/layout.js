@@ -8,14 +8,14 @@ import ListingToolsSidebar from '@/components/listing/ListingToolsSidebar'
 import DashboardTopbar from '@/components/dashboard/DashboardTopbar'
 
 export const metadata = {
-  title: 'Listing Tools — Arshanemi',
+  title: 'Listing Tools — Barmeto',
   robots: { index: false },
 }
 const HEADER_HIDDEN = process.env.NEXT_PUBLIC_IS_Header_Hide === 'true'
 
 export default async function ListingToolsLayout({ children }) {
   const cookieStore = await cookies()
-  const token = cookieStore.get('arshanemi-token')?.value || cookieStore.get('admin-token')?.value
+  const token = cookieStore.get('barmeto-token')?.value || cookieStore.get('admin-token')?.value
   const payload = token ? await verifyToken(token) : null
 
   if (!payload) redirect('/login')
@@ -31,7 +31,7 @@ export default async function ListingToolsLayout({ children }) {
           <div className="max-w-sm">
             <h1 className="text-lg font-bold text-foreground">Connect via the Admin Panel</h1>
             <p className="mt-2 text-sm text-muted">
-              Listing Tools is only available when this app is opened through the Arshanemi admin
+              Listing Tools is only available when this app is opened through the Barmeto admin
               panel. Sign in there and launch Listing Tools from your dashboard.
             </p>
           </div>

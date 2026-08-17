@@ -3,7 +3,7 @@ import { getAdminFromRequest } from '@/lib/auth'
 import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
 // master_admin only, both verbs — powers TemplateAccessPanel. Per-user
-// Template Settings grants live on the hub (arshanemi-admin-pannels), not
+// Template Settings grants live on the hub (barmeto-admin-pannels), not
 // here, same "forward the caller's own token, let the hub re-check and
 // persist" idiom as app/api/listing-tools/assignments/route.js. Replaces the
 // old app/api/admin/listing-tools-config route, which stored a role-blanket

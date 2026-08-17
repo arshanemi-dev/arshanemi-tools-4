@@ -1,4 +1,4 @@
-const SITE_URL = 'https://tools.arshanemi.com';
+const SITE_URL = 'https://tools.barmeto.com';
 
 // Private, login-gated dashboard — nothing here is meant to be indexed.
 // A minimal sitemap is kept only because Next.js expects one at /sitemap.xml.

@@ -10,7 +10,7 @@ import {
 import { IS_CONNECT, proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
 // Per-user Master SKU CRUD for the 'pdf-cropper' tool (mirrors
-// arshanemi-admin-pannels' identical route). In connected mode this app has
+// barmeto-admin-pannels' identical route). In connected mode this app has
 // no local `users`/`user_settings` rows for the caller — login proxies to
 // root and only stores root's issued token (see lib/connect.js) — so the
 // read/write goes to root's own /api/sku/master instead of this app's local

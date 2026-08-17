@@ -110,7 +110,7 @@ export default function ForgotPasswordPage() {
           <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center">
             <span className="text-white font-bold">A</span>
           </div>
-          <span className="font-bold text-foreground text-lg">Arshanemi</span>
+          <span className="font-bold text-foreground text-lg">Barmeto</span>
         </div>
 
         <Link href="/login" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground mb-6 transition-colors">

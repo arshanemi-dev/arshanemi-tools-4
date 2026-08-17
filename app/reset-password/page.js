@@ -87,7 +87,7 @@ function ResetForm() {
     <>
       <h1 className="text-2xl font-bold text-foreground mb-2">Set new password</h1>
       <p className="text-muted text-sm mb-8">
-        Choose a strong password for your Arshanemi account.
+        Choose a strong password for your Barmeto account.
       </p>
 
       {error && (
@@ -168,7 +168,7 @@ export default function ResetPasswordPage() {
           <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center">
             <span className="text-white font-bold">A</span>
           </div>
-          <span className="font-bold text-foreground text-lg">Arshanemi</span>
+          <span className="font-bold text-foreground text-lg">Barmeto</span>
         </div>
         <Suspense fallback={<div className="text-muted text-sm">Loading…</div>}>
           <ResetForm />

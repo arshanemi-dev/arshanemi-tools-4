@@ -35,7 +35,7 @@ export async function POST(req) {
     const { subject, html } = buildContactEmail({ name, email, phone, budget, service, message });
 
     await sendEmail({
-      from: `"Arshanemi Website" <${process.env.SMTP_USER}>`,
+      from: `"Barmeto Website" <${process.env.SMTP_USER}>`,
       replyTo: `"${name}" <${email}>`,
       to: toEmail,
       subject,

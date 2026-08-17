@@ -8,7 +8,7 @@ const PUBLIC_PATHS = ['/api/auth/login']
 // imported from there because that module pulls in next/headers' cookies(), which isn't the
 // right API surface inside middleware (this file already reimplements JWT verification itself
 // via `jose` directly for the same reason, rather than importing lib/auth.js's verifyToken).
-const COOKIE_NAME = 'arshanemi-token'
+const COOKIE_NAME = 'barmeto-token'
 const ADMIN_COOKIE = 'admin-token'
 function authCookie(token) {
   return {
@@ -75,12 +75,12 @@ export async function proxy(req) {
   }
 
   // Any authenticated role (master_admin / admin / user) gets an
-  // 'arshanemi-token' cookie on login; only master_admin additionally gets
+  // 'barmeto-token' cookie on login; only master_admin additionally gets
   // 'admin-token'. Structural access to these paths is granted to any
   // logged-in role here — the layout and API routes below decide what each
   // role can actually see/do, same defense-in-depth pattern already used
   // elsewhere.
-  const cookieToken = req.cookies.get('admin-token')?.value || req.cookies.get('arshanemi-token')?.value
+  const cookieToken = req.cookies.get('admin-token')?.value || req.cookies.get('barmeto-token')?.value
   // Cross-app SSO handoff (see lib/tokenHandoff.js) — root appends its own issued access token as
   // `lt_at` on this app's URL when opening it embedded in an iframe. That's normally only picked
   // up by client-side JS for *API calls* (a Bearer header attached from localStorage), but a

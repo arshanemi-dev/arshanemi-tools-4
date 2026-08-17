@@ -9,7 +9,7 @@ import {
 import { IS_CONNECT, proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
 // Per-user SKU→Master mapping CRUD for the 'pdf-cropper' tool (mirrors
-// arshanemi-admin-pannels' identical route). Same connected-mode contract as
+// barmeto-admin-pannels' identical route). Same connected-mode contract as
 // ./master/route.js — see that file's comment for why the tool-access check
 // is skipped locally and the call proxies to root instead.
 const TOOL_SLUG = 'pdf-cropper'

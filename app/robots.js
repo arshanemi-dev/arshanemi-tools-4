@@ -1,4 +1,4 @@
-const SITE_URL = 'https://tools.arshanemi.com';
+const SITE_URL = 'https://tools.barmeto.com';
 
 // Private, login-gated dashboard — keep every crawler out entirely.
 export default function robots() {
