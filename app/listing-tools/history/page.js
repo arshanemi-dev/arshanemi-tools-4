@@ -33,7 +33,7 @@ export default function ListingHistoryPage() {
   }, [active])
 
   return (
-    <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
+    <div className="min-h-[70vh] bg-surface px-6 py-6 space-y-4">
       <div className="flex items-center gap-2">
         {TABS.map((t) => (
           <button
@@ -41,7 +41,7 @@ export default function ListingHistoryPage() {
             type="button"
             onClick={() => setActive(t.key)}
             className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-colors ${
-              active === t.key ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              active === t.key ? 'bg-foreground text-foreground' : 'bg-card text-muted border border-divider hover:bg-surface'
             }`}
           >
             {t.label}
@@ -49,33 +49,33 @@ export default function ListingHistoryPage() {
         ))}
       </div>
 
-      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+      <div className="border border-divider rounded-lg overflow-hidden bg-card">
         {rows === null && (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+            <Loader2 className="w-5 h-5 animate-spin text-subtle" />
           </div>
         )}
         {rows !== null && rows.length === 0 && (
-          <p className="text-center py-16 text-[13px] text-gray-400">No {tab.label.toLowerCase()} history yet.</p>
+          <p className="text-center py-16 text-[13px] text-subtle">No {tab.label.toLowerCase()} history yet.</p>
         )}
         {rows !== null && rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-surface border-b border-divider">
                 <tr>
-                  <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Template</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-gray-600">{tab.keyLabel}</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-gray-600">SKU</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Updated</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted">Template</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted">{tab.keyLabel}</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted">SKU</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-muted">Updated</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-gray-100 last:border-0">
-                    <td className="px-4 py-2.5 text-gray-700">{r.template_name}</td>
-                    <td className="px-4 py-2.5 text-gray-900 font-medium">{r[tab.keyField]}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{r.row_data?.sku || '—'}</td>
-                    <td className="px-4 py-2.5 text-gray-400">{new Date(r.updated_at).toLocaleString()}</td>
+                  <tr key={r.id} className="border-b border-divider last:border-0">
+                    <td className="px-4 py-2.5 text-muted">{r.template_name}</td>
+                    <td className="px-4 py-2.5 text-foreground font-medium">{r[tab.keyField]}</td>
+                    <td className="px-4 py-2.5 text-subtle">{r.row_data?.sku || '—'}</td>
+                    <td className="px-4 py-2.5 text-subtle">{new Date(r.updated_at).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>

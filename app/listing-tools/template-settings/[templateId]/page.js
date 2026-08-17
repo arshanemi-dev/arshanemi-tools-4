@@ -8,7 +8,7 @@ export const metadata = {
 export default async function EditTemplateSettingsPage({ params }) {
   const { templateId } = await params
   return (
-    <div className="min-h-full bg-gray-50">
+    <div className="min-h-full bg-surface">
       <TemplateSettingsWizard templateId={templateId} />
     </div>
   )

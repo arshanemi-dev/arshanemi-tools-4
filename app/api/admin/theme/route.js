@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { revalidateTag } from 'next/cache'
 import { getSingleton, updateSingleton } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { getAdminFromRequest } from '@/lib/auth'
 import { defaultTheme } from '@/data/defaultTheme'
 import { IS_CONNECT, proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 
@@ -28,9 +27,7 @@ export async function GET(req) {
 
 export async function PUT(req) {
   try {
-    const cookieStore = await cookies()
-    const token = cookieStore.get('admin-token')?.value
-    if (!token || !(await verifyToken(token))) {
+    if (!(await getAdminFromRequest(req))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     const body = await req.json()
@@ -54,9 +51,7 @@ export async function PUT(req) {
 
 export async function DELETE(req) {
   try {
-    const cookieStore = await cookies()
-    const token = cookieStore.get('admin-token')?.value
-    if (!token || !(await verifyToken(token))) {
+    if (!(await getAdminFromRequest(req))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 

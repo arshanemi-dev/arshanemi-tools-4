@@ -13,7 +13,7 @@ const TABS = [
 // two distinct treatments visible across the source screenshots.
 export default function SheetTabs({ active, onChange, variant = 'light' }) {
   return (
-    <div className="flex items-stretch border-b border-gray-200 bg-white">
+    <div className="flex items-stretch border-b border-divider bg-card">
       {TABS.map((tab) => {
         const isActive = tab.group === active
         return (
@@ -21,12 +21,12 @@ export default function SheetTabs({ active, onChange, variant = 'light' }) {
             key={tab.group}
             type="button"
             onClick={() => onChange(tab.group)}
-            className={`px-5 py-2.5 text-[13.5px] font-medium border-r border-gray-200 transition-colors ${
+            className={`px-5 py-2.5 text-[13.5px] font-medium border-r border-divider transition-colors ${
               isActive
                 ? variant === 'dark'
-                  ? 'bg-black text-white'
-                  : 'bg-gray-100 text-gray-900'
-                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                  ? 'bg-background text-foreground'
+                  : 'bg-card-hover text-foreground'
+                : 'text-subtle hover:text-foreground hover:bg-surface'
             }`}
           >
             {tab.label}

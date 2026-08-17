@@ -101,13 +101,13 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
         onClick={() => !disabled && !isBusy && !isQueued && !value && inputRef.current?.click()}
         title={hasError ? `${status.error} — click to retry` : isQueued ? 'Queued…' : isRetrying ? `Retrying (${status.attempt}/3)…` : undefined}
         className={`relative group flex items-center justify-center w-full h-20 flex-shrink-0 rounded border overflow-hidden transition-colors ${
-          value ? 'border-gray-200 bg-gray-50' : 'border-dashed'
+          value ? 'border-divider bg-surface' : 'border-dashed'
         } ${
-          disabled ? 'opacity-50 cursor-not-allowed border-gray-200' :
+          disabled ? 'opacity-50 cursor-not-allowed border-divider' :
           value ? '' :
           hasError ? 'cursor-pointer border-red-300 bg-red-50 hover:border-red-400' :
-          'cursor-pointer border-gray-300 hover:border-indigo-300 hover:bg-gray-50'
-        } ${dragging ? 'border-indigo-400 bg-indigo-50' : ''}`}
+          'cursor-pointer border-divider-light hover:border-accent-light hover:bg-surface'
+        } ${dragging ? 'border-accent bg-accent/10' : ''}`}
       >
         {value ? (
           imgBroken ? (
@@ -117,19 +117,19 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
             <img src={value} alt="" className="w-full h-full object-cover" onError={() => setImgBroken(true)} />
           )
         ) : isBusy ? (
-          <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
+          <Loader2 className="w-3.5 h-3.5 text-accent animate-spin" />
         ) : isQueued ? (
-          <Clock className="w-3.5 h-3.5 text-gray-300" />
+          <Clock className="w-3.5 h-3.5 text-subtle" />
         ) : hasError ? (
           <AlertCircle className="w-3.5 h-3.5 text-red-500" />
         ) : (
-          <ImagePlus className="w-3.5 h-3.5 text-gray-400" />
+          <ImagePlus className="w-3.5 h-3.5 text-subtle" />
         )}
         {value && !disabled && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onChange(null) }}
-            className="absolute top-0 right-0 p-0.5 bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-0 right-0 p-0.5 bg-background/50 text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
           >
             <X className="w-3 h-3" />
           </button>
@@ -152,8 +152,8 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
           placeholder="Paste image URL…"
           title={value || undefined}
-          className={`w-full text-[10.5px] px-1.5 py-0.5 border rounded text-gray-500 focus:outline-none focus:ring-1 ${
-            urlInvalid ? 'border-red-300 focus:ring-red-400' : 'border-gray-200 focus:ring-indigo-400'
+          className={`w-full text-[10.5px] px-1.5 py-0.5 border rounded text-subtle focus:outline-none focus:ring-1 ${
+            urlInvalid ? 'border-red-300 focus:ring-red-400' : 'border-divider focus:ring-accent-light'
           }`}
         />
       )}

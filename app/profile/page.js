@@ -47,7 +47,7 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-background">
       {!HEADER_HIDDEN && <DashboardTopbar user={user} onLogout={handleLogout} loggingOut={loggingOut} />}
       {BOTTOM_MENU_SHOWN && <BottomMenu user={user} />}
-      <main className={HEADER_HIDDEN ? '' : 'pt-16'}>
+      <main>
         <div className="max-w-5xl mx-auto px-5 sm:px-8 py-10">
           <ToastProvider>
             <ProfileContent />

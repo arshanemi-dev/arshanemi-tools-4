@@ -125,10 +125,10 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
 
   return (
     <>
-      <tr className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60">
-        <td className="px-4 py-3 text-gray-800 font-medium">{template.templateName}</td>
-        <td className="px-4 py-3 text-gray-500">{template.description || '—'}</td>
-        <td className="px-4 py-3 text-gray-500">
+      <tr className="border-b border-divider last:border-b-0 hover:bg-surface/60">
+        <td className="px-4 py-3 text-foreground font-medium">{template.templateName}</td>
+        <td className="px-4 py-3 text-subtle">{template.description || '—'}</td>
+        <td className="px-4 py-3 text-subtle">
           {template.marketplaceName || template.category ? `${template.marketplaceName || '—'} / ${template.category || '—'}` : '—'}
         </td>
         <td className="px-4 py-3">
@@ -140,14 +140,14 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
             disabled={togglingVisibility}
             title={template.isAllowedToShow ? 'Visible in Auto Listing / Choose Your Template' : 'Hidden from Auto Listing / Choose Your Template'}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-80 ${
-              template.isAllowedToShow ? 'bg-emerald-500' : 'bg-gray-300'
+              template.isAllowedToShow ? 'bg-emerald-500' : 'bg-divider-light'
             }`}
           >
             {togglingVisibility ? (
-              <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-white" />
+              <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-foreground" />
             ) : (
               <span
-                className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
+                className="inline-block h-3.5 w-3.5 rounded-full bg-card shadow-sm transition-transform"
                 style={{ transform: template.isAllowedToShow ? 'translateX(18px)' : 'translateX(4px)' }}
               />
             )}
@@ -176,10 +176,10 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
 
       {editingRules && (
         <tr>
-          <td colSpan={5} className="bg-gray-50 px-4 py-4">
-            <div className="rounded-lg border border-gray-200 bg-white p-3.5 space-y-3">
+          <td colSpan={5} className="bg-surface px-4 py-4">
+            <div className="rounded-lg border border-divider bg-card p-3.5 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[11.5px] font-semibold text-gray-600">Edit AI Rules for &quot;{template.templateName}&quot;</p>
+                <p className="text-[11.5px] font-semibold text-muted">Edit AI Rules for &quot;{template.templateName}&quot;</p>
                 <div className="flex items-center gap-2">
                   <PillButton variant="ghost" icon={ClipboardPaste} onClick={handlePasteRules}>Paste Rules</PillButton>
                   <PillButton variant="upload" icon={Check} loading={savingRules} onClick={handleSaveRules}>Save Rules</PillButton>
@@ -188,11 +188,11 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {EDIT_FIELDS.map((f) => (
                   <div key={f.key}>
-                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{f.label}</label>
+                    <label className="block text-[11px] font-semibold text-subtle uppercase tracking-wide mb-1">{f.label}</label>
                     <input
                       value={draft[f.key]}
                       onChange={(e) => setDraft((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                      className="w-full px-2.5 py-2 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      className="w-full px-2.5 py-2 text-[13px] border border-divider rounded-md focus:outline-none focus:ring-1 focus:ring-accent-light"
                     />
                   </div>
                 ))}

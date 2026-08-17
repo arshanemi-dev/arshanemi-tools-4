@@ -77,16 +77,16 @@ export default function TemplateAccessPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="px-6 py-10 text-center text-sm text-gray-500">
+      <div className="px-6 py-10 text-center text-sm text-subtle">
         Couldn’t load users.{' '}
-        <button type="button" onClick={load} className="text-indigo-600 font-medium hover:underline">Retry</button>
+        <button type="button" onClick={load} className="text-accent font-medium hover:underline">Retry</button>
       </div>
     )
   }
@@ -95,36 +95,36 @@ export default function TemplateAccessPanel() {
     <div className="px-6 py-6 space-y-6 pb-24">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Template Access</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-xl font-bold text-foreground">Template Access</h1>
+          <p className="text-sm text-subtle mt-0.5">
             Grant individual accounts access to Template Settings (create, edit, and manage templates). master_admin always has access and never needs a grant.
           </p>
         </div>
         <div className="relative w-full max-w-xs">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-subtle absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search users…"
-            className="w-full pl-9 pr-3 py-2 text-[13px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="w-full pl-9 pr-3 py-2 text-[13px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
           />
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
+      <div className="bg-card rounded-lg border border-divider divide-y divide-divider">
         {filteredUsers.length === 0 && (
-          <div className="px-5 py-10 text-center text-sm text-gray-400">No users found.</div>
+          <div className="px-5 py-10 text-center text-sm text-subtle">No users found.</div>
         )}
         {filteredUsers.map((u) => (
           <div key={u.id} className="flex items-center justify-between gap-4 px-5 py-4">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-gray-900 truncate">{u.name}</p>
-                <span className="inline-flex flex-shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                <p className="text-sm font-semibold text-foreground truncate">{u.name}</p>
+                <span className="inline-flex flex-shrink-0 items-center rounded-full bg-card-hover px-2 py-0.5 text-[11px] font-medium text-muted">
                   {ROLE_LABEL[u.role] || u.role}
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-0.5 truncate">
+              <p className="text-xs text-subtle mt-0.5 truncate">
                 {u.email || u.mobile}
                 {companies[u.company_id] ? ` · ${companies[u.company_id]}` : ''}
               </p>
@@ -134,19 +134,19 @@ export default function TemplateAccessPanel() {
               role="switch"
               aria-checked={!!access[u.id]}
               onClick={() => toggle(u.id)}
-              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${access[u.id] ? 'bg-indigo-600' : 'bg-gray-300'}`}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${access[u.id] ? 'bg-accent' : 'bg-divider-light'}`}
             >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${access[u.id] ? 'translate-x-5' : ''}`} />
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-card shadow transition-transform ${access[u.id] ? 'translate-x-5' : ''}`} />
             </button>
           </div>
         ))}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 lg:left-48 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3 z-10 shadow-sm">
+      <div className="fixed bottom-0 left-0 right-0 lg:left-48 bg-card border-t border-divider px-6 py-4 flex items-center justify-end gap-3 z-10 shadow-sm">
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-foreground hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
         >
           <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : 'Save Changes'}
         </button>

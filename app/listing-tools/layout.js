@@ -4,14 +4,14 @@ import { verifyToken } from '@/lib/auth'
 import { IS_CONNECT } from '@/lib/connect'
 import { fetchTemplateSettingsAllowed } from '@/lib/listingTemplateAccess'
 import { ToastProvider } from '@/components/admin/Toast'
-import SessionManager from '@/components/admin/SessionManager'
 import ListingToolsSidebar from '@/components/listing/ListingToolsSidebar'
-import ListingToolsHeader from '@/components/listing/ListingToolsHeader'
+import DashboardTopbar from '@/components/dashboard/DashboardTopbar'
 
 export const metadata = {
   title: 'Listing Tools — Arshanemi',
   robots: { index: false },
 }
+const HEADER_HIDDEN = process.env.NEXT_PUBLIC_IS_Header_Hide === 'true'
 
 export default async function ListingToolsLayout({ children }) {
   const cookieStore = await cookies()
@@ -44,9 +44,9 @@ export default async function ListingToolsLayout({ children }) {
 
   return (
     <ToastProvider>
-      <SessionManager />
       <div className="flex flex-col h-screen overflow-hidden bg-background">
-        <ListingToolsHeader name={payload.name} email={payload.email} />
+        {!HEADER_HIDDEN && <DashboardTopbar user={{ name: payload.name, email: payload.email, role: payload.role }} />}
+
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <ListingToolsSidebar role={payload.role} templateSettingsAllowed={templateSettingsAllowed} />
           <main className="flex-1 overflow-y-auto">{children}</main>

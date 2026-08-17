@@ -129,19 +129,19 @@ export default function AiFillUpModal({ onClose, sheets, defaultGroup, onRun }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl max-h-[88vh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 flex-shrink-0">
-          <h2 className="flex items-center gap-2 text-[14px] font-semibold text-gray-800">
-            <Sparkles className="w-4 h-4 text-indigo-600" /> AI Fill Up
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/40 p-4">
+      <div className="bg-card rounded-xl w-full max-w-2xl shadow-2xl max-h-[88vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-divider flex-shrink-0">
+          <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+            <Sparkles className="w-4 h-4 text-accent" /> AI Fill Up
           </h2>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} className="text-subtle hover:text-muted">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="px-5 py-4 flex flex-col gap-3 overflow-y-auto">
-          <p className="text-[12px] text-gray-500">
+          <p className="text-[12px] text-subtle">
             Fills every empty, AI-eligible field in the rows/columns you leave checked below —
             grounded in your own past listings — billed per row. Fields that already have a value
             are never touched.
@@ -157,20 +157,20 @@ export default function AiFillUpModal({ onClose, sheets, defaultGroup, onRun }) 
             const checkedIds = headerChecked[sheet.group] || new Set()
             const counts = countsByGroup[sheet.group]
             return (
-              <div key={sheet.group} className="rounded-lg border border-gray-200 overflow-hidden">
-                <label className="flex items-center gap-2.5 px-3 py-2.5 bg-gray-50 cursor-pointer select-none">
+              <div key={sheet.group} className="rounded-lg border border-divider overflow-hidden">
+                <label className="flex items-center gap-2.5 px-3 py-2.5 bg-surface cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleGroup(sheet.group)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600"
+                    className="w-3.5 h-3.5 rounded border-divider-light accent-accent"
                   />
-                  <span className="text-[12.5px] font-semibold text-gray-800">{sheet.sheetName || sheet.group}</span>
-                  <span className="text-[11px] text-gray-400">
+                  <span className="text-[12.5px] font-semibold text-foreground">{sheet.sheetName || sheet.group}</span>
+                  <span className="text-[11px] text-subtle">
                     {sheet.rows.filter((r) => !isRowEmpty(r)).length} row(s)
                   </span>
                   {checked && counts && counts.fields > 0 && (
-                    <span className="ml-auto text-[11px] font-medium text-indigo-600">
+                    <span className="ml-auto text-[11px] font-medium text-accent">
                       {counts.rows} row{counts.rows === 1 ? '' : 's'} · {counts.fields} field{counts.fields === 1 ? '' : 's'}
                     </span>
                   )}
@@ -181,19 +181,19 @@ export default function AiFillUpModal({ onClose, sheets, defaultGroup, onRun }) 
                     {fillableMeta.map(({ header }) => (
                       <label
                         key={header.id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 text-[11.5px] text-gray-700 cursor-pointer hover:border-indigo-300 select-none"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-divider px-2.5 py-1 text-[11.5px] text-muted cursor-pointer hover:border-accent-light select-none"
                       >
                         <input
                           type="checkbox"
                           checked={checkedIds.has(header.id)}
                           onChange={() => toggleHeader(sheet.group, header.id)}
-                          className="w-3 h-3 rounded border-gray-300 accent-indigo-600"
+                          className="w-3 h-3 rounded border-divider-light accent-accent"
                         />
                         {header.label}
                       </label>
                     ))}
                     {fillableMeta.length === 0 && (
-                      <p className="text-[11.5px] text-gray-400 italic">No empty AI-fillable fields in this group.</p>
+                      <p className="text-[11.5px] text-subtle italic">No empty AI-fillable fields in this group.</p>
                     )}
                   </div>
                 )}
@@ -202,20 +202,20 @@ export default function AiFillUpModal({ onClose, sheets, defaultGroup, onRun }) 
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-200 flex-shrink-0">
-          <span className="text-[12px] text-gray-500">
-            <strong className="text-gray-800">{totalRows}</strong> row{totalRows === 1 ? '' : 's'} ·{' '}
-            <strong className="text-gray-800">{totalFields}</strong> field{totalFields === 1 ? '' : 's'} will be filled
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-divider flex-shrink-0">
+          <span className="text-[12px] text-subtle">
+            <strong className="text-foreground">{totalRows}</strong> row{totalRows === 1 ? '' : 's'} ·{' '}
+            <strong className="text-foreground">{totalFields}</strong> field{totalFields === 1 ? '' : 's'} will be filled
           </span>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="px-3.5 py-2 text-[12.5px] font-medium text-gray-600 hover:text-gray-800">
+            <button type="button" onClick={onClose} className="px-3.5 py-2 text-[12.5px] font-medium text-muted hover:text-foreground">
               Cancel
             </button>
             <button
               type="button"
               disabled={totalFields === 0}
               onClick={handleConfirm}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[12.5px] font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[12.5px] font-medium text-foreground bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5" /> Run AI Fill
             </button>

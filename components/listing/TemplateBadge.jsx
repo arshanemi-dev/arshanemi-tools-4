@@ -6,9 +6,9 @@
 // badge.
 const STYLES = {
   self: 'bg-emerald-100 text-emerald-700',
-  default: 'bg-indigo-100 text-indigo-700',
+  default: 'bg-accent/15 text-accent-hover',
   main: 'bg-amber-100 text-amber-700',
-  identity: 'bg-gray-100 text-gray-700',
+  identity: 'bg-card-hover text-muted',
 }
 
 export default function TemplateBadge({ badge }) {

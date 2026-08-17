@@ -662,15 +662,15 @@ function ScopedAutoDetails({ templateId }) {
   }
 
   return (
-    <div className="min-h-[70vh] bg-gray-50 px-6 py-6 space-y-4">
+    <div className="min-h-[70vh] bg-surface px-6 py-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -720,10 +720,10 @@ function ScopedAutoDetails({ templateId }) {
         </div>
       </div>
 
-      {!content && <p className="px-4 py-8 text-center text-[13px] text-gray-400">Loading…</p>}
+      {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
 
       {sheet && (
-        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+        <div className="border border-divider rounded-lg overflow-hidden bg-card">
           <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} />
           <SheetGrid
             headers={sheet.headers}

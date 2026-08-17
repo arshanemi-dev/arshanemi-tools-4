@@ -41,7 +41,7 @@ export default function FormulaCell({ value, formula, headers, row, disabled, on
         placeholder={String(evaluateFormula(formula, row, headers) ?? '') || undefined}
         disabled={disabled}
         title={formula || undefined}
-        className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 italic focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400 placeholder:not-italic placeholder:text-gray-400"
+        className="w-full min-w-[110px] px-3 py-2 bg-transparent text-foreground italic focus:outline-none focus:ring-1 focus:ring-inset focus:ring-accent-light disabled:text-subtle placeholder:not-italic placeholder:text-subtle"
       />
     )
   }
@@ -54,7 +54,7 @@ export default function FormulaCell({ value, formula, headers, row, disabled, on
         className={`w-full min-w-[110px] px-3 py-2 flex flex-wrap gap-1 ${disabled ? '' : 'cursor-text'}`}
       >
         {parts.map((v, i) => (
-          <span key={i} className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[11.5px] text-indigo-700 italic">
+          <span key={i} className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-[11.5px] text-accent-hover italic">
             {v}
           </span>
         ))}
@@ -82,7 +82,7 @@ export default function FormulaCell({ value, formula, headers, row, disabled, on
           value={v}
           onChange={(e) => updatePart(i, e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          className="w-16 min-w-0 px-1.5 py-0.5 text-[11.5px] italic text-indigo-700 bg-indigo-50 border border-indigo-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="w-16 min-w-0 px-1.5 py-0.5 text-[11.5px] italic text-accent-hover bg-accent/10 border border-accent/30 rounded focus:outline-none focus:ring-1 focus:ring-accent-light"
         />
       ))}
     </div>

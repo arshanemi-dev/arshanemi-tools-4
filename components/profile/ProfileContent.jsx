@@ -266,7 +266,7 @@ export default function ProfileContent() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`pb-3 text-lg font-bold transition-colors border-b-2 -mb-px ${
-                tab === t.id ? 'text-foreground border-foreground' : 'text-subtle border-transparent hover:text-muted'
+                tab === t.id ? 'text-white border-white' : 'text-white/40 border-transparent hover:text-white/70'
               }`}
             >
               {t.label}

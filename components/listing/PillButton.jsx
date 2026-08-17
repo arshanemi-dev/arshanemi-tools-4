@@ -5,16 +5,16 @@ import { Loader2 } from 'lucide-react'
 // Delete (red), Edit (amber), View Details (teal) — the four button colors
 // that recur across every Listing Tools toolbar in the source screenshots.
 const VARIANTS = {
-  upload: 'bg-teal-500 hover:bg-teal-600 text-white',
-  download: 'bg-indigo-600 hover:bg-indigo-700 text-white',
-  delete: 'bg-red-500 hover:bg-red-600 text-white',
-  edit: 'bg-amber-500 hover:bg-amber-600 text-white',
-  view: 'bg-teal-500 hover:bg-teal-600 text-white',
-  ghost: 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50',
+  upload: 'bg-teal-500 hover:bg-teal-600 text-foreground',
+  download: 'bg-accent hover:bg-accent-hover text-white',
+  delete: 'bg-red-500 hover:bg-red-600 text-foreground',
+  edit: 'bg-amber-500 hover:bg-amber-600 text-foreground',
+  view: 'bg-teal-500 hover:bg-teal-600 text-foreground',
+  ghost: 'bg-card border border-divider text-muted hover:bg-surface',
   // AI Auto-Fill actions (plan/gemini-ai-plan.md §5/§10) — reuses the app's
   // existing indigo accent (SheetGrid/ComboboxCell focus rings, "download"
   // pill) rather than inventing a new color.
-  ai: 'bg-indigo-600 hover:bg-indigo-700 text-white',
+  ai: 'bg-accent hover:bg-accent-hover text-white',
 }
 
 export default function PillButton({ icon: Icon, children, variant = 'download', loading, className = '', ...props }) {

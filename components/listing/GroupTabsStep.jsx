@@ -22,8 +22,8 @@ const DROPDOWN_LIKE_TYPES = ['dropdown', 'multiselect']
 // dev but silently vanish from the production CSS since Tailwind can't see
 // a literal class name to scan for.
 const COLOR_PALETTE = {
-  gray: { border: 'border-t-gray-400', dot: 'bg-gray-400', badge: 'bg-gray-200 text-gray-700' },
-  indigo: { border: 'border-t-indigo-500', dot: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-800' },
+  gray: { border: 'border-t-divider-light', dot: 'bg-subtle', badge: 'bg-card-hover text-muted' },
+  indigo: { border: 'border-t-accent', dot: 'bg-accent', badge: 'bg-accent/15 text-accent-hover' },
   purple: { border: 'border-t-purple-500', dot: 'bg-purple-500', badge: 'bg-purple-100 text-purple-800' },
   red: { border: 'border-t-red-500', dot: 'bg-red-500', badge: 'bg-red-100 text-red-800' },
   blue: { border: 'border-t-blue-500', dot: 'bg-blue-500', badge: 'bg-blue-100 text-blue-800' },
@@ -43,7 +43,7 @@ const DEFAULT_TAB_COLOR = {
   optional: 'amber',
 }
 
-const fieldLabelCls = 'text-[11px] font-semibold text-gray-500 uppercase tracking-wide'
+const fieldLabelCls = 'text-[11px] font-semibold text-subtle uppercase tracking-wide'
 
 // Identity badge (per the user's ask: "some identity mentioned this is
 // default headers... this is created... this is by sheets") — where a
@@ -55,7 +55,7 @@ const fieldLabelCls = 'text-[11px] font-semibold text-gray-500 uppercase trackin
 const SOURCE_LABEL = { default: 'Default', upload: 'From Sheet', manual: 'Manual' }
 const SOURCE_BADGE_CLS = {
   default: 'bg-purple-100 text-purple-700',
-  upload: 'bg-gray-100 text-gray-600',
+  upload: 'bg-card-hover text-muted',
   manual: 'bg-emerald-100 text-emerald-700',
 }
 
@@ -156,8 +156,8 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
           see every column the sheet actually has at a glance. Colored by
           current group so it doubles as a quick "what's mapped where" check. */}
       {fields.length > 1000 && (
-        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3.5">
-          <p className="mb-2 text-[11.5px] font-semibold text-gray-600">
+        <div className="mb-4 rounded-lg border border-divider bg-card p-3.5">
+          <p className="mb-2 text-[11.5px] font-semibold text-muted">
             All headers in this sheet ({fields.length})
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -179,19 +179,19 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
 
       {/* Bulk-assign toolbar — dropdown picks the target group instead of a
           clicked "active tab" (every group is already visible at once below) */}
-      <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3.5">
-        <label className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-600">
+      <div className="mb-4 rounded-lg border border-divider bg-surface p-3.5">
+        <label className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold text-muted">
           <Layers className="w-3.5 h-3.5" /> Bulk assign unmapped headers to a target group
         </label>
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={bulkTargetId}
             onChange={(e) => onBulkTargetChange(e.target.value)}
-            className="px-2.5 py-1.5 text-[12.5px] font-semibold text-indigo-600 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="px-2.5 py-1.5 text-[12.5px] font-semibold text-accent border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
           >
             {tabs.map((t) => <option key={t.id} value={t.id}>Target Group: [{t.label}]</option>)}
           </select>
-          <span className="text-[11.5px] text-gray-400">{unmappedFields.length} unmapped header{unmappedFields.length === 1 ? '' : 's'} available</span>
+          <span className="text-[11.5px] text-subtle">{unmappedFields.length} unmapped header{unmappedFields.length === 1 ? '' : 's'} available</span>
         </div>
 
         {/* Checkbox list, not a native multiple-select — checking a header
@@ -200,24 +200,24 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
             Unselected. Each header is its own row, not a cramped native
             option list. */}
         {bulkTargetId !== UNMAPPED_TAB_ID && unmappedFields.length > 0 && (
-          <div className="mt-2.5 overflow-hidden rounded-md border border-gray-200 bg-white">
-            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2">
-              <button type="button" onClick={assignAllUnmapped} className="text-[11.5px] font-semibold text-indigo-600 hover:text-indigo-700">
+          <div className="mt-2.5 overflow-hidden rounded-md border border-divider bg-card">
+            <div className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
+              <button type="button" onClick={assignAllUnmapped} className="text-[11.5px] font-semibold text-accent hover:text-accent-hover">
                 Assign all to [{tabs.find((t) => t.id === bulkTargetId)?.label}]
               </button>
-              <span className="text-[11.5px] text-gray-400">Check a header to assign it instantly</span>
+              <span className="text-[11.5px] text-subtle">Check a header to assign it instantly</span>
             </div>
 
-            <div className="max-h-48 divide-y divide-gray-100 overflow-y-auto">
+            <div className="max-h-48 divide-y divide-divider overflow-y-auto">
               {unmappedFields.map((f) => (
-                <label key={f.id} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50">
+                <label key={f.id} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-surface">
                   <input
                     type="checkbox"
                     checked={false}
                     onChange={() => assignToTarget(f.id)}
-                    className="h-3.5 w-3.5 flex-shrink-0 rounded border-gray-300 accent-indigo-600"
+                    className="h-3.5 w-3.5 flex-shrink-0 rounded border-divider-light accent-accent"
                   />
-                  <span className="truncate text-[12.5px] text-gray-700">{f.label}</span>
+                  <span className="truncate text-[12.5px] text-muted">{f.label}</span>
                 </label>
               ))}
             </div>
@@ -234,10 +234,10 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
           return (
             <div
               key={tab.id}
-              className={`flex w-[300px] flex-shrink-0 flex-col rounded-lg border border-t-4 border-gray-200 bg-gray-50 ${COLOR_PALETTE[colorKey].border}`}
+              className={`flex w-[300px] flex-shrink-0 flex-col rounded-lg border border-t-4 border-divider bg-surface ${COLOR_PALETTE[colorKey].border}`}
               style={{ height: '70vh' }}
             >
-              <div className="sticky top-0 z-10 rounded-t-md border-b border-gray-200 bg-white px-3.5 py-3">
+              <div className="sticky top-0 z-10 rounded-t-md border-b border-divider bg-card px-3.5 py-3">
                 <div className="flex items-center gap-2">
                   {editingTabId === tab.id ? (
                     <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -247,12 +247,12 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                         onChange={(e) => setTempLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') commitRename(tab) }}
                         onBlur={() => commitRename(tab)}
-                        className="min-w-0 flex-1 rounded border border-indigo-300 px-2 py-1 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        className="min-w-0 flex-1 rounded border border-accent-light px-2 py-1 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-accent-light"
                       />
                       <button
                         type="button"
                         onClick={() => commitRename(tab)}
-                        className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600"
+                        className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-emerald-600"
                       >
                         Save
                       </button>
@@ -265,11 +265,11 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       title={tab.id === UNMAPPED_TAB_ID ? undefined : 'Click to rename group'}
                       className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left disabled:cursor-default"
                     >
-                      <span className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-semibold text-gray-800">
-                        {tab.id !== UNMAPPED_TAB_ID && <Pencil className="w-3 h-3 flex-shrink-0 text-gray-400" />}
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-semibold text-foreground">
+                        {tab.id !== UNMAPPED_TAB_ID && <Pencil className="w-3 h-3 flex-shrink-0 text-subtle" />}
                         {tab.label}
                       </span>
-                      <span className="shrink-0 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10.5px] font-bold text-gray-600">{colFields.length}</span>
+                      <span className="shrink-0 rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-bold text-muted">{colFields.length}</span>
                     </button>
                   )}
 
@@ -281,17 +281,17 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       type="button"
                       onClick={() => setColorPickerOpenId((cur) => (cur === tab.id ? null : tab.id))}
                       title="Change group color"
-                      className={`h-4 w-4 rounded-full ring-1 ring-inset ring-black/10 ${COLOR_PALETTE[colorKey].dot}`}
+                      className={`h-4 w-4 rounded-full ring-1 ring-inset ring-foreground/10 ${COLOR_PALETTE[colorKey].dot}`}
                     />
                     {colorPickerOpenId === tab.id && (
-                      <div className="absolute right-0 top-full z-20 mt-1 grid w-[124px] grid-cols-5 gap-1.5 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+                      <div className="absolute right-0 top-full z-20 mt-1 grid w-[124px] grid-cols-5 gap-1.5 rounded-lg border border-divider bg-card p-2 shadow-lg">
                         {Object.keys(COLOR_PALETTE).map((key) => (
                           <button
                             key={key}
                             type="button"
                             title={key}
                             onClick={() => setTabColor(tab.id, key)}
-                            className={`h-5 w-5 rounded-full ${COLOR_PALETTE[key].dot} ${colorKey === key ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`}
+                            className={`h-5 w-5 rounded-full ${COLOR_PALETTE[key].dot} ${colorKey === key ? 'ring-2 ring-offset-1 ring-subtle' : ''}`}
                           />
                         ))}
                       </div>
@@ -307,7 +307,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       type="button"
                       onClick={() => onRemoveTab(tab.id)}
                       title="Remove this group"
-                      className="flex-shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                      className="flex-shrink-0 rounded p-1 text-subtle hover:bg-red-50 hover:text-red-500"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -319,7 +319,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                 onDragOver={(e) => { e.preventDefault(); if (dragOverTabId !== tab.id) setDragOverTabId(tab.id) }}
                 onDragLeave={() => setDragOverTabId((cur) => (cur === tab.id ? null : cur))}
                 onDrop={(e) => handleDrop(e, tab.id)}
-                className={`flex flex-1 flex-col gap-3 overflow-y-auto rounded-b-md p-3 transition-colors ${isDragOver ? 'bg-indigo-50' : ''}`}
+                className={`flex flex-1 flex-col gap-3 overflow-y-auto rounded-b-md p-3 transition-colors ${isDragOver ? 'bg-accent/10' : ''}`}
               >
                 {/* Add a brand-new header directly into this group — not
                     extracted from the upload, just a manually-added field
@@ -327,14 +327,14 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                 <button
                   type="button"
                   onClick={() => onAddHeader(tab.id)}
-                  className="flex w-full flex-shrink-0 items-center justify-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-[11.5px] font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                  className="flex w-full flex-shrink-0 items-center justify-center gap-1 rounded-md border border-dashed border-divider-light px-2 py-1.5 text-[11.5px] font-medium text-subtle hover:border-accent-light hover:text-accent"
                 >
                   <Plus className="w-3 h-3" /> Add Header
                 </button>
 
                 {colFields.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center">
-                    <p className="text-center text-[12px] italic text-gray-400">No headers in this group.</p>
+                    <p className="text-center text-[12px] italic text-subtle">No headers in this group.</p>
                   </div>
                 ) : (
                   colFields.map((field) => (
@@ -342,14 +342,14 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                       key={field.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, field.id)}
-                      className="flex cursor-grab flex-col gap-2.5 rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
+                      className="flex cursor-grab flex-col gap-2.5 rounded-lg border border-divider bg-card p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
                     >
-                      <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-2">
+                      <div className="flex items-start justify-between gap-2 border-b border-divider pb-2">
                         <input
                           value={field.label}
                           onChange={(e) => onUpdateField(field.id, { label: e.target.value })}
                           onMouseDown={(e) => e.stopPropagation()}
-                          className="min-w-0 flex-1 border-0 bg-transparent px-0 py-0.5 text-[13px] font-semibold text-gray-800 focus:outline-none focus:ring-0"
+                          className="min-w-0 flex-1 border-0 bg-transparent px-0 py-0.5 text-[13px] font-semibold text-foreground focus:outline-none focus:ring-0"
                         />
                         <span
                           title="Where this header came from"
@@ -367,10 +367,10 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           onClick={() => toggleAdvanced(field.id)}
                           onMouseDown={(e) => e.stopPropagation()}
                           title="Advanced settings"
-                          className={`flex shrink-0 items-center gap-0.5 rounded p-1 ${advancedOpenIds.has(field.id) ? 'bg-gray-100 text-indigo-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                          className={`flex shrink-0 items-center gap-0.5 rounded p-1 ${advancedOpenIds.has(field.id) ? 'bg-card-hover text-accent' : 'text-subtle hover:bg-card-hover hover:text-muted'}`}
                         >
-                          {field.isUniqueKeyPart && <Key className="w-3 h-3 text-indigo-500" />}
-                          {field.disabled && <Lock className="w-3 h-3 text-indigo-500" />}
+                          {field.isUniqueKeyPart && <Key className="w-3 h-3 text-accent" />}
+                          {field.disabled && <Lock className="w-3 h-3 text-accent" />}
                           <Settings className="w-3.5 h-3.5" />
                         </button>
 
@@ -383,7 +383,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           onClick={() => onDeleteHeader(field.id)}
                           onMouseDown={(e) => e.stopPropagation()}
                           title="Delete this header"
-                          className="flex shrink-0 items-center rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                          className="flex shrink-0 items-center rounded p-1 text-subtle hover:bg-red-50 hover:text-red-500"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -394,7 +394,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                           TemplateSettingsWizard.jsx) — shown here so it's
                           obviously not lost, not welded onto the label above. */}
                       {field.description && (
-                        <p className="line-clamp-2 text-[11px] italic text-gray-400" title={field.description}>
+                        <p className="line-clamp-2 text-[11px] italic text-subtle" title={field.description}>
                           {field.description}
                         </p>
                       )}
@@ -405,7 +405,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                             longer fit on one line inside a fixed 300px card
                             without wrapping/overflowing, so each button gets
                             its own cell and wraps to more rows instead. */}
-                        <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-100 p-1">
+                        <div className="grid grid-cols-2 gap-1 rounded-md bg-card-hover p-1">
                           {TYPE_OPTIONS.map((t) => (
                             <button
                               key={t.value}
@@ -417,7 +417,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                               })}
                               title={t.label}
                               className={`flex items-center justify-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors truncate ${
-                                field.dataType === t.value ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                                field.dataType === t.value ? 'bg-card text-accent shadow-sm' : 'text-subtle hover:text-muted'
                               }`}
                             >
                               <t.icon className="w-3 h-3 flex-shrink-0" /> <span className="truncate">{t.label}</span>
@@ -452,7 +452,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                 onMouseDown={(e) => e.stopPropagation()}
                                 disabled={!(field.dropdownValues || []).length}
                                 title="Copy these options"
-                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-gray-500 hover:bg-gray-100 hover:text-indigo-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-subtle hover:bg-card-hover hover:text-accent disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"
                               >
                                 <Copy className="w-3 h-3" /> Copy
                               </button>
@@ -462,13 +462,13 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                 onMouseDown={(e) => e.stopPropagation()}
                                 disabled={!copiedValues}
                                 title={copiedValues ? `Paste ${copiedValues.length} value${copiedValues.length === 1 ? '' : 's'}` : 'Copy a dropdown\'s values first'}
-                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-gray-500 hover:bg-gray-100 hover:text-indigo-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                                className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium text-subtle hover:bg-card-hover hover:text-accent disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"
                               >
                                 <ClipboardPaste className="w-3 h-3" /> Paste
                               </button>
                             </div>
                           </div>
-                          <div className="rounded-md border border-gray-200 bg-gray-50 p-1.5">
+                          <div className="rounded-md border border-divider bg-surface p-1.5">
                             <input
                               type="text"
                               placeholder="Type a value, press Enter to add…"
@@ -483,18 +483,18 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                 onUpdateField(field.id, { dropdownValues: [...existing, v] })
                                 e.target.value = ''
                               }}
-                              className="w-full px-2 py-1 text-[12px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              className="w-full px-2 py-1 text-[12px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
                             />
                             {(field.dropdownValues || []).length > 0 ? (
                               <div className="mt-1.5 flex flex-wrap gap-1">
                                 {field.dropdownValues.map((v, i) => (
-                                  <span key={`${v}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-700">
+                                  <span key={`${v}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-divider bg-card px-2 py-0.5 text-[11px] text-muted">
                                     {v}
                                     <button
                                       type="button"
                                       onMouseDown={(e) => e.stopPropagation()}
                                       onClick={() => onUpdateField(field.id, { dropdownValues: field.dropdownValues.filter((_, idx) => idx !== i) })}
-                                      className="text-gray-400 hover:text-red-500"
+                                      className="text-subtle hover:text-red-500"
                                     >
                                       <X className="w-3 h-3" />
                                     </button>
@@ -502,7 +502,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                 ))}
                               </div>
                             ) : (
-                              <p className="mt-1 text-[11px] text-gray-400">No values yet — type one above.</p>
+                              <p className="mt-1 text-[11px] text-subtle">No values yet — type one above.</p>
                             )}
                           </div>
                         </div>
@@ -524,23 +524,23 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                             onChange={(e) => onUpdateField(field.id, { formula: e.target.value })}
                             onMouseDown={(e) => e.stopPropagation()}
                             placeholder="e.g. [MRP] * 1.5  or  [Col1] power [Col2]"
-                            className="w-full px-2 py-1.5 text-[12px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            className="w-full px-2 py-1.5 text-[12px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
                           />
-                          <p className="text-[11px] text-gray-400">
+                          <p className="text-[11px] text-subtle">
                             Reference other columns by name in brackets. Supports +, -, *, /, ^ (or the word &quot;power&quot;), and parentheses.
                           </p>
                         </div>
                       )}
 
                       {advancedOpenIds.has(field.id) && (
-                        <div className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Advanced Settings</p>
-                          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-gray-600 select-none">
+                        <div className="flex flex-col gap-2 rounded-md border border-divider bg-surface p-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-subtle">Advanced Settings</p>
+                          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-muted select-none">
                             <input
                               type="checkbox"
                               checked={!!field.isUniqueKeyPart}
                               onChange={(e) => onUpdateField(field.id, { isUniqueKeyPart: e.target.checked })}
-                              className="h-3.5 w-3.5 rounded border-gray-300 accent-indigo-600"
+                              className="h-3.5 w-3.5 rounded border-divider-light accent-accent"
                             />
                             <Key className="w-3 h-3" /> Unique key part
                           </label>
@@ -552,12 +552,12 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                               elsewhere (a connected-header cascade, a
                               cross-group sync) — never from someone directly
                               editing this cell. */}
-                          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-gray-600 select-none">
+                          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-muted select-none">
                             <input
                               type="checkbox"
                               checked={!!field.disabled}
                               onChange={(e) => onUpdateField(field.id, { disabled: e.target.checked })}
-                              className="h-3.5 w-3.5 rounded border-gray-300 accent-indigo-600"
+                              className="h-3.5 w-3.5 rounded border-divider-light accent-accent"
                             />
                             <Lock className="w-3 h-3" /> Disabled (read-only at fill time)
                           </label>
@@ -574,7 +574,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                 value={field.linkedGroup || ''}
                                 onChange={(e) => onUpdateField(field.id, { linkedGroup: e.target.value || null, linkedHeaderId: null })}
                                 onMouseDown={(e) => e.stopPropagation()}
-                                className="min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                className="min-w-0 flex-1 rounded-md border border-divider bg-card px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-accent-light"
                               >
                                 <option value="">Not connected</option>
                                 {tabs.filter((t) => t.id !== field.groupId && t.id !== UNMAPPED_TAB_ID).map((t) => (
@@ -586,7 +586,7 @@ export default function GroupTabsStep({ tabs, fields, bulkTargetId, onBulkTarget
                                   value={field.linkedHeaderId || ''}
                                   onChange={(e) => onUpdateField(field.id, { linkedHeaderId: e.target.value || null })}
                                   onMouseDown={(e) => e.stopPropagation()}
-                                  className="min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                  className="min-w-0 flex-1 rounded-md border border-divider bg-card px-1.5 py-1 text-[11.5px] focus:outline-none focus:ring-1 focus:ring-accent-light"
                                 >
                                   <option value="">Pick a header…</option>
                                   {fields.filter((f) => f.groupId === field.linkedGroup).map((f) => (

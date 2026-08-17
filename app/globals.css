@@ -11,6 +11,10 @@
   --color-divider:       #262626;
   --color-divider-light: #333333;
 
+  /* Navbar band — fixed deep navy, matches the root admin panel's Header.jsx
+     and does not change with the light/dark toggle */
+  --color-footer: #0b1330;
+
   /* Text */
   --color-muted:         #a3a3a3;
   --color-subtle:        #6b7280;

@@ -152,14 +152,14 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
 
   return (
     <>
-      <tr className={`border-b border-gray-100 last:border-b-0 hover:bg-gray-50/60 ${isSelected ? 'bg-indigo-50/30' : ''}`}>
+      <tr className={`border-b border-divider last:border-b-0 hover:bg-surface/60 ${isSelected ? 'bg-accent/6' : ''}`}>
         {/* Row Checkbox */}
         <td className="px-3 py-3 text-center">
           <input
             type="checkbox"
             checked={isSelected}
             onChange={(e) => onToggleSelect(template.id, e.target.checked)}
-            className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+            className="w-4 h-4 text-accent rounded border-divider-light focus:ring-accent cursor-pointer"
           />
         </td>
           <td className="px-3 py-3">
@@ -175,39 +175,39 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
                 : 'Hidden from Auto Listing / Choose Your Template'
             }
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-80 ${
-              template.isAllowedToShow ? 'bg-emerald-500' : 'bg-gray-300'
+              template.isAllowedToShow ? 'bg-emerald-500' : 'bg-divider-light'
             }`}
           >
             {togglingVisibility ? (
-              <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-white" />
+              <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-foreground" />
             ) : (
               <span
-                className="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
+                className="inline-block h-3.5 w-3.5 rounded-full bg-card shadow-sm transition-transform"
                 style={{ transform: template.isAllowedToShow ? 'translateX(18px)' : 'translateX(4px)' }}
               />
             )}
           </button>
         </td>
 
-        <td className="px-3 py-3 text-gray-800 font-medium whitespace-nowrap">
+        <td className="px-3 py-3 text-foreground font-medium whitespace-nowrap">
           <span className="inline-flex items-center gap-1.5">
             {template.templateName}
             <TemplateBadge badge={template.viewerBadge} />
           </span>
         </td>
-         <td className="px-3 py-3 text-gray-500 whitespace-nowrap">
+         <td className="px-3 py-3 text-subtle whitespace-nowrap">
           {template.marketplaceName || template.category
             ? `${template.marketplaceName || '—'} / ${template.category || '—'}`
             : '—'}
         </td>
-        <td className="px-3 py-3 text-gray-500 max-w-[180px]">
+        <td className="px-3 py-3 text-subtle max-w-[180px]">
           {editingRules ? (
             <input
               type="text"
               value={descDraft}
               onChange={(e) => setDescDraft(e.target.value)}
               placeholder="Template description"
-              className="w-full px-2 py-1 text-[12.5px] border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+              className="w-full px-2 py-1 text-[12.5px] border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light bg-card"
             />
           ) : (
             <span className="block truncate" title={template.description}>{template.description || '—'}</span>
@@ -226,11 +226,11 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
                   onChange={(e) =>
                     setDraft((prev) => ({ ...prev, [field.key]: e.target.value }))
                   }
-                  className="w-full px-2 py-1 text-[12.5px] border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+                  className="w-full px-2 py-1 text-[12.5px] border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light bg-card"
                 />
               ) : (
                 <span
-                  className="block max-w-[140px] truncate text-gray-600 text-[12.5px]"
+                  className="block max-w-[140px] truncate text-muted text-[12.5px]"
                   title={value || '—'}
                 >
                   {value || '—'}
@@ -481,23 +481,23 @@ export default function TemplateSettingsListPage() {
   }
 
   return (
-    <div className="min-h-full bg-gray-50 px-6 py-6">
+    <div className="min-h-full bg-surface px-6 py-6">
       <div className="flex items-center justify-between gap-3 mb-1">
-        <h1 className="text-lg font-bold text-gray-900">Template Settings</h1>
+        <h1 className="text-lg font-bold text-foreground">Template Settings</h1>
       </div>
-      <p className="text-[13px] text-gray-500 mb-5">
+      <p className="text-[13px] text-subtle mb-5">
         Create, edit, and delete your Listing Tools template definitions — groups, headers, dropdown sources, export preset, and AI rules.
       </p>
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search templates…"
-            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
           />
         </div>
 
@@ -544,10 +544,10 @@ export default function TemplateSettingsListPage() {
       </div>
 
       {/* Table Component */}
-      <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white">
+      <div className="border border-divider rounded-lg overflow-x-auto bg-card">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="bg-white border-b border-gray-200">
+            <tr className="bg-card border-b border-divider">
               <th className="px-3 py-2.5 text-center w-10">
                 <input
                   type="checkbox"
@@ -556,33 +556,33 @@ export default function TemplateSettingsListPage() {
                     if (el) el.indeterminate = someFilteredSelected
                   }}
                   onChange={toggleSelectAll}
-                  className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                  className="w-4 h-4 text-accent rounded border-divider-light focus:ring-accent cursor-pointer"
                 />
               </th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Visible</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Template Name</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Marketplace / Category</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Description</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Rule Title</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Rule Description</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Keywords</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Rules</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Rule-1</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-800">Rule-2</th>
-              <th className="px-3 py-2.5 text-right font-semibold text-gray-800">Actions</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Visible</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template Name</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Marketplace / Category</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Description</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule Title</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule Description</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Keywords</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rules</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule-1</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule-2</th>
+              <th className="px-3 py-2.5 text-right font-semibold text-foreground">Actions</th>
             </tr>
           </thead>
           <tbody>
             {templates === null && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-gray-400">
+                <td colSpan={12} className="px-4 py-10 text-center text-subtle">
                   Loading…
                 </td>
               </tr>
             )}
             {templates !== null && filtered.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-gray-400">
+                <td colSpan={12} className="px-4 py-10 text-center text-subtle">
                   No templates yet — create one to get started.
                 </td>
               </tr>

@@ -18,8 +18,8 @@ const EDITOR_FIELDS = [
   { key: 'otherRules', label: 'Other Rules & Tone Constraints' },
 ]
 
-const labelCls = 'block text-[11.5px] font-semibold text-gray-600 mb-1'
-const inputCls = 'w-full px-2.5 py-2 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-400'
+const labelCls = 'block text-[11.5px] font-semibold text-muted mb-1'
+const inputCls = 'w-full px-2.5 py-2 text-[13px] border border-divider rounded-md focus:outline-none focus:ring-1 focus:ring-accent-light'
 
 function rulesFromTemplate(t) {
   return {
@@ -144,18 +144,18 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[13px] font-semibold text-gray-800">5. AI Rules &amp; Template Generation</h2>
+    <div className="border border-divider rounded-lg overflow-hidden bg-card">
+      <div className="px-4 py-2.5 bg-surface border-b border-divider flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-[13px] font-semibold text-foreground">5. AI Rules &amp; Template Generation</h2>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-subtle" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search rule keywords…"
-              className="pl-8 pr-3 py-1.5 text-[12.5px] w-44 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="pl-8 pr-3 py-1.5 text-[12.5px] w-44 border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
             />
           </div>
 
@@ -194,7 +194,7 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
               value={value.marketplace}
               disabled
               title="Set in Section 4 — display only here"
-              className={`${inputCls} bg-gray-50 text-gray-500 cursor-default`}
+              className={`${inputCls} bg-surface text-subtle cursor-default`}
             />
           </div>
 
@@ -204,7 +204,7 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
               value={value.category}
               disabled
               title="Set in Section 4 — display only here"
-              className={`${inputCls} bg-gray-50 text-gray-500 cursor-default`}
+              className={`${inputCls} bg-surface text-subtle cursor-default`}
             />
           </div>
 
@@ -222,8 +222,8 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
         </div>
 
         {showEditor && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-            <h3 className="text-[12.5px] font-semibold text-gray-700">Edit AI Generation Prompts &amp; Instructions</h3>
+          <div className="rounded-lg border border-divider bg-surface p-4 space-y-3">
+            <h3 className="text-[12.5px] font-semibold text-muted">Edit AI Generation Prompts &amp; Instructions</h3>
             <div className="grid md:grid-cols-2 gap-3">
               {EDITOR_FIELDS.map((f) => (
                 <div key={f.key}>

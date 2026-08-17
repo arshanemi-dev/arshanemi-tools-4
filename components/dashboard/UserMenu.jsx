@@ -72,7 +72,7 @@ function roleLabel(role) {
             {initial}
           </span>
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-foreground">{user?.name}</p>
+            <p className="text-sm font-semibold text-white">{user?.name}</p>
             <p className="text-[11px] text-subtle">{roleLabel(user?.role)}</p>
           </div>
         </button>

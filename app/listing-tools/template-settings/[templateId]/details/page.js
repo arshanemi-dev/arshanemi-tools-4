@@ -23,8 +23,8 @@ const GROUP_ORDER = [
 ]
 
 const TYPE_STYLE = {
-  text: { icon: Type, badge: 'bg-gray-100 text-gray-600' },
-  dropdown: { icon: ListFilter, badge: 'bg-indigo-100 text-indigo-700' },
+  text: { icon: Type, badge: 'bg-card-hover text-muted' },
+  dropdown: { icon: ListFilter, badge: 'bg-accent/15 text-accent-hover' },
   image: { icon: ImageIcon, badge: 'bg-purple-100 text-purple-700' },
 }
 const MAX_VALUE_CHIPS = 5
@@ -36,13 +36,13 @@ const TABS = [
 
 function StatCard({ icon: Icon, label, value }) {
   return (
-    <div className="flex items-center gap-2.5 border border-gray-200 rounded-lg bg-white p-3">
-      <div className="flex-shrink-0 w-8 h-8 rounded-md bg-indigo-50 flex items-center justify-center">
-        <Icon className="w-4 h-4 text-indigo-600" />
+    <div className="flex items-center gap-2.5 border border-divider rounded-lg bg-card p-3">
+      <div className="flex-shrink-0 w-8 h-8 rounded-md bg-accent/10 flex items-center justify-center">
+        <Icon className="w-4 h-4 text-accent" />
       </div>
       <div className="min-w-0">
-        <p className="text-[10.5px] font-semibold text-gray-400 uppercase tracking-wide">{label}</p>
-        <p className="text-[13.5px] font-semibold text-gray-800 truncate">{value}</p>
+        <p className="text-[10.5px] font-semibold text-subtle uppercase tracking-wide">{label}</p>
+        <p className="text-[13.5px] font-semibold text-foreground truncate">{value}</p>
       </div>
     </div>
   )
@@ -50,8 +50,8 @@ function StatCard({ icon: Icon, label, value }) {
 function ReadField({ label, value }) {
   return (
     <div>
-      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-[13px] text-gray-700 break-words">{value || <span className="italic text-gray-300">Not set</span>}</p>
+      <p className="text-[11px] font-semibold text-subtle uppercase tracking-wide mb-1">{label}</p>
+      <p className="text-[13px] text-muted break-words">{value || <span className="italic text-subtle">Not set</span>}</p>
     </div>
   )
 }
@@ -84,9 +84,9 @@ export default function TemplateDetailsPage() {
   if (loadError) {
     return (
       <div className="max-w-lg mx-auto px-6 py-16 text-center">
-        <p className="text-[14px] font-semibold text-gray-800">Couldn&apos;t load this template.</p>
-        <p className="text-[13px] text-gray-500 mt-1">It may have been deleted, or you don&apos;t have access to it.</p>
-        <Link href="/listing-tools/template-settings" className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
+        <p className="text-[14px] font-semibold text-foreground">Couldn&apos;t load this template.</p>
+        <p className="text-[13px] text-subtle mt-1">It may have been deleted, or you don&apos;t have access to it.</p>
+        <Link href="/listing-tools/template-settings" className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:text-accent-hover">
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Template Settings
         </Link>
       </div>
@@ -95,7 +95,7 @@ export default function TemplateDetailsPage() {
   if (!template || !content) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+        <Loader2 className="w-6 h-6 text-accent animate-spin" />
       </div>
     )
   }
@@ -103,21 +103,21 @@ export default function TemplateDetailsPage() {
   const totalHeaders = content.sheets.reduce((sum, s) => sum + (s.headers?.length || 0), 0)
 
   return (
-    <div className="min-h-full bg-gray-50 px-6 py-6">
+    <div className="min-h-full bg-surface px-6 py-6">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
         <div>
-          <Link href="/listing-tools/template-settings" className="inline-flex items-center gap-1.5 text-[12px] font-medium text-gray-500 hover:text-gray-700 mb-2">
+          <Link href="/listing-tools/template-settings" className="inline-flex items-center gap-1.5 text-[12px] font-medium text-subtle hover:text-muted mb-2">
             <ArrowLeft className="w-3 h-3" /> Back to Template Settings
           </Link>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-bold text-gray-900">{template.templateName}</h1>
+            <h1 className="text-lg font-bold text-foreground">{template.templateName}</h1>
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${
-              template.isAllowedToShow ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+              template.isAllowedToShow ? 'bg-emerald-100 text-emerald-700' : 'bg-card-hover text-subtle'
             }`}>
               {template.isAllowedToShow ? 'Active' : 'Hidden'}
             </span>
           </div>
-          {template.description && <p className="text-[13px] text-gray-500 mt-0.5">{template.description}</p>}
+          {template.description && <p className="text-[13px] text-subtle mt-0.5">{template.description}</p>}
         </div>
         {/* <Link href={`/listing-tools/template-settings/${templateId}`}>
           <PillButton variant="edit" icon={Pencil} title="Edit this template's groups, headers, dropdown sources, preset and AI rules">
@@ -128,7 +128,7 @@ export default function TemplateDetailsPage() {
 
       {/* Tabs — segmented control, not a thin underline, so switching to
           Excel Formats is obvious rather than easy to miss. */}
-      <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 mb-5">
+      <div className="inline-flex items-center gap-1 rounded-lg bg-card-hover p-1 mb-5">
         {TABS.map((t) => {
           const Icon = t.icon
           const active = activeTab === t.id
@@ -138,7 +138,7 @@ export default function TemplateDetailsPage() {
               type="button"
               onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
-                active ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                active ? 'bg-card text-accent-hover shadow-sm' : 'text-subtle hover:text-muted'
               }`}
             >
               <Icon className="w-3.5 h-3.5" /> {t.label}
@@ -158,16 +158,16 @@ export default function TemplateDetailsPage() {
             <StatCard icon={GitBranch} label="Version" value={template.exportVersion || '—'} />
             <StatCard icon={Rows3} label="Total Headers" value={totalHeaders} />
           </div>
-          <div className="flex items-center gap-2 mb-5 border border-gray-200 rounded-lg bg-white px-3.5 py-2.5">
-            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Final Name</span>
-            <span className="text-[13px] font-mono font-medium text-gray-700 truncate">{template.finalName || '—'}</span>
+          <div className="flex items-center gap-2 mb-5 border border-divider rounded-lg bg-card px-3.5 py-2.5">
+            <span className="text-[11px] font-semibold text-subtle uppercase tracking-wide">Final Name</span>
+            <span className="text-[13px] font-mono font-medium text-muted truncate">{template.finalName || '—'}</span>
           </div>
 
           {/* AI Rules */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-5">
-            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-              <h2 className="text-[13px] font-semibold text-gray-800">AI Rules</h2>
+          <div className="border border-divider rounded-lg overflow-hidden bg-card mb-5">
+            <div className="px-4 py-2.5 bg-surface border-b border-divider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-accent" />
+              <h2 className="text-[13px] font-semibold text-foreground">AI Rules</h2>
             </div>
             <div className="p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <ReadField label="Title" value={template.aiRules?.title} />
@@ -185,18 +185,18 @@ export default function TemplateDetailsPage() {
               const dropdownCount = headers.filter((h) => h.dataType === 'dropdown').length
               const uniqueCount = headers.filter((h) => h.isUniqueKeyPart).length
               return (
-                <div key={g.id} className={`border border-l-4 ${g.accent} border-gray-200 rounded-lg overflow-hidden bg-white`}>
-                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                <div key={g.id} className={`border border-l-4 ${g.accent} border-divider rounded-lg overflow-hidden bg-card`}>
+                  <div className="px-4 py-2.5 bg-surface border-b border-divider flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${g.dot}`} />
-                      <h2 className="text-[13px] font-semibold text-gray-800">{sheet?.sheetName || g.label}</h2>
+                      <h2 className="text-[13px] font-semibold text-foreground">{sheet?.sheetName || g.label}</h2>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {uniqueCount > 0 && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10.5px] font-semibold text-indigo-700">{uniqueCount} unique</span>
+                        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10.5px] font-semibold text-accent-hover">{uniqueCount} unique</span>
                       )}
                       {dropdownCount > 0 && (
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10.5px] font-semibold text-gray-600">{dropdownCount} dropdown</span>
+                        <span className="rounded-full bg-card-hover px-2 py-0.5 text-[10.5px] font-semibold text-muted">{dropdownCount} dropdown</span>
                       )}
                       <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${g.badge}`}>
                         {headers.length} header{headers.length === 1 ? '' : 's'}
@@ -204,9 +204,9 @@ export default function TemplateDetailsPage() {
                     </div>
                   </div>
                   {headers.length === 0 ? (
-                    <p className="px-4 py-6 text-center text-[12px] italic text-gray-400">No headers in this group.</p>
+                    <p className="px-4 py-6 text-center text-[12px] italic text-subtle">No headers in this group.</p>
                   ) : (
-                    <div className="divide-y divide-gray-100">
+                    <div className="divide-y divide-divider">
                       {headers.map((h, i) => {
                         const typeStyle = TYPE_STYLE[h.dataType] || TYPE_STYLE.text
                         const Icon = typeStyle.icon
@@ -214,12 +214,12 @@ export default function TemplateDetailsPage() {
                         const shown = values.slice(0, MAX_VALUE_CHIPS)
                         const extra = values.length - shown.length
                         return (
-                          <div key={h.id} className={`px-4 py-3 ${i % 2 === 1 ? 'bg-gray-50/60' : ''}`}>
+                          <div key={h.id} className={`px-4 py-3 ${i % 2 === 1 ? 'bg-surface/60' : ''}`}>
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
-                                <span className="text-[13px] font-medium text-gray-800">{h.label}</span>
+                                <span className="text-[13px] font-medium text-foreground">{h.label}</span>
                                 {h.isUniqueKeyPart && (
-                                  <span title="Unique key part" className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">
+                                  <span title="Unique key part" className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent-hover">
                                     <Key className="w-2.5 h-2.5" /> Unique
                                   </span>
                                 )}
@@ -233,14 +233,14 @@ export default function TemplateDetailsPage() {
                                 {shown.length > 0 ? (
                                   <>
                                     {shown.map((v, vi) => (
-                                      <span key={vi} className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-600">{v}</span>
+                                      <span key={vi} className="rounded-full border border-divider bg-card px-2 py-0.5 text-[11px] text-muted">{v}</span>
                                     ))}
                                     {extra > 0 && (
-                                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">+{extra} more</span>
+                                      <span className="rounded-full bg-card-hover px-2 py-0.5 text-[11px] font-medium text-subtle">+{extra} more</span>
                                     )}
                                   </>
                                 ) : (
-                                  <span className="text-[11px] italic text-gray-400">No values</span>
+                                  <span className="text-[11px] italic text-subtle">No values</span>
                                 )}
                               </div>
                             )}

@@ -20,7 +20,7 @@ export default async function TemplateAccessPage() {
   if (payload?.role !== 'master_admin') redirect('/listing-tools')
 
   return (
-    <div className="min-h-full bg-gray-50">
+    <div className="min-h-full bg-surface">
       <TemplateAccessPanel />
     </div>
   )

@@ -29,21 +29,21 @@ export default function BulkImageDropZone({ headers, rows, onRowsChange, uploadU
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!uploading) handleFiles(e.dataTransfer.files) }}
       onClick={() => !uploading && inputRef.current?.click()}
       className={`flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed transition-colors ${
-        uploading ? 'border-gray-300 bg-white cursor-default' :
-        dragging ? 'border-indigo-400 bg-indigo-50 cursor-pointer' : 'border-gray-300 bg-white hover:border-indigo-300 cursor-pointer'
+        uploading ? 'border-divider-light bg-card cursor-default' :
+        dragging ? 'border-accent bg-accent/10 cursor-pointer' : 'border-divider-light bg-card hover:border-accent-light cursor-pointer'
       }`}
     >
       {uploading ? (
-        <Loader2 className="w-4 h-4 text-indigo-500 animate-spin flex-shrink-0" />
+        <Loader2 className="w-4 h-4 text-accent animate-spin flex-shrink-0" />
       ) : (
-        <UploadCloud className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        <UploadCloud className="w-4 h-4 text-subtle flex-shrink-0" />
       )}
 
       <div className="min-w-0">
-        <p className="text-[13px] font-medium text-gray-700">
+        <p className="text-[13px] font-medium text-muted">
           {uploading ? `Uploading to Dropbox — ${doneCount}/${uploads.length} done…` : 'Drop product images here, or click to browse'}
         </p>
-        <p className={`text-[11.5px] truncate ${message?.warning ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+        <p className={`text-[11.5px] truncate ${message?.warning ? 'text-red-500 font-medium' : 'text-subtle'}`}>
           {uploading
             ? 'Watch each row\'s Image box below for live progress.'
             : message?.text || 'Fills empty Image boxes row by row, uploaded one by one to Dropbox — selecting more images than empty boxes across filled rows is blocked.'}

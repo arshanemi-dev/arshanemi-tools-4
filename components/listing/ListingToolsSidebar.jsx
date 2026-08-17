@@ -64,17 +64,17 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
   const activeTemplateId = activateTemplateNav ? searchParams.get('template') : null
 
   return (
-    <aside className="w-48 flex-shrink-0 h-full bg-[#0a0a0a] flex flex-col overflow-y-auto py-5
+    <aside className="w-48 flex-shrink-0 h-full bg-background flex flex-col overflow-y-auto py-5
       [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:transparent
-      [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
+      [&::-webkit-scrollbar-thumb]:bg-foreground/20 [&::-webkit-scrollbar-thumb]:rounded-full">
       <nav className="flex flex-col">
         {navItems.map((item, i) =>
           i === 0|| i === 1|| i === 2 ? (
             // "Auto Listing" is a dropdown label only — it never navigates
             // anywhere itself, it just introduces the template list below it.
             <div key={item.href}>
-              <div className={`px-5 py-2.5 text-[15px] font-semibold mb-1 transition-colors ${
-                item.templateNav === activateTemplateNav ? 'text-indigo-400' : 'text-white/75'
+              <div className={`px-5 py-2 text-[15px] font-semibold mb-1 transition-colors ${
+                item.templateNav === activateTemplateNav ? 'text-accent-light bg-gray-100' : 'text-foreground/75'
               }`}>{item.label}</div>
               {myTemplates.length > 0 && (
                 <ul className="pb-2">
@@ -83,7 +83,7 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
                       <Link
                         href={`/listing-tools/${item.templateNav}?template=${t.templateId}`}
                         className={`flex items-center gap-2 pl-7 pr-5 py-1.5 text-[13px] transition-colors ${
-                          t.templateId === activeTemplateId&&item.templateNav === activateTemplateNav ? 'text-indigo-400 font-medium' : 'text-white/55 hover:text-white'
+                          t.templateId === activeTemplateId&&item.templateNav === activateTemplateNav ? 'text-accent-light font-bold border-r-3' : 'text-foreground/55 hover:text-foreground'
                         }`}
                       >
                         <span className="w-1 h-1 rounded-full bg-current flex-shrink-0" />
@@ -99,7 +99,7 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
               key={item.href}
               href={item.href}
               className={`block px-5 py-2.5 text-[13.5px] font-medium transition-colors ${
-                isActive(item.href) ? 'bg-indigo-600/15 text-indigo-300' : 'text-white/75 hover:text-white hover:bg-white/5'
+                isActive(item.href) ? 'bg-accent/15 text-accent-light' : 'text-foreground/75 hover:text-foreground hover:bg-foreground/5'
               }`}
             >
               {item.label}

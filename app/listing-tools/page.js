@@ -26,33 +26,33 @@ export default function AutoListingPage() {
   })
 
   return (
-    <div className="min-h-[70vh] bg-gray-50 px-6 py-6">
+    <div className="min-h-[70vh] bg-surface px-6 py-6">
       <div className="relative max-w-md mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search templates…"
-          className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
         />
       </div>
 
-      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+      <div className="border border-divider rounded-lg overflow-hidden bg-card">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="bg-white border-b border-gray-200">
-              <th className="px-4 py-2.5 text-left font-semibold text-gray-800 w-40">My Template</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-gray-800">Template Name</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-gray-800">Description</th>
-              <th className="px-4 py-2.5 text-right font-semibold text-gray-800 w-36">Expand</th>
+            <tr className="bg-card border-b border-divider">
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground w-40">My Template</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template Name</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Description</th>
+              <th className="px-4 py-2.5 text-right font-semibold text-foreground w-36">Expand</th>
             </tr>
           </thead>
           <tbody>
             {templates === null && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Loading…</td></tr>
             )}
             {templates !== null && filtered.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">No templates yet — create one to get started.</td></tr>
+              <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">No templates yet — create one to get started.</td></tr>
             )}
             {filtered.map((t) => (
               <AutoListingRow

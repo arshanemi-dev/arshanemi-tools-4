@@ -86,8 +86,8 @@ export default function SheetGrid({
   // Hard 2px border instead of the grid's normal 1px hairline — marks the actual freeze
   // boundary (bottom of the pinned header row, right edge of the pinned key column) so it reads
   // as a real seam, not just another gridline.
-  const stickyRightBorderCls = 'border-r-2 border-r-gray-300'
-  const plainRightBorderCls = 'border-r border-gray-200'
+  const stickyRightBorderCls = 'border-r-2 border-r-divider-light'
+  const plainRightBorderCls = 'border-r border-divider'
 
   // One shared bulk-upload session for the whole grid — any ImageCell that
   // receives more than one file at once delegates to this instead of its
@@ -149,10 +149,10 @@ export default function SheetGrid({
   const allSelected = selectable && selectableRowIndexes.length > 0 && selectableRowIndexes.every((i) => selectedIds.includes(i))
 
   return (
-    <div className="border border-gray-200 rounded-lg bg-white">
+    <div className="border border-divider rounded-lg bg-card">
       {bulk.message && (
-        <div className="px-3 py-2 border-b border-gray-200">
-          <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-gray-500'}`}>{bulk.message.text}</p>
+        <div className="px-3 py-2 border-b border-divider">
+          <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-subtle'}`}>{bulk.message.text}</p>
         </div>
       )}
       <div className="max-h-[70vh] overflow-auto">
@@ -165,10 +165,10 @@ export default function SheetGrid({
           never top/left, so there's nothing for a neighbor to double up against. */}
       <table className="w-full border-separate border-spacing-0 text-[13px]">
         <thead>
-          <tr className="bg-white">
+          <tr className="bg-card">
             {selectable && (
               <th
-                className={`h-[80px] sticky top-0 left-0 z-30 bg-white border-b-2 border-b-gray-300 w-10 px-3 py-2.5 align-top ${
+                className={`h-[80px] sticky top-0 left-0 z-30 bg-card border-b-2 border-b-divider-light w-10 px-3 py-2.5 align-top ${
                   checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
                 }`}
               >
@@ -176,28 +176,28 @@ export default function SheetGrid({
                   type="checkbox"
                   checked={allSelected}
                   onChange={(e) => onToggleSelectAll?.(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600"
+                  className="w-3.5 h-3.5 rounded border-divider-light accent-accent"
                 />
               </th>
             )}
             {sortedHeaders.map((h) => (
               <th
                 key={h.id}
-                className={`h-[80px] sticky top-0 z-20 bg-white border-b-2 border-b-gray-300 px-3 py-2.5 text-left font-semibold text-gray-800 whitespace-nowrap align-top ${
+                className={`h-[80px] sticky top-0 z-20 bg-card border-b-2 border-b-divider-light px-3 py-2.5 text-left font-semibold text-foreground whitespace-nowrap align-top ${
                   h.id === stickyKeyHeaderId ? `${stickyLeftCls} z-30 ${stickyRightBorderCls}` : plainRightBorderCls
                 }`}
               >
                 <div className="flex items-center gap-1.5">
                   <span title={h.description || undefined}>{h.label}</span>
                   {(h.dataType === 'dropdown' || h.dataType === 'multiselect' || pickerOptions[h.id]?.length > 0) && (
-                    <ChevronDown className="w-3 h-3 text-gray-400" />
+                    <ChevronDown className="w-3 h-3 text-subtle" />
                   )}
-                  {h.disabled && <Lock className="w-3 h-3 text-gray-400" title="Read-only — filled automatically" />}
+                  {h.disabled && <Lock className="w-3 h-3 text-subtle" title="Read-only — filled automatically" />}
                   {onFilterChange && h.isUniqueKeyPart && (
                     <button
                       type="button"
                       onClick={() => onFilterChange(h.id)}
-                      className={`transition-colors ${activeFilterHeaderId === h.id ? 'text-indigo-600' : 'text-gray-400 hover:text-indigo-500'}`}
+                      className={`transition-colors ${activeFilterHeaderId === h.id ? 'text-accent' : 'text-subtle hover:text-accent'}`}
                     >
                       <Filter className="w-3 h-3" />
                     </button>
@@ -209,7 +209,7 @@ export default function SheetGrid({
                     value={filterValue}
                     onChange={(e) => onFilterChange(h.id, e.target.value)}
                     placeholder="Filter…"
-                    className="mt-1 w-full px-1.5 py-0.5 text-[11.5px] font-normal border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className="mt-1 w-full px-1.5 py-0.5 text-[11.5px] font-normal border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light"
                   />
                 )}
                 {/* Formula headers carry their own editable formula box
@@ -231,7 +231,7 @@ export default function SheetGrid({
                     }}
                     placeholder="e.g. [MRP] * 1.5"
                     title="Formula — reference other columns as [Column Label]"
-                    className="mt-1 w-full px-1.5 py-0.5 text-[11px] font-normal italic border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className="mt-1 w-full px-1.5 py-0.5 text-[11px] font-normal italic border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light"
                   />
                 )}
               </th>
@@ -240,10 +240,10 @@ export default function SheetGrid({
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="hover:bg-gray-50/80 group">
+            <tr key={rowIndex} className="hover:bg-surface/80 group">
               {selectable && (
                 <td
-                  className={`sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-b border-gray-200 px-3 py-2 ${
+                  className={`sticky left-0 z-10 bg-card group-hover:bg-surface border-b border-divider px-3 py-2 ${
                     checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
                   }`}
                 >
@@ -252,7 +252,7 @@ export default function SheetGrid({
                       type="checkbox"
                       checked={selectedIds.includes(rowIndex)}
                       onChange={() => onToggleSelect?.(rowIndex)}
-                      className="w-3.5 h-3.5 rounded border-gray-300 accent-indigo-600"
+                      className="w-3.5 h-3.5 rounded border-divider-light accent-accent"
                     />
                   )}
                 </td>
@@ -264,8 +264,8 @@ export default function SheetGrid({
                 <td
                   key={h.id}
                   title={aiFilled ? 'Filled by AI' : undefined}
-                  className={`h-[140px] border-b border-gray-200 p-0 align-middle ${isStickyKey ? stickyRightBorderCls : plainRightBorderCls} ${
-                    aiFilled ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : isStickyKey ? 'bg-white group-hover:bg-gray-50' : ''
+                  className={`h-[140px] border-b border-divider p-0 align-middle ${isStickyKey ? stickyRightBorderCls : plainRightBorderCls} ${
+                    aiFilled ? 'bg-accent/10 border-l-2 border-l-accent-light' : isStickyKey ? 'bg-card group-hover:bg-surface' : ''
                   } ${isStickyKey ? `sticky z-10 ${stickyLeftCls}` : ''}`}
                 >
                   {h.dataType === 'image' ? (
@@ -309,7 +309,7 @@ export default function SheetGrid({
                       value={row[h.id] ?? ''}
                       onChange={(e) => updateCell(rowIndex, h.id, e.target.value)}
                       disabled={readOnly || h.disabled}
-                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-gray-800 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-400 disabled:text-gray-400"
+                      className="w-full min-w-[110px] px-3 py-2 bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-inset focus:ring-accent-light disabled:text-subtle"
                     />
                   )}
                 </td>

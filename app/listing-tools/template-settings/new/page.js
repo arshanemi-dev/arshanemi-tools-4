@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function NewTemplateSettingsPage() {
   return (
-    <div className="min-h-full bg-gray-50">
+    <div className="min-h-full bg-surface">
       <TemplateSettingsWizard />
     </div>
   )

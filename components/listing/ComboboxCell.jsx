@@ -158,13 +158,13 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
         type="button"
         disabled={disabled || loading}
         onClick={toggleOpen}
-        className={`m-1 flex w-[calc(100%-8px)] items-center justify-between gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`m-1 flex w-[calc(100%-8px)] items-center justify-between gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-60 ${
           open
-            ? 'border-indigo-300 bg-indigo-50/50 ring-2 ring-indigo-500/20'
-            : 'border-transparent hover:border-gray-200 hover:bg-gray-50'
+            ? 'border-accent-light bg-accent/10 ring-2 ring-accent/20'
+            : 'border-transparent hover:border-divider hover:bg-surface'
         }`}
       >
-        <span className={`truncate ${value ? 'text-gray-800' : 'italic text-gray-400'}`}>{value || 'Select…'}</span>
+        <span className={`truncate ${value ? 'text-foreground' : 'italic text-subtle'}`}>{value || 'Select…'}</span>
         <span className="flex flex-shrink-0 items-center gap-0.5">
           {value && !disabled && !loading && (
             <span
@@ -173,15 +173,15 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
               title="Clear"
               onMouseDown={(e) => e.preventDefault()}
               onClick={clearValue}
-              className="rounded p-0.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
+              className="rounded p-0.5 text-subtle hover:bg-red-50 hover:text-red-500"
             >
               <X className="w-3.5 h-3.5" />
             </span>
           )}
           {showLoader ? (
-            <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin text-indigo-500" />
+            <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin text-accent" />
           ) : (
-            <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180 text-indigo-500' : ''}`} />
+            <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 text-subtle transition-transform duration-150 ${open ? 'rotate-180 text-accent' : ''}`} />
           )}
         </span>
       </button>
@@ -190,10 +190,10 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
         <div
           ref={panelRef}
           style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 220) }}
-          className="dropdown-panel-in z-[999] origin-top overflow-hidden rounded-xl border border-gray-100 bg-white shadow-lg ring-1 ring-black/5"
+          className="dropdown-panel-in z-[999] origin-top overflow-hidden rounded-xl border border-divider bg-card shadow-lg ring-1 ring-foreground/5"
         >
-          <div className="relative bg-gray-50/70">
-            <Search className="pointer-events-none absolute left-3 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-gray-400" />
+          <div className="relative bg-surface/70">
+            <Search className="pointer-events-none absolute left-3 top-1/2 w-3.5 h-3.5 -translate-y-1/2 text-subtle" />
             <input
               ref={inputRef}
               autoFocus
@@ -201,7 +201,7 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
               onChange={(e) => { setQuery(e.target.value); setHighlighted(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search or type a new value…"
-              className="w-full border-b border-gray-100 bg-transparent py-2.5 pl-9 pr-8 text-[12.5px] text-gray-800 placeholder:text-gray-400 focus:outline-none"
+              className="w-full border-b border-divider bg-transparent py-2.5 pl-9 pr-8 text-[12.5px] text-foreground placeholder:text-subtle focus:outline-none"
             />
             {query && (
               <button
@@ -209,7 +209,7 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
                 title="Clear search"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setQuery(''); setHighlighted(0); inputRef.current?.focus() }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-gray-400 hover:bg-gray-200/70 hover:text-gray-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-subtle hover:bg-card-hover/70 hover:text-muted"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -219,19 +219,19 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
           <div className="max-h-52 overflow-y-auto p-1.5">
             {filtered.length === 0 && !query.trim() && (
               <div className="flex flex-col items-center gap-1.5 px-3 py-6 text-center">
-                <ListX className="w-4 h-4 text-gray-300" />
-                <p className="text-[12px] text-gray-400">No options yet — type to add one</p>
+                <ListX className="w-4 h-4 text-subtle" />
+                <p className="text-[12px] text-subtle">No options yet — type to add one</p>
               </div>
             )}
             {filtered.length === 0 && query.trim() && (
               <button
                 type="button"
                 onClick={commitTyped}
-                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-2.5 py-2 text-left text-[12.5px] text-indigo-700 hover:bg-indigo-50"
+                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-accent/30 bg-accent/10 px-2.5 py-2 text-left text-[12.5px] text-accent-hover hover:bg-accent/10"
               >
                 <Plus className="w-3.5 h-3.5 flex-shrink-0" />
                 <span className="truncate">
-                  Use &quot;{query.trim()}&quot; <span className="font-normal text-indigo-400">— press Enter</span>
+                  Use &quot;{query.trim()}&quot; <span className="font-normal text-accent-light">— press Enter</span>
                 </span>
               </button>
             )}
@@ -243,20 +243,20 @@ export default function ComboboxCell({ value, options = [], onChange, disabled, 
                 onClick={() => select(option)}
                 className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors ${
                   option === value
-                    ? 'bg-indigo-50 font-medium text-indigo-700'
+                    ? 'bg-accent/10 font-medium text-accent-hover'
                     : i === highlighted
-                    ? 'bg-gray-100 text-gray-800'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? 'bg-card-hover text-foreground'
+                    : 'text-muted hover:bg-surface'
                 }`}
               >
                 <span className="truncate">{option}</span>
-                {option === value && <Check className="w-3.5 h-3.5 flex-shrink-0 text-indigo-500" />}
+                {option === value && <Check className="w-3.5 h-3.5 flex-shrink-0 text-accent" />}
               </button>
             ))}
           </div>
 
           {options.length > 0 && (
-            <div className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-400">
+            <div className="border-t border-divider px-3 py-1.5 text-[10.5px] text-subtle">
               {filtered.length === options.length ? `${options.length} option${options.length === 1 ? '' : 's'}` : `${filtered.length} of ${options.length}`}
             </div>
           )}

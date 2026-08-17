@@ -43,9 +43,9 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
   if (!sourceFileUrl) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-        <FileSpreadsheet className="w-7 h-7 text-gray-300" />
-        <p className="text-[13.5px] font-semibold text-gray-600">Original file isn&apos;t available for this template.</p>
-        <p className="text-[12px] text-gray-400 max-w-sm">
+        <FileSpreadsheet className="w-7 h-7 text-subtle" />
+        <p className="text-[13.5px] font-semibold text-muted">Original file isn&apos;t available for this template.</p>
+        <p className="text-[12px] text-subtle max-w-sm">
           It was either created before this feature existed, or uploaded as a legacy .xls file — only .xlsx uploads keep a viewable copy of the original.
         </p>
       </div>
@@ -55,14 +55,14 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
         <AlertTriangle className="w-7 h-7 text-amber-400" />
-        <p className="text-[13.5px] font-semibold text-gray-600">Couldn&apos;t open the original file.</p>
+        <p className="text-[13.5px] font-semibold text-muted">Couldn&apos;t open the original file.</p>
       </div>
     )
   }
   if (!sheets) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+        <Loader2 className="w-6 h-6 text-accent animate-spin" />
       </div>
     )
   }
@@ -71,11 +71,11 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
   const colCount = sheet?.colWidths.length || 0
 
   return (
-    <div className="border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
+    <div className="border border-divider-light rounded-lg overflow-hidden bg-card shadow-sm">
       {/* Toolbar strip — just enough chrome to read as "a spreadsheet", not a data table */}
-      <div className="flex items-center gap-2 border-b border-gray-300 bg-gray-50 px-3 py-2">
-        <FileSpreadsheet className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-        <span className="text-[12.5px] font-semibold text-gray-700 truncate">{sheet?.name}</span>
+      <div className="flex items-center gap-2 border-b border-divider-light bg-surface px-3 py-2">
+        <FileSpreadsheet className="w-4 h-4 text-accent flex-shrink-0" />
+        <span className="text-[12.5px] font-semibold text-muted truncate">{sheet?.name}</span>
         {sheet?.truncated && (
           <span className="ml-auto flex-shrink-0 text-[11px] text-amber-600">
             Showing first {sheet.rows.length} rows / {colCount} cols
@@ -92,11 +92,11 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
           </colgroup>
           <thead>
             <tr>
-              <th className="sticky top-0 left-0 z-30 bg-gray-100 border border-gray-300" />
+              <th className="sticky top-0 left-0 z-30 bg-card-hover border border-divider-light" />
               {Array.from({ length: colCount }, (_, i) => (
                 <th
                   key={i}
-                  className="sticky top-0 z-20 bg-gray-100 border border-gray-300 px-1 py-1 text-[11px] font-medium text-gray-500 select-none"
+                  className="sticky top-0 z-20 bg-card-hover border border-divider-light px-1 py-1 text-[11px] font-medium text-subtle select-none"
                 >
                   {colLetter(i + 1)}
                 </th>
@@ -105,12 +105,12 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
           </thead>
           <tbody>
             {sheet?.rows.length === 0 && (
-              <tr><td className="px-4 py-8 text-center text-[12px] text-gray-400">This sheet is empty.</td></tr>
+              <tr><td className="px-4 py-8 text-center text-[12px] text-subtle">This sheet is empty.</td></tr>
             )}
             {sheet?.rows.map((row, rowNumber) => (
               <tr key={row.key} style={row.height ? { height: `${row.height}px` } : undefined}>
                 <th
-                  className="sticky left-0 z-10 bg-gray-100 border border-gray-300 px-1.5 text-[11px] font-medium text-gray-500 text-right select-none"
+                  className="sticky left-0 z-10 bg-card-hover border border-divider-light px-1.5 text-[11px] font-medium text-subtle text-right select-none"
                 >
                   {rowNumber + 1}
                 </th>
@@ -120,7 +120,7 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
                     rowSpan={cell.rowSpan}
                     colSpan={cell.colSpan}
                     style={cell.style}
-                    className="relative border border-gray-200 px-2 py-1 text-[12px] text-gray-800 align-top whitespace-pre-wrap hover:z-[5] hover:outline hover:outline-2 hover:-outline-offset-1 hover:outline-indigo-400"
+                    className="relative border border-divider px-2 py-1 text-[12px] text-foreground align-top whitespace-pre-wrap hover:z-[5] hover:outline hover:outline-2 hover:-outline-offset-1 hover:outline-accent-light"
                   >
                     {cell.value}
                   </td>
@@ -132,7 +132,7 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
       </div>
 
       {/* Sheet tabs — bottom strip, like the real workbook's tab bar */}
-      <div className="flex items-end gap-0.5 border-t border-gray-300 bg-gray-100 px-2 pt-1.5 overflow-x-auto">
+      <div className="flex items-end gap-0.5 border-t border-divider-light bg-card-hover px-2 pt-1.5 overflow-x-auto">
         {sheets.map((s, i) => (
           <button
             key={`${s.name}-${i}`}
@@ -140,8 +140,8 @@ export default function ExcelFormatsView({ sourceFileUrl }) {
             onClick={() => setActiveSheet(i)}
             className={`px-3 py-1.5 text-[12px] font-medium rounded-t-md border border-b-0 -mb-px whitespace-nowrap transition-colors ${
               i === activeSheet
-                ? 'bg-white border-gray-300 text-gray-900'
-                : 'bg-gray-100 border-transparent text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                ? 'bg-card border-divider-light text-foreground'
+                : 'bg-card-hover border-transparent text-subtle hover:bg-card-hover hover:text-muted'
             }`}
           >
             {s.name}

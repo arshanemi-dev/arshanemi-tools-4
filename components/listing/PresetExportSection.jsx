@@ -3,8 +3,8 @@ import { Save, Check } from 'lucide-react'
 import PillButton from './PillButton'
 import { useToast } from '@/components/admin/Toast'
 
-const labelCls = 'block text-[11.5px] font-semibold text-gray-600 mb-1'
-const inputCls = 'w-full px-2.5 py-2 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-400'
+const labelCls = 'block text-[11.5px] font-semibold text-muted mb-1'
+const inputCls = 'w-full px-2.5 py-2 text-[13px] border border-divider rounded-md focus:outline-none focus:ring-1 focus:ring-accent-light'
 
 // Section 4 of Template Settings, matching source/11.html's "Preset & Export
 // Configuration" single-line row pixel-for-pixel. marketplaceName/category/
@@ -31,9 +31,9 @@ export default function PresetExportSection({ value, onChange, onSave, currentPr
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-        <h2 className="text-[13px] font-semibold text-gray-800">4. Preset &amp; Export Configuration</h2>
+    <div className="border border-divider rounded-lg overflow-hidden bg-card">
+      <div className="px-4 py-2.5 bg-surface border-b border-divider">
+        <h2 className="text-[13px] font-semibold text-foreground">4. Preset &amp; Export Configuration</h2>
       </div>
       <div className="p-4 flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[140px]">
@@ -63,7 +63,7 @@ export default function PresetExportSection({ value, onChange, onSave, currentPr
 
         <div className="flex-[1.6] min-w-[220px]">
           <label className={labelCls}>Final Name</label>
-          <input readOnly value={finalName} className={`${inputCls} bg-gray-50 font-semibold text-gray-700 cursor-default`} />
+          <input readOnly value={finalName} className={`${inputCls} bg-surface font-semibold text-muted cursor-default`} />
         </div>
       </div>
 

@@ -500,7 +500,7 @@ function tabLabelsFromContent(content) {
 // note + reduced opacity/pointer-events, not the section disappearing.
 function LockedNote({ children }) {
   return (
-    <p className="mb-3 flex items-center gap-1.5 text-[11.5px] text-gray-400">
+    <p className="mb-3 flex items-center gap-1.5 text-[11.5px] text-subtle">
       <Lock className="w-3 h-3" /> {children}
     </p>
   )
@@ -515,13 +515,13 @@ function LockedNote({ children }) {
 function RowNumberInput({ label, value, onChange }) {
   return (
     <div>
-      <label className="block text-[11px] font-medium text-gray-500 mb-1">{label}</label>
+      <label className="block text-[11px] font-medium text-subtle mb-1">{label}</label>
       <input
         type="number"
         min={1}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2.5 py-1.5 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        className="w-full px-2.5 py-1.5 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
       />
     </div>
   )
@@ -961,16 +961,16 @@ export default function TemplateSettingsWizard({ templateId }) {
   if (isEditMode && loadingExisting) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+        <Loader2 className="w-6 h-6 text-accent animate-spin" />
       </div>
     )
   }
   if (isEditMode && loadError) {
     return (
       <div className="max-w-lg mx-auto px-6 py-16 text-center">
-        <p className="text-[14px] font-semibold text-gray-800">Couldn&apos;t load this template.</p>
-        <p className="text-[13px] text-gray-500 mt-1">It may have been deleted, or you don&apos;t have access to it.</p>
-        <Link href="/listing-tools/template-settings" className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
+        <p className="text-[14px] font-semibold text-foreground">Couldn&apos;t load this template.</p>
+        <p className="text-[13px] text-subtle mt-1">It may have been deleted, or you don&apos;t have access to it.</p>
+        <Link href="/listing-tools/template-settings" className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:text-accent-hover">
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Template Settings
         </Link>
       </div>
@@ -980,8 +980,8 @@ export default function TemplateSettingsWizard({ templateId }) {
   return (
     <div className="w-full mx-auto px-6 py-8 space-y-5">
       <div>
-        <h1 className="text-lg font-bold text-gray-900">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
-        <p className="text-[13px] text-gray-500 mt-0.5">
+        <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
+        <p className="text-[13px] text-subtle mt-0.5">
           {isEditMode
             ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
             : "Upload a master sheet and pick its Product Data Sheet — its headers appear on the Kanban board below automatically. Drag headers between groups, or bulk-assign several at once."}
@@ -991,32 +991,32 @@ export default function TemplateSettingsWizard({ templateId }) {
       {!isEditMode && (
         <>
           {/* Section 1 — Upload */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-              <h2 className="text-[13px] font-semibold text-gray-800">1. Upload Master Excel File</h2>
+          <div className="border border-divider rounded-lg overflow-hidden bg-card">
+            <div className="px-4 py-2.5 bg-surface border-b border-divider">
+              <h2 className="text-[13px] font-semibold text-foreground">1. Upload Master Excel File</h2>
             </div>
             <div className="p-4">
               {!fileName ? (
-                <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 rounded-xl py-12 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition-colors">
-                  {parsing ? <Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /> : <UploadCloud className="w-7 h-7 text-gray-400" />}
+                <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-divider-light rounded-xl py-12 cursor-pointer hover:border-accent hover:bg-accent/8 transition-colors">
+                  {parsing ? <Loader2 className="w-7 h-7 text-accent animate-spin" /> : <UploadCloud className="w-7 h-7 text-subtle" />}
                   <div className="text-center">
-                    <p className="text-[13.5px] font-semibold text-gray-800">Click to upload .xlsx / .xls</p>
-                    <p className="text-[12px] text-gray-400 mt-0.5">Any number of sheets — you&apos;ll pick their role next</p>
+                    <p className="text-[13.5px] font-semibold text-foreground">Click to upload .xlsx / .xls</p>
+                    <p className="text-[12px] text-subtle mt-0.5">Any number of sheets — you&apos;ll pick their role next</p>
                   </div>
                   <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
                 </label>
               ) : (
-                <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
-                  <FileSpreadsheet className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                <div className="flex items-center gap-3 px-3 py-2.5 bg-surface border border-divider rounded-lg">
+                  <FileSpreadsheet className="w-5 h-5 text-accent flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium text-gray-800 truncate">{fileName}</p>
-                    <p className="text-[12px] text-gray-400">
+                    <p className="text-[13px] font-medium text-foreground truncate">{fileName}</p>
+                    <p className="text-[12px] text-subtle">
                       {sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found
                       {uploadingSource && ' · saving original file…'}
                       {!uploadingSource && sourceFileUrl && ' · original file saved'}
                     </p>
                   </div>
-                  <label className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer flex-shrink-0">
+                  <label className="text-[12px] font-medium text-accent hover:text-accent-hover cursor-pointer flex-shrink-0">
                     Replace file
                     <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
                   </label>
@@ -1026,15 +1026,15 @@ export default function TemplateSettingsWizard({ templateId }) {
           </div>
 
           {/* Section 2 — Choose sheets (single-select, matching source/11.html) */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
-              <h2 className="text-[13px] font-semibold text-gray-800">2. Select Sheets</h2>
+          <div className="border border-divider rounded-lg overflow-hidden bg-card">
+            <div className="px-4 py-2.5 bg-surface border-b border-divider">
+              <h2 className="text-[13px] font-semibold text-foreground">2. Select Sheets</h2>
             </div>
             <div className={sheetsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
               {sheetsLocked && <LockedNote>Upload a file in Section 1 to unlock.</LockedNote>}
               <div className="grid md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Product Data Sheet (Compulsory Prefill Data)</label>
+                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Product Data Sheet (Compulsory Prefill Data)</label>
                   <select
                     value={dataSheetName}
                     onChange={(e) => {
@@ -1052,7 +1052,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                         setDropdownColumns({})
                       }
                     }}
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className="w-full px-3 py-2 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
                   >
                     <option value="">-- Select sheet --</option>
                     {sheetMeta.map((s) => (
@@ -1066,7 +1066,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                 </div>
 
                 <div>
-                  <label className="block text-[12.5px] font-semibold text-gray-700 mb-1.5">Dropdowns Reference Sheet</label>
+                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Dropdowns Reference Sheet</label>
                   <select
                     value={dropdownSheetName}
                     onChange={(e) => {
@@ -1087,7 +1087,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                         setDropdownValuesRow(values + 1)
                       })
                     }}
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className="w-full px-3 py-2 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
                   >
                     <option value="">-- None --</option>
                     {sheetMeta.map((s) => (
@@ -1106,10 +1106,10 @@ export default function TemplateSettingsWizard({ templateId }) {
       )}
 
       {/* Section 3 — Kanban groups + mapping */}
-      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold text-gray-800">3. Group Headers &amp; Map Fields</h2>
-          <span className="text-[11.5px] text-gray-400">
+      <div className="border border-divider rounded-lg overflow-hidden bg-card">
+        <div className="px-4 py-2.5 bg-surface border-b border-divider flex items-center justify-between">
+          <h2 className="text-[13px] font-semibold text-foreground">3. Group Headers &amp; Map Fields</h2>
+          <span className="text-[11.5px] text-subtle">
             {fields.length} field{fields.length === 1 ? '' : 's'}{!isEditMode && ` from "${dataSheetName || '—'}"`}
           </span>
         </div>
@@ -1142,14 +1142,14 @@ export default function TemplateSettingsWizard({ templateId }) {
      
 
       {/* Save — persists the real template (sheets + Section 4/5 data) via /api/listing-tools */}
-      <div className="border border-gray-200 rounded-lg bg-white p-4 space-y-4">
+      <div className="border border-divider rounded-lg bg-card p-4 space-y-4">
         {savedTemplate ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-[13.5px] font-semibold text-gray-800">
+              <p className="text-[13.5px] font-semibold text-foreground">
                 &quot;{savedTemplate.templateName}&quot; {isEditMode ? 'updated.' : 'created.'}
               </p>
-              <p className="text-[12px] text-gray-500 mt-0.5">Section 5 above now shows this template&apos;s saved rules.</p>
+              <p className="text-[12px] text-subtle mt-0.5">Section 5 above now shows this template&apos;s saved rules.</p>
             </div>
             <div className="flex items-center gap-2">
               <Link href={`/listing-tools/auto-details?template=${savedTemplate.id}`}>
@@ -1189,8 +1189,8 @@ export default function TemplateSettingsWizard({ templateId }) {
               </div>
             )}
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[12px] text-gray-500">
-                Will be saved as <span className="font-semibold text-gray-700">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
+              <p className="text-[12px] text-subtle">
+                Will be saved as <span className="font-semibold text-muted">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
               </p>
               <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0 || uploadingSource} onClick={handleSave}>
                 {isEditMode ? 'Save Changes' : 'Save Template'}

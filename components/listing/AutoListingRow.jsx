@@ -61,15 +61,15 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
 
   return (
     <>
-      <tr className="border-b border-gray-100 hover:bg-gray-50/60">
+      <tr className="border-b border-divider hover:bg-surface/60">
         <td className="px-4 py-3">
-          <button type="button" onClick={onToggle} className="flex items-center gap-1.5 text-gray-700 font-medium">
+          <button type="button" onClick={onToggle} className="flex items-center gap-1.5 text-muted font-medium">
             {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             My Template
           </button>
         </td>
-        <td className="px-4 py-3 text-gray-800 font-medium">{template.templateName}</td>
-        <td className="px-4 py-3 text-gray-500">{template.description || '—'}</td>
+        <td className="px-4 py-3 text-foreground font-medium">{template.templateName}</td>
+        <td className="px-4 py-3 text-subtle">{template.description || '—'}</td>
         <td className="px-4 py-3 text-right">
           <Link href={`/listing-tools/auto-details?template=${template.id}`}>
             <PillButton variant="view">View Details</PillButton>
@@ -78,8 +78,8 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={4} className="bg-gray-50 px-4 py-4">
-            {loading && <p className="text-[13px] text-gray-400">Loading…</p>}
+          <td colSpan={4} className="bg-surface px-4 py-4">
+            {loading && <p className="text-[13px] text-subtle">Loading…</p>}
             {prefillSheet && (
               <div className="space-y-3">
                 <div className="flex items-center justify-end gap-2">
