@@ -1,0 +1,9 @@
+# Barmeto Tools Dashboard
+
+> Private, login-gated dashboard hosting Barmeto's Listing Tools (Auto Listing Mapper) and account management. Not publicly indexed.
+
+## Access
+- Requires a Barmeto account. Not intended for public search or AI-answer citation — see /robots.txt.
+
+## About
+- [Barmeto](https://www.barmeto.com): Barmeto is an SEO & digital marketing agency and ecommerce tools suite based in Surat, India — also offering [PDF Cropper](https://pdfcropper.barmeto.com), [Background Remover](https://bgremover.barmeto.com), and a Link Generator.
