@@ -24,6 +24,9 @@ export default function ImageUpload({ value, onChange, collection = 'general', l
       fd.append('file', file)
       fd.append('collection', collection)
       const res = await fetch('/api/upload', { method: 'POST', body: fd })
+      // A 401 already triggered the shared login-required modal (see
+      // lib/authGate.js) — don't also show a generic error toast for it.
+      if (res.status === 401) return
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Upload failed')
       onChange(data.url)

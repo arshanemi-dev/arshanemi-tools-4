@@ -58,6 +58,9 @@ export default function TemplateAccessPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(access),
       })
+      // A 401 already triggered the shared login-required modal (see
+      // lib/authGate.js) — don't also show a generic error toast for it.
+      if (res.status === 401) return
       if (!res.ok) throw new Error('Failed to save')
       addToast('Saved', 'success')
     } catch (err) {

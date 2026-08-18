@@ -109,7 +109,7 @@ function ScopedProductDetails({ templateId }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ headers, rows: nextRows }),
     })
-    if (!res.ok) {
+    if (!res.ok && res.status !== 401) {
       const data = await res.json().catch(() => ({}))
       addToast(data.message || 'Could not save changes', 'error')
     }
@@ -172,7 +172,7 @@ function ScopedProductDetails({ templateId }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ headers: nextHeaders, rows: sheet.rows }),
     }).then(async (res) => {
-      if (!res.ok) {
+      if (!res.ok && res.status !== 401) {
         const data = await res.json().catch(() => ({}))
         addToast(data.message || 'Could not save formula', 'error')
       }

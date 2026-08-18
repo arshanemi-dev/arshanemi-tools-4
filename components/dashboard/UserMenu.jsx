@@ -32,7 +32,10 @@ export default function UserMenu({ user, onLogout, variant = 'header', dropUp = 
       onLogout?.();
       // Hard redirect (not router.push) so every server component re-renders
       // logged-out — client-side nav would leave stale authed state cached.
-      window.location.href = '/login';
+      // Lands on '/' (which forwards into /listing-tools), not '/login' —
+      // this app doesn't require login just to look at it, see
+      // lib/authGate.js.
+      window.location.href = '/';
     }
   }
 

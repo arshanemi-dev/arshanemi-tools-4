@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import UserMenu from './UserMenu';
+import { redirectToLogin } from '@/lib/authGate';
 
 // One shared navbar for every route in this app (Listing Tools shell +
 // /profile) — logo, the current tool's name (this app is single-product, so
@@ -37,12 +38,18 @@ export default function DashboardTopbar({ user, onLogout }) {
             {user ? (
               <UserMenu user={user} onLogout={onLogout} />
             ) : (
-              <Link
-                href="/login"
+              // A plain <button> rather than a <Link href="/login"> — the
+              // real destination (this app's own /login, or the hub's, in
+              // connected mode) is only knowable client-side, and computing
+              // that into a static href would make the server- and
+              // client-rendered markup disagree. See lib/authGate.js.
+              <button
+                type="button"
+                onClick={redirectToLogin}
                 className="inline-flex items-center justify-center px-5 py-2 rounded-full bg-white text-accent text-sm font-semibold hover:bg-white/90 transition-colors whitespace-nowrap"
               >
                 Log in
-              </Link>
+              </button>
             )}
           </div>
         </div>

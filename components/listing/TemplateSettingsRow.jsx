@@ -47,7 +47,14 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
       body: JSON.stringify(body),
     })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new Error(data?.error || 'Request failed')
+    if (!res.ok) {
+      // Callers check err.status to skip their own toast on a 401 — the
+      // shared login-required modal already covers that case (see
+      // lib/authGate.js).
+      const err = new Error(data?.error || 'Request failed')
+      err.status = res.status
+      throw err
+    }
     return data.template
   }
 
@@ -85,7 +92,7 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
       setEditingRules(false)
       onUpdated(updated)
     } catch (err) {
-      addToast(err.message, 'error')
+      if (err.status !== 401) addToast(err.message, 'error')
     } finally {
       setSavingRules(false)
     }
@@ -104,7 +111,7 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
         'success',
       )
     } catch (err) {
-      addToast(err.message, 'error')
+      if (err.status !== 401) addToast(err.message, 'error')
     } finally {
       setTogglingVisibility(false)
     }
@@ -114,7 +121,10 @@ export default function TemplateSettingsRow({ template, onUpdated, onDeleted }) 
     setDeleting(true)
     try {
       const res = await fetch(`/api/listing-tools/${template.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Could not delete template')
+      if (!res.ok) {
+        if (res.status === 401) { setDeleting(false); return }
+        throw new Error('Could not delete template')
+      }
       addToast('Template deleted', 'success')
       onDeleted(template.id)
     } catch (err) {

@@ -94,11 +94,13 @@ function ScopedAutoDetails({ templateId }) {
   useEffect(() => {
     let cancelled = false
     fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
-      .then((r) => r.json())
-      .then((d) => {
+      .then((r) => r.json().then((d) => ({ status: r.status, d })))
+      .then(({ status, d }) => {
         if (cancelled) return
         if (!d.content) {
-          addToast(d.error || 'Could not load this template', 'error')
+          // A 401 already triggered the shared login-required modal (see
+          // lib/authGate.js) — don't also show a generic load-failure toast.
+          if (status !== 401) addToast(d.error || 'Could not load this template', 'error')
           return
         }
         setTemplate(d.template)
@@ -598,7 +600,7 @@ function ScopedAutoDetails({ templateId }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ headers: nextHeaders, rows: mergedRowsFor(activeGroup, sessionRows[activeGroup]) }),
     }).then(async (res) => {
-      if (!res.ok) {
+      if (!res.ok && res.status !== 401) {
         const data = await res.json().catch(() => ({}))
         addToast(data.message || 'Could not save formula', 'error')
       }
@@ -646,6 +648,10 @@ function ScopedAutoDetails({ templateId }) {
         addToast('Could not save — check your connection', 'error')
         return
       }
+      // A 401 already triggered the shared login-required modal — nothing
+      // was actually persisted server-side (the route 401s before ever
+      // reaching the merge/save step), so this must not claim "Saved".
+      if (res.status === 401) return
       const result = await res.json().catch(() => ({}))
       addToast('Saved', 'success')
       if (!res.ok && result.blocked) setSaveGate({ reason: result.reason, data: result.data })

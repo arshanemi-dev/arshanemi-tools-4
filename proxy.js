@@ -45,9 +45,11 @@ export async function proxy(req) {
   }
 
   const isAdminPath = pathname.startsWith('/api/admin')
-  // Listing Tools requires a logged-in session, and any authenticated role
-  // may reach it (not just master_admin/admin) — see app/listing-tools/layout.js
-  // for the rest of the gate (connected-mode check + role-agnostic access).
+  // Listing Tools pages themselves are NOT login-gated (see
+  // app/listing-tools/layout.js and lib/authGate.js) — "requires auth" here
+  // only still means something for /api/listing-tools/* (always a real
+  // 401 below, same as any other protected API) and /api/admin/*. Any
+  // authenticated role may reach the pages (not just master_admin/admin).
   const isListingToolsPath = pathname.startsWith('/listing-tools') || pathname.startsWith('/api/listing-tools')
   const requiresAuth = isAdminPath || isListingToolsPath
 
@@ -92,14 +94,29 @@ export async function proxy(req) {
   // token verifies here too); only a token that actually passes gets trusted.
   const handoffToken = !cookieToken ? req.nextUrl.searchParams.get('lt_at') : null
   const token = cookieToken || handoffToken
-  const loginPath = '/login'
+  const isApi = pathname.startsWith('/api/')
+
+  // No token, or (below) an invalid/expired one, on a page navigation: this
+  // used to hard-redirect straight to /login — but this app has no page
+  // that requires being signed in just to look at it (see
+  // app/listing-tools/layout.js), and a full-page navigation has no way to
+  // run the client-side silent-refresh flow SessionManager already does for
+  // API calls. That made every access-token expiry (1 day) or missed SSO
+  // handoff bounce a page-reload straight to /login even when the visitor
+  // had a perfectly good refreshable session — now it renders through, and
+  // only an actual authenticated action shows the shared login-required
+  // modal (an unauthenticated /api/* call still 401s immediately below,
+  // same as before — that's what the modal reacts to).
   if (!token) {
-    if (pathname.startsWith('/api/')) {
+    if (isApi) {
       const res = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       setCorsHeaders(res, origin)
       return res
     }
-    return NextResponse.redirect(new URL(loginPath, req.url))
+    const res = NextResponse.next()
+    res.headers.set('x-pathname', pathname)
+    setCorsHeaders(res, origin)
+    return res
   }
 
   try {
@@ -118,12 +135,15 @@ export async function proxy(req) {
     }
     return res
   } catch {
-    if (pathname.startsWith('/api/')) {
+    if (isApi) {
       const res = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       setCorsHeaders(res, origin)
       return res
     }
-    return NextResponse.redirect(new URL(loginPath, req.url))
+    const res = NextResponse.next()
+    res.headers.set('x-pathname', pathname)
+    setCorsHeaders(res, origin)
+    return res
   }
 }
 

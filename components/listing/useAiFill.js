@@ -28,7 +28,12 @@ export default function useAiFill(templateId) {
         body: JSON.stringify({ group, rowIndex, imageHeaderId }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) { addToast(data.error || 'AI fill failed', 'error'); return }
+      if (!res.ok) {
+        // A 401 already triggered the shared login-required modal (see
+        // lib/authGate.js) — don't also show a generic error toast for it.
+        if (res.status !== 401) addToast(data.error || 'AI fill failed', 'error')
+        return
+      }
 
       const fields = data.fields || {}
       if (Object.keys(fields).length === 0) {

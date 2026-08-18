@@ -35,7 +35,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ headers, rows }),
     })
-    if (!res.ok) {
+    if (!res.ok && res.status !== 401) {
       const data = await res.json().catch(() => ({}))
       addToast(data.message || 'Could not save changes', 'error')
     }
@@ -56,7 +56,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
     if (!confirm(`Delete "${template.templateName}"? This can't be undone.`)) return
     const res = await fetch(`/api/listing-tools/${template.id}`, { method: 'DELETE' })
     if (res.ok) { addToast('Template deleted', 'success'); onDeleted() }
-    else addToast('Could not delete template', 'error')
+    else if (res.status !== 401) addToast('Could not delete template', 'error')
   }
 
   return (

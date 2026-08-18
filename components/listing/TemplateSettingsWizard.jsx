@@ -675,6 +675,10 @@ export default function TemplateSettingsWizard({ templateId }) {
       formData.append('file', file)
       const res = await fetch('/api/listing-tools/source-file', { method: 'POST', body: formData })
       const data = await res.json().catch(() => null)
+      // A 401 already triggered the shared login-required modal — this
+      // upload is fire-and-forget anyway (see the comment above), so just
+      // stop quietly rather than also showing a confusing toast.
+      if (res.status === 401) return
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Upload failed')
       setSourceFileUrl(data.url)
     } catch {
@@ -923,6 +927,9 @@ export default function TemplateSettingsWizard({ templateId }) {
       // on that, which is far more confusing than just naming the HTTP
       // status, so parse defensively instead of assuming JSON.
       const data = await res.json().catch(() => null)
+      // A 401 already triggered the shared login-required modal (see
+      // lib/authGate.js) — don't also show a generic error toast for it.
+      if (res.status === 401) return
       if (!res.ok) throw new Error(data?.error || `Failed to save template (${res.status})`)
       if (!data?.template) throw new Error('Server did not return the saved template.')
 

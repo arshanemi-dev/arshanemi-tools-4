@@ -1,6 +1,7 @@
 'use client'
 import { useEffect } from 'react'
 import { getAccessToken, getRefreshToken, clearAuthTokens, isTokenExpired, refreshAccessToken } from '@/lib/tokenStore'
+import { requireLogin } from '@/lib/authGate'
 
 // Keeps every same-origin /api/* call authenticated without any individual
 // fetch('/api/...') call site needing to know or care how — three mechanisms:
@@ -24,9 +25,12 @@ import { getAccessToken, getRefreshToken, clearAuthTokens, isTokenExpired, refre
 //   3. Proactive expiry check — a periodic check against the expiresAt
 //      mirror kept in localStorage (tokenStore.js) so most requests never
 //      even hit a 401.
-// If the refresh token itself is invalid/expired, both paths fall through to
-// forceLogout(): clears the httpOnly cookie(s) server-side, clears the
-// localStorage mirror, and hard-redirects to /login.
+// If the refresh token itself is invalid/expired (or never existed — a
+// guest), both paths fall through to forceLogout(): clears the httpOnly
+// cookie(s) server-side, clears the localStorage mirror, and triggers the
+// shared "please log in" modal (lib/authGate.js) — never a hard redirect.
+// This app has no page that requires being logged in just to look at it;
+// only an actual authenticated action should ever interrupt the visitor.
 
 let patched = false
 let realFetch = null
@@ -40,10 +44,14 @@ async function tryRefresh() {
   }
 }
 
+let loggingOut = false
 async function forceLogout() {
+  if (loggingOut) return
+  loggingOut = true
   clearAuthTokens()
   try { await realFetch('/api/auth/logout', { method: 'POST' }) } catch { /* cookie may already be gone */ }
-  window.location.href = '/login'
+  requireLogin()
+  loggingOut = false
 }
 
 // Merges the cached access token into `init.headers` as `Authorization:

@@ -30,8 +30,12 @@ export default function useTemplateExport(templateId) {
         body: JSON.stringify({ groups, sessionRows }),
       }).catch(() => null)
       const billResult = billRes ? await billRes.json().catch(() => ({})) : {}
-      if (billRes && !billRes.ok && billResult.blocked) {
-        setGate({ reason: billResult.reason, data: billResult.data })
+      if (billRes && !billRes.ok) {
+        // A plain 401 (no session at all) isn't a billing `blocked` decision
+        // — the shared login-required modal already surfaced for it (see
+        // lib/authGate.js). Either way, don't fall through to generating a
+        // file from stale/incomplete client state.
+        if (billResult.blocked) setGate({ reason: billResult.reason, data: billResult.data })
         return
       }
 

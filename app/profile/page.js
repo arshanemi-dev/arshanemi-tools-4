@@ -35,7 +35,9 @@ export default function ProfilePage() {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
       clearAuthTokens()
-      window.location.href = '/login'
+      // Not '/login' — this app doesn't require login just to look at it,
+      // see lib/authGate.js. '/' forwards into /listing-tools.
+      window.location.href = '/'
     }
   }
 

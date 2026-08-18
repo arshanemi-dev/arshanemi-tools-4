@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, ShieldCheck, Zap } from 'lucide-react'
 import { saveAuthTokens, isLoggedIn } from '@/lib/tokenStore'
 
@@ -13,10 +13,13 @@ const OTP_SECONDS = 60
 // used to bounce those accounts to a second, near-duplicate page at
 // /settings/login, which no longer exists now that the local admin shell
 // (Companies/Users/Theme) has been removed in favor of the hub admin panel.
-// Every role lands on the same place after signing in: /listing-tools, the
-// only real product surface left in this app.
-export default function LoginPage() {
+// Every role lands on /listing-tools after signing in by default — or back
+// on whatever page sent them here via ?next=, e.g. the shared
+// login-required modal (components/auth/LoginRequiredModal.jsx).
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const next = searchParams.get('next') || '/listing-tools'
   const [step, setStep] = useState('credentials') // 'credentials' | 'otp'
   const [form, setForm] = useState({ identifier: '', password: '' })
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
@@ -29,8 +32,8 @@ export default function LoginPage() {
 
   // Already signed in — skip straight to the product.
   useEffect(() => {
-    if (isLoggedIn()) router.replace('/listing-tools')
-  }, [router])
+    if (isLoggedIn()) router.replace(next)
+  }, [router, next])
 
   useEffect(() => {
     if (timer <= 0) { clearInterval(intervalRef.current); return }
@@ -45,7 +48,7 @@ export default function LoginPage() {
       expiresIn: data.expiresIn,
       user: data.user,
     })
-    router.push('/listing-tools')
+    router.push(next)
     router.refresh()
   }
 
@@ -292,5 +295,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   )
 }

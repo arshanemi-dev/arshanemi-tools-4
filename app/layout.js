@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { ThemeProvider } from '@/context/ThemeContext';
 import SplashScreen from '@/components/ui/SplashScreen';
 import SessionManager from '@/components/admin/SessionManager';
+import AuthGateProvider from '@/components/auth/AuthGateProvider';
 
 const SITE_URL = 'https://tools.barmeto.com';
 const SITE_NAME = 'Barmeto Tools';
@@ -50,7 +51,7 @@ export default async function RootLayout({ children }) {
         <ThemeProvider>
           <SplashScreen />
           <SessionManager />
-          {children}
+          <AuthGateProvider>{children}</AuthGateProvider>
         </ThemeProvider>
       </body>
     </html>

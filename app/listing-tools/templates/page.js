@@ -52,7 +52,10 @@ export default function ChooseTemplatePage() {
     })
     if (!res.ok) {
       setMine(prev)
-      addToast('Could not save your template selection', 'error')
+      // A 401 already triggered the shared login-required modal (see
+      // lib/authGate.js) — don't also show a generic, unhelpful toast for
+      // the same failure.
+      if (res.status !== 401) addToast('Could not save your template selection', 'error')
     }
   }
   function addMine(template) {

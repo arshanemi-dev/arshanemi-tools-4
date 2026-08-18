@@ -13,6 +13,13 @@ export default function BillingGateModal({ gate, onClose, onRetry }) {
   if (!gate) return null
   const { reason, data } = gate
 
+  // The shared login-required modal (components/auth/LoginRequiredModal.jsx,
+  // mounted once app-wide via AuthGateProvider) already covers this — see
+  // lib/toolBilling.js. Unlike tools/arshanemi-tools-2's equivalent
+  // orchestrator, tools-4 doesn't render LoginRequiredModal per call site
+  // here, since the global one already reacted to the same 401.
+  if (reason === 'login_required') return null
+
   if (reason === 'insufficient_coins' || reason === 'coins_expired') {
     return <InsufficientCoinsModal open onClose={onClose} reason={reason} data={data} />
   }

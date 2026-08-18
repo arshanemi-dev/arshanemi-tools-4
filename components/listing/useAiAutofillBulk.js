@@ -33,7 +33,12 @@ export default function useAiAutofillBulk(templateId) {
         body: JSON.stringify({ selections, dryRun: true }),
       })
       const plan = await planRes.json().catch(() => ({}))
-      if (!planRes.ok) { addToast(plan.error || 'Could not plan AI Autofill', 'error'); return }
+      if (!planRes.ok) {
+        // A 401 already triggered the shared login-required modal (see
+        // lib/authGate.js) — don't also show a generic error toast for it.
+        if (planRes.status !== 401) addToast(plan.error || 'Could not plan AI Autofill', 'error')
+        return
+      }
 
       const { textFillRowCount = 0, imageFillRowCount = 0 } = plan
       if (textFillRowCount === 0 && imageFillRowCount === 0) {
@@ -54,7 +59,9 @@ export default function useAiAutofillBulk(templateId) {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         if (data.blocked) { setGate({ reason: data.reason, data: data.data }); return }
-        addToast(data.error || 'AI Autofill failed', 'error')
+        // A 401 already triggered the shared login-required modal (see
+        // lib/authGate.js) — don't also show a generic error toast for it.
+        if (res.status !== 401) addToast(data.error || 'AI Autofill failed', 'error')
         return
       }
 
