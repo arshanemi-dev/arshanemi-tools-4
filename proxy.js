@@ -93,7 +93,18 @@ export async function proxy(req) {
   // requires this app's JWT_SECRET to match root's — see .env.example — so a real root-issued
   // token verifies here too); only a token that actually passes gets trusted.
   const handoffToken = !cookieToken ? req.nextUrl.searchParams.get('lt_at') : null
-  const token = cookieToken || handoffToken
+  // Every actual dashboard data call (SessionManager's fetch interceptor,
+  // lib/tokenStore.js's authFetch) authenticates with this header, not a
+  // cookie — it's the one channel guaranteed to work regardless of
+  // third-party cookie policy (see components/admin/SessionManager.jsx).
+  // Without also trusting it here, every /api/listing-tools/* and
+  // /api/admin/* call made *after* the initial page load 401'd at this
+  // middleware before ever reaching the route handler below (which already
+  // accepts this same header via lib/auth.js's getAuthPayload) — even
+  // though the visitor had a perfectly valid, currently-working token.
+  const bearer = req.headers.get('Authorization')
+  const bearerToken = !cookieToken && !handoffToken && bearer?.startsWith('Bearer ') ? bearer.slice(7) : null
+  const token = cookieToken || handoffToken || bearerToken
   const isApi = pathname.startsWith('/api/')
 
   // No token, or (below) an invalid/expired one, on a page navigation: this
