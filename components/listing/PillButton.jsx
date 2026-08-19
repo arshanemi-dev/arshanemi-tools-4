@@ -15,6 +15,7 @@ const VARIANTS = {
   // existing indigo accent (SheetGrid/ComboboxCell focus rings, "download"
   // pill) rather than inventing a new color.
   ai: 'bg-accent hover:bg-accent-hover text-white',
+  howto: 'bg-pink-500 hover:bg-pink-600 text-white',
 }
 
 export default function PillButton({ icon: Icon, children, variant = 'download', loading, className = '', ...props }) {

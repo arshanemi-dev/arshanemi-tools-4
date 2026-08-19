@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, PlusCircle, Save, Sparkles } from 'lucide-react'
+import { Search, Download, UploadCloud, PlusCircle, Save, Sparkles, Monitor } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
@@ -722,6 +722,10 @@ function ScopedAutoDetails({ templateId }) {
             onClick={handleDownload}
           >
             Download Final Sheet
+          </PillButton>
+          {/* Dummy placeholder — no destination wired up yet */}
+          <PillButton variant="howto" icon={Monitor}>
+            How to Use
           </PillButton>
         </div>
       </div>
