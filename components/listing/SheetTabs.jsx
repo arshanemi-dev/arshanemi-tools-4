@@ -3,8 +3,7 @@
 const TABS = [
   { group: 'design_system', label: 'Product details' },
   { group: 'compulsory', label: 'Compulsory' },
-  { group: 'prefill', label: 'Prefill' },
-  { group: 'optional', label: 'Optional' },
+  { group: 'prefill', label: 'Brand Details' },
 ]
 
 // variant="light" — the standalone Product Details page's own tab strip
@@ -19,13 +18,13 @@ const TABS = [
 //    its own name here instead of always falling back to the generic one every template used to
 //    share.
 //  - a group with zero headers never gets a tab at all. getTemplateContent backfills every
-//    template's `content.sheets` with all 4 groups unconditionally (empty ones included) purely
+//    template's `content.sheets` with every group unconditionally (empty ones included) purely
 //    so server-side code can always index by group without a null check (see its own comment) —
 //    that backfill was never meant to imply every template actually *uses* every group. A
-//    template built without, say, a Prefill column mapped to anything ends up with a real
+//    template built without, say, a Brand Details column mapped to anything ends up with a real
 //    `prefill` sheet object but `headers: []`; showing a tab for it just opens onto a permanently
 //    blank grid, so it's filtered out here rather than left for every template to render the same
-//    fixed 4 tabs regardless of what it was actually set up with.
+//    fixed tabs regardless of what it was actually set up with.
 export default function SheetTabs({ active, onChange, variant = 'light', sheets = [] }) {
   // No `sheets` supplied at all (rather than an empty array) means the caller isn't scoped to a
   // specific template's content yet — fall back to showing every tab instead of hiding all of

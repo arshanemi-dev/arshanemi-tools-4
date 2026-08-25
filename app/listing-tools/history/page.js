@@ -13,7 +13,7 @@ import { Loader2 } from 'lucide-react'
 // Details, N rows" action log, this shows the actual saved values.
 const TABS = [
   { key: 'product', label: 'Product Details', endpoint: '/api/listing-tools/product-details-history', keyLabel: 'Product Number', keyField: 'product_number' },
-  { key: 'prefill', label: 'Prefill Details', endpoint: '/api/listing-tools/prefill-details-history', keyLabel: 'Brand', keyField: 'brand' },
+  { key: 'prefill', label: 'Brand Details', endpoint: '/api/listing-tools/prefill-details-history', keyLabel: 'Brand', keyField: 'brand' },
 ]
 
 export default function ListingHistoryPage() {

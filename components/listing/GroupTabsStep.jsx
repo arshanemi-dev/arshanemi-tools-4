@@ -40,7 +40,6 @@ const DEFAULT_TAB_COLOR = {
   design_system: 'purple',
   compulsory: 'red',
   prefill: 'blue',
-  optional: 'amber',
 }
 
 const fieldLabelCls = 'text-[11px] font-semibold text-subtle uppercase tracking-wide'

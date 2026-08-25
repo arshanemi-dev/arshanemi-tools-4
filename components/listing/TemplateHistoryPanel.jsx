@@ -5,7 +5,10 @@ import Modal from '@/components/admin/Modal'
 import PillButton from './PillButton'
 
 const ACTION_LABEL = { save: 'Saved', delete: 'Deleted' }
-const GROUP_LABEL = { design_system: 'Product Details', compulsory: 'Compulsory', prefill: 'Prefill', optional: 'Optional', template: 'Template' }
+// "Optional" is a retired group (see TemplateSettingsWizard.jsx's own GROUPS comment) — its label
+// stays here so an *old* log entry from before the retirement still renders a real name instead
+// of the raw group id, even though nothing writes new history under it anymore.
+const GROUP_LABEL = { design_system: 'Product Details', compulsory: 'Compulsory', prefill: 'Brand Details', optional: 'Optional', template: 'Template' }
 
 // Read-only audit trail for one template — who saved/deleted which sheet
 // and when. Write side is lib/listingHistory.js's fire-and-forget

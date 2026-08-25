@@ -43,11 +43,11 @@ export default function AutoDetailsPage() {
 // that row, see components/listing/linkedHeaders.js), and (b) something to
 // merge new rows into on save/export, so a save from this blank screen can
 // never wipe out data that was already on the server.
-const ALL_GROUPS = ['design_system', 'compulsory', 'prefill', 'optional']
-// "Upload Old Sheet" only ever matches into these three — Product Details'
+const ALL_GROUPS = ['design_system', 'compulsory', 'prefill']
+// "Upload Old Sheet" only ever matches into these two — Product Details'
 // own data comes from Template Settings' Product Data Sheet at creation
 // time and from the Rule A/B pickers here, not from a bulk re-upload.
-const UPLOAD_MATCH_GROUPS = ['compulsory', 'prefill', 'optional']
+const UPLOAD_MATCH_GROUPS = ['compulsory', 'prefill']
 
 // `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded here
 // for the same reason as SheetGrid.jsx's own copy of this check.

@@ -4,22 +4,23 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Loader2, ArrowLeft, Pencil, Key, ListFilter, Image as ImageIcon, Type,
-  Store, Tag, GitBranch, Rows3, Sparkles, FileText, Table2,
+  Store, Tag, GitBranch, Rows3, Sparkles, FileText, Table2, Hash,
 } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import ExcelFormatsView from '@/components/listing/ExcelFormatsView'
 
-// The 4 real groups, in a fixed display order — same set the wizard and
-// backend (lib/listingTemplates.js GROUPS) always use. Colors match the
-// create wizard's Kanban board (GroupTabsStep.jsx's DEFAULT_TAB_COLOR) so a
-// group reads as the same color everywhere in this feature. Written out in
-// full (not built with template strings) so Tailwind's build sees the
-// literal class names — see GroupTabsStep.jsx's own comment on this.
+// The 3 real groups, in a fixed display order — same set the wizard and
+// backend (lib/listingTemplates.js GROUPS) always use ("Optional" was
+// retired — see TemplateSettingsWizard.jsx's own GROUPS comment). Colors
+// match the create wizard's Kanban board (GroupTabsStep.jsx's
+// DEFAULT_TAB_COLOR) so a group reads as the same color everywhere in this
+// feature. Written out in full (not built with template strings) so
+// Tailwind's build sees the literal class names — see GroupTabsStep.jsx's
+// own comment on this.
 const GROUP_ORDER = [
   { id: 'design_system', label: 'Product Details', accent: 'border-l-purple-400', dot: 'bg-purple-500', badge: 'bg-purple-50 text-purple-700' },
   { id: 'compulsory', label: 'Compulsory', accent: 'border-l-red-400', dot: 'bg-red-500', badge: 'bg-red-50 text-red-700' },
-  { id: 'prefill', label: 'Prefill', accent: 'border-l-blue-400', dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700' },
-  { id: 'optional', label: 'Optional', accent: 'border-l-amber-400', dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700' },
+  { id: 'prefill', label: 'Brand Details', accent: 'border-l-blue-400', dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700' },
 ]
 
 const TYPE_STYLE = {
@@ -153,8 +154,13 @@ export default function TemplateDetailsPage() {
         <>
           {/* Overview */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <StatCard icon={Hash} label="Template Number" value={template.templateNumber || '—'} />
             <StatCard icon={Store} label="Marketplace" value={template.marketplaceName || '—'} />
-            <StatCard icon={Tag} label="Category" value={template.category || '—'} />
+            <StatCard
+              icon={Tag}
+              label="Category"
+              value={[template.category1, template.category2, template.category3, template.category4].filter(Boolean).join(' / ') || '—'}
+            />
             <StatCard icon={GitBranch} label="Version" value={template.exportVersion || '—'} />
             <StatCard icon={Rows3} label="Total Headers" value={totalHeaders} />
           </div>

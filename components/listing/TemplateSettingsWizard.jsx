@@ -11,33 +11,42 @@ import AiRulesSection from './AiRulesSection'
 import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX } from '@/lib/listingSheetLayout'
 import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
 
-// Same 4 groups every other Listing Tools screen renders against (see
+// Same 3 groups every other Listing Tools screen renders against (see
 // SheetTabs.jsx's TABS / lib/listingTemplates.js GROUPS) — kept as its own
 // local constant, same as SheetTabs.jsx does, rather than importing
 // lib/listingTemplates.js: that module pulls in blobStore.js's server-only
 // Vercel Blob access, which has no place in a client bundle.
+//
+// "Optional" (a 4th group) was retired — every template's own Optional
+// headers/rows were migrated into Compulsory (see
+// scripts/migrate_optional_to_brand_details.mjs), and new templates no
+// longer get it offered as a destination here. `group: 'optional'` still
+// exists in the data model/backend (lib/listingTemplates.js's own GROUPS,
+// the sheets/[group] route) purely so a template saved before the retirement
+// that somehow still has data there doesn't 404 — nothing here should ever
+// write to it again.
 const GROUPS = [
   { id: 'design_system', label: 'Product Details' },
   { id: 'compulsory', label: 'Compulsory' },
-  { id: 'prefill', label: 'Prefill' },
-  { id: 'optional', label: 'Optional' },
+  { id: 'prefill', label: 'Brand Details' },
 ]
 
 // Kanban columns shown in Section 3 — "Unselected" holds every header until
-// it's moved into one of the 4 real groups. Only those 4 (plus Unselected)
+// it's moved into one of the 3 real groups. Only those 3 (plus Unselected)
 // are ever persisted: the backend (lib/listingTemplates.js GROUPS, the
 // sheets/[group] API route) only reads/writes those group ids, and so does
-// every other Listing Tools page (Product Details, Prefill Details, Choose
+// every other Listing Tools page (Product Details, Brand Details, Choose
 // Your Template, exports). GroupTabsStep's "+ Add Column" is on for
 // organizing headers while building a template — see `customTabs` below —
 // but a header left in a custom group at save time is caught by
 // handleSave's stuckFields guard rather than silently dropped. Column
-// *labels* on the 4 real groups can be renamed freely (source/11.html's
+// *labels* on the 3 real groups can be renamed freely (source/11.html's
 // click-to-rename) — see tabLabels below, which only overrides the display
 // name, never the underlying group id.
 const TABS = [{ id: UNMAPPED_TAB_ID, label: 'Unselected' }, ...GROUPS]
 
-const DEFAULT_PRESET = { marketplaceName: 'Meesho', category: '', exportVersion: 'v1.0', description: '' }
+const DEFAULT_PRESET = { marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' }
+const DEFAULT_CATEGORIES = { category1: '', category2: '', category3: '', category4: '' }
 const DEFAULT_AI_RULES = { marketplace: '', category: '', title: '', description: '', keyword: '', otherRules: '' }
 
 function slugify(label) {
@@ -435,7 +444,7 @@ function withDefaultHeaders(fields) {
   // design_system first — every other group's connectors resolve their
   // linkedHeaderId against these by label, so order matters here.
   for (const config of DEFAULT_HEADERS_CONFIG.design_system || []) addDefault('design_system', config)
-  for (const groupId of ['compulsory', 'prefill', 'optional']) {
+  for (const groupId of ['compulsory', 'prefill']) {
     for (const config of DEFAULT_HEADERS_CONFIG[groupId] || []) addDefault(groupId, config)
   }
 
@@ -573,6 +582,13 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [customTabs, setCustomTabs] = useState([]) // [{id,label}] — user-added Kanban columns; organizing-only, see handleSave's stuckFields guard
   const [removedGroupIds, setRemovedGroupIds] = useState(() => new Set()) // built-in groups (design_system/compulsory/prefill/optional) hidden for this template — Unselected can't be removed
 
+  // A real, independently-typed field — no longer derived from marketplaceName/category1/
+  // exportVersion (that composite lives on as its own "Final Name" preview below, unrelated).
+  const [templateNameInput, setTemplateNameInput] = useState('')
+  const [categoriesData, setCategoriesData] = useState(DEFAULT_CATEGORIES)
+  // Assigned server-side once, at creation (lib/listingTemplates.js's nextTemplateNumber) —
+  // blank here until then; edit mode loads the real one and it's never sent back in a PATCH.
+  const [templateNumber, setTemplateNumber] = useState('')
   const [presetData, setPresetData] = useState(DEFAULT_PRESET)
   const [currentPreset, setCurrentPreset] = useState(null) // the one Section 4 "Save Preset" snapshot, offered in Section 5's template list — saving again replaces it, never adds another
   const [aiRulesData, setAiRulesData] = useState(DEFAULT_AI_RULES)
@@ -595,14 +611,26 @@ export default function TemplateSettingsWizard({ templateId }) {
         if (!data?.template || !data?.content) { setLoadError(true); return }
         setFields(fieldsFromContent(data.content))
         setTabLabels(tabLabelsFromContent(data.content))
+        setTemplateNameInput(data.template.templateName || '')
+        setTemplateNumber(data.template.templateNumber || '')
+        setCategoriesData({
+          category1: data.template.category1 || '',
+          category2: data.template.category2 || '',
+          category3: data.template.category3 || '',
+          category4: data.template.category4 || '',
+        })
         setPresetData({
           marketplaceName: data.template.marketplaceName || '',
-          category: data.template.category || '',
           exportVersion: data.template.exportVersion || '',
+          // Previously missing here entirely — edit mode loaded every other preset field but
+          // this one, so re-opening an existing template for editing silently reset its
+          // description in this form (source of truth on the server was untouched until Save,
+          // which would then have overwritten it right back to blank).
+          description: data.template.description || '',
         })
         setAiRulesData({
           marketplace: data.template.marketplaceName || '',
-          category: data.template.category || '',
+          category: data.template.category1 || '',
           title: data.template.aiRules?.title || '',
           description: data.template.aiRules?.description || '',
           keyword: data.template.aiRules?.keyword || '',
@@ -799,7 +827,7 @@ export default function TemplateSettingsWizard({ templateId }) {
     setCurrentPreset({
       id: 'current_preset',
       marketplaceName: preset.marketplaceName,
-      category: preset.category,
+      category1: preset.category1,
       exportVersion: preset.exportVersion,
     })
   }
@@ -823,6 +851,9 @@ export default function TemplateSettingsWizard({ templateId }) {
     setTabLabels({})
     setCustomTabs([])
     setRemovedGroupIds(new Set())
+    setTemplateNameInput('')
+    setTemplateNumber('')
+    setCategoriesData(DEFAULT_CATEGORIES)
     setPresetData(DEFAULT_PRESET)
     setCurrentPreset(null)
     setAiRulesData(DEFAULT_AI_RULES)
@@ -835,6 +866,10 @@ export default function TemplateSettingsWizard({ templateId }) {
     // here too in case that state ever gets out of sync.
     if (stuckFields.length > 0) {
       addToast('Move headers out of custom groups before saving — see the notice above Save.', 'error')
+      return
+    }
+    if (!templateNameInput.trim()) {
+      addToast('Enter a Template Name before saving.', 'error')
       return
     }
     const allGrouped = GROUPS.map((g, i) => ({
@@ -891,9 +926,13 @@ export default function TemplateSettingsWizard({ templateId }) {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            templateName: finalTemplateName,
+            templateName: templateNameInput,
+            description: presetData.description,
             marketplaceName: presetData.marketplaceName,
-            category: presetData.category,
+            category1: categoriesData.category1,
+            category2: categoriesData.category2,
+            category3: categoriesData.category3,
+            category4: categoriesData.category4,
             exportVersion: presetData.exportVersion,
             aiRules: aiRulesData,
             sheets: allGrouped,
@@ -905,7 +944,7 @@ export default function TemplateSettingsWizard({ templateId }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            templateName: finalTemplateName,
+            templateName: templateNameInput,
             description: presetData.description,
             sourceFileName: fileName,
             sourceFileUrl: sourceFileUrl || null,
@@ -915,7 +954,10 @@ export default function TemplateSettingsWizard({ templateId }) {
               ? { sheetName: dropdownSheetName, columns: mergedColumns }
               : { sheetName: null, columns: {} },
             marketplaceName: presetData.marketplaceName,
-            category: presetData.category,
+            category1: categoriesData.category1,
+            category2: categoriesData.category2,
+            category3: categoriesData.category3,
+            category4: categoriesData.category4,
             exportVersion: presetData.exportVersion,
             aiRules: aiRulesData,
           }),
@@ -961,10 +1003,6 @@ export default function TemplateSettingsWizard({ templateId }) {
   // save if we let it through, so Save stays disabled until these are empty.
   const stuckFields = fields.filter((f) => customTabIds.has(f.groupId))
   const stuckGroupNames = [...new Set(stuckFields.map((f) => tabLabels[f.groupId] || customTabs.find((t) => t.id === f.groupId)?.label || f.groupId))]
-  // Section 4's Final Name is the template name — no separate name field to
-  // keep in sync with it.
-  const finalTemplateName = `${presetData.marketplaceName || 'marketplace'}_${presetData.category || 'category'}_${presetData.exportVersion || 'v1.0'}`
-
   if (isEditMode && loadingExisting) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -1041,7 +1079,7 @@ export default function TemplateSettingsWizard({ templateId }) {
               {sheetsLocked && <LockedNote>Upload a file in Section 1 to unlock.</LockedNote>}
               <div className="grid md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Product Data Sheet (Compulsory Prefill Data)</label>
+                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Product Data Sheet (Compulsory Brand Details Data)</label>
                   <select
                     value={dataSheetName}
                     onChange={(e) => {
@@ -1142,7 +1180,17 @@ export default function TemplateSettingsWizard({ templateId }) {
       {/* Section 4 — Preset & Export Configuration (source/11.html §4) */}
       <div className={groupsLocked ? 'opacity-50 pointer-events-none select-none' : ''}>
         {groupsLocked && <LockedNote>Complete Section 3 to unlock.</LockedNote>}
-        <PresetExportSection value={presetData} onChange={setPresetData} onSave={savePreset} currentPreset={currentPreset} />
+        <PresetExportSection
+          value={presetData}
+          onChange={setPresetData}
+          categories={categoriesData}
+          onCategoriesChange={setCategoriesData}
+          templateName={templateNameInput}
+          onTemplateNameChange={setTemplateNameInput}
+          templateNumber={templateNumber}
+          onSave={savePreset}
+          currentPreset={currentPreset}
+        />
       </div>
 
       {/* Section 5 — AI Rules & Template Generation (source/11.html §5) */}
@@ -1178,7 +1226,7 @@ export default function TemplateSettingsWizard({ templateId }) {
               <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>
-                  {stuckFields.length} header{stuckFields.length === 1 ? '' : 's'} {stuckFields.length === 1 ? 'is' : 'are'} in custom group{stuckGroupNames.length === 1 ? '' : 's'} ({stuckGroupNames.join(', ')}) — drag {stuckFields.length === 1 ? 'it' : 'them'} into Product Details / Compulsory / Prefill / Optional in Section 3 before saving.
+                  {stuckFields.length} header{stuckFields.length === 1 ? '' : 's'} {stuckFields.length === 1 ? 'is' : 'are'} in custom group{stuckGroupNames.length === 1 ? '' : 's'} ({stuckGroupNames.join(', ')}) — drag {stuckFields.length === 1 ? 'it' : 'them'} into Product Details / Compulsory / Brand Details in Section 3 before saving.
                 </span>
               </div>
             )}
@@ -1197,7 +1245,7 @@ export default function TemplateSettingsWizard({ templateId }) {
             )}
             <div className="flex items-center justify-between gap-3">
               <p className="text-[12px] text-subtle">
-                Will be saved as <span className="font-semibold text-muted">&quot;{finalTemplateName}&quot;</span> — set in Section 4&apos;s Final Name.
+                Will be saved as <span className="font-semibold text-muted">&quot;{templateNameInput || 'Untitled Template'}&quot;</span> — set in Section 4&apos;s Template Name.
               </p>
               <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0 || uploadingSource} onClick={handleSave}>
                 {isEditMode ? 'Save Changes' : 'Save Template'}

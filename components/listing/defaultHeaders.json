@@ -31,15 +31,5 @@
       "linkedGroup": "design_system",
       "linkedLabel": "Brand"
     }
-  ],
-  "optional": [
-    {
-      "label": "Product Number",
-      "dataType": "text",
-      "isUniqueKeyPart": true,
-      "disabled": true, 
-      "linkedGroup": "design_system",
-      "linkedLabel": "Product Number"
-    }
   ]
 }

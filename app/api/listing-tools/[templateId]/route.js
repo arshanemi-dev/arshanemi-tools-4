@@ -41,16 +41,21 @@ export async function PATCH(req, { params }) {
 
     const body = await req.json().catch(() => ({}))
     const patch = {}
+    // templateNumber is deliberately never accepted here — assigned once at creation
+    // (createTemplateMeta) and permanent for the life of the template.
     if ('templateName' in body) patch.templateName = body.templateName
     if ('description' in body) patch.description = body.description
     if ('marketplaceName' in body) patch.marketplaceName = body.marketplaceName?.trim() || ''
-    if ('category' in body) patch.category = body.category?.trim() || ''
+    if ('category1' in body) patch.category1 = body.category1?.trim() || ''
+    if ('category2' in body) patch.category2 = body.category2?.trim() || ''
+    if ('category3' in body) patch.category3 = body.category3?.trim() || ''
+    if ('category4' in body) patch.category4 = body.category4?.trim() || ''
     if ('exportVersion' in body) patch.exportVersion = body.exportVersion?.trim() || ''
     if ('aiRules' in body) patch.aiRules = body.aiRules
     if ('isAllowedToShow' in body) patch.isAllowedToShow = !!body.isAllowedToShow
-    if ('marketplaceName' in body || 'category' in body || 'exportVersion' in body) {
+    if ('marketplaceName' in body || 'category1' in body || 'exportVersion' in body) {
       const mp = 'marketplaceName' in body ? body.marketplaceName : meta.marketplaceName
-      const cat = 'category' in body ? body.category : meta.category
+      const cat = 'category1' in body ? body.category1 : meta.category1
       const ver = 'exportVersion' in body ? body.exportVersion : meta.exportVersion
       patch.finalName = [mp, cat, ver].map((s) => s?.trim()).filter(Boolean).join('_')
     }

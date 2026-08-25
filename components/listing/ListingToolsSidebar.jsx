@@ -16,7 +16,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 const BASE_NAV_ITEMS = [
   { href: '/listing-tools', label: 'Auto Listing' ,templateNav:`auto-details`},
   { href: '/listing-tools/product-details', label: 'Product Details',templateNav:`product-details` },
-  { href: '/listing-tools/prefill-details', label: 'Prefill Details',templateNav:`prefill-details` },
+  { href: '/listing-tools/brand-details', label: 'Brand Details',templateNav:`brand-details` },
   { href: '/listing-tools/templates', label: 'Choose Your template',templateNav:`templates` },
   { href: '/listing-tools/history', label: 'History' },
 ]
@@ -53,13 +53,13 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
   }, [])
 
   const isActive = (href) => (href === '/listing-tools' ? pathname === '/listing-tools' : pathname.startsWith(href))
-  // Which of the three dropdown-driven group pages (Auto Listing, Product Details, Prefill
+  // Which of the three dropdown-driven group pages (Auto Listing, Product Details, Brand
   // Details) the viewer is currently on, and which template's ?template= is open there — drives
   // the indigo "currently open" highlight below, on both the group label and its matching
   // template link. Previously this only ever recognized Product Details' own path, so opening a
-  // template from Prefill Details (or Auto Listing itself) never highlighted anything even
+  // template from Brand Details (or Auto Listing itself) never highlighted anything even
   // though a real template was open.
-  const GROUP_PATHS = { '/listing-tools/auto-details': 'auto-details', '/listing-tools/product-details': 'product-details', '/listing-tools/prefill-details': 'prefill-details' }
+  const GROUP_PATHS = { '/listing-tools/auto-details': 'auto-details', '/listing-tools/product-details': 'product-details', '/listing-tools/brand-details': 'brand-details' }
   const activateTemplateNav = GROUP_PATHS[pathname] || null
   const activeTemplateId = activateTemplateNav ? searchParams.get('template') : null
 

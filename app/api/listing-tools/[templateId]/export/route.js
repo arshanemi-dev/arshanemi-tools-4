@@ -106,7 +106,7 @@ export async function POST(req, { params }) {
   const body = await req.json().catch(() => ({}))
   const groups = Array.isArray(body.groups) && body.groups.length
     ? body.groups
-    : ['design_system', 'compulsory', 'prefill', 'optional']
+    : ['design_system', 'compulsory', 'prefill']
   const sessionRows = body.sessionRows && typeof body.sessionRows === 'object' ? body.sessionRows : null
 
   const content = await getTemplateContent(templateId)

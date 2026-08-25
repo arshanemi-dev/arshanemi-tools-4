@@ -189,6 +189,7 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
           </button>
         </td>
 
+        <td className="px-3 py-3 text-subtle font-mono whitespace-nowrap">{template.templateNumber || '—'}</td>
         <td className="px-3 py-3 text-foreground font-medium whitespace-nowrap">
           <span className="inline-flex items-center gap-1.5">
             {template.templateName}
@@ -196,8 +197,8 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
           </span>
         </td>
          <td className="px-3 py-3 text-subtle whitespace-nowrap">
-          {template.marketplaceName || template.category
-            ? `${template.marketplaceName || '—'} / ${template.category || '—'}`
+          {template.marketplaceName || template.category1
+            ? `${template.marketplaceName || '—'} / ${template.category1 || '—'}`
             : '—'}
         </td>
         <td className="px-3 py-3 text-subtle max-w-[180px]">
@@ -560,6 +561,7 @@ export default function TemplateSettingsListPage() {
                 />
               </th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Visible</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template #</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template Name</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Marketplace / Category</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Description</th>
@@ -575,14 +577,14 @@ export default function TemplateSettingsListPage() {
           <tbody>
             {templates === null && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-subtle">
+                <td colSpan={13} className="px-4 py-10 text-center text-subtle">
                   Loading…
                 </td>
               </tr>
             )}
             {templates !== null && filtered.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-subtle">
+                <td colSpan={13} className="px-4 py-10 text-center text-subtle">
                   No templates yet — create one to get started.
                 </td>
               </tr>

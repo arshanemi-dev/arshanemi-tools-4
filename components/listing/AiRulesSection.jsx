@@ -24,7 +24,7 @@ const inputCls = 'w-full px-2.5 py-2 text-[13px] border border-divider rounded-m
 function rulesFromTemplate(t) {
   return {
     marketplace: t.marketplaceName || '',
-    category: t.category || '',
+    category: t.category1 || '',
     title: t.aiRules?.title || '',
     description: t.aiRules?.description || '',
     keyword: t.aiRules?.keyword || '',
@@ -92,7 +92,7 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
     // those two fields change; Title/Description/Keyword/Other Rules are
     // left as-is.
     if (currentPreset && id === currentPreset.id) {
-      onChange({ ...value, marketplace: currentPreset.marketplaceName || '', category: currentPreset.category || '' })
+      onChange({ ...value, marketplace: currentPreset.marketplaceName || '', category: currentPreset.category1 || '' })
       return
     }
     const match = templates.find((t) => t.id === id)
@@ -177,7 +177,7 @@ export default function AiRulesSection({ value, onChange, latestTemplateId, curr
               <option value="">— Start from scratch —</option>
               {currentPreset && (
                 <option value={currentPreset.id}>
-                  Current preset: {currentPreset.marketplaceName || 'marketplace'} / {currentPreset.category || 'category'} / {currentPreset.exportVersion || 'v1.0'}
+                  Current preset: {currentPreset.marketplaceName || 'marketplace'} / {currentPreset.category1 || 'category'} / {currentPreset.exportVersion || 'v1.0'}
                 </option>
               )}
               {templates.length > 0 && (
