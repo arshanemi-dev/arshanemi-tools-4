@@ -2,12 +2,8 @@
   "design_system": [
     { "label": "Product Group", "dataType": "text", "isProductGroupField": true },
     { "label": "Product Number", "dataType": "text", "isUniqueKeyPart": true },
-    { "label": "Cost", "dataType": "text" },
     { "label": "Highlights", "dataType": "text" },
     { "label": "Brand", "dataType": "text" },
-     { "label": "Variations", "dataType": "multiselect" },
-    { "label": "Selling Price", "dataType": "formula", "formula": "[Cost+250]" },
-    { "label": "SKU", "dataType": "formula", "formula": "[Product Number]-[Variations]" },
     { "label": "Image 1", "dataType": "image" },
     { "label": "Image 2", "dataType": "image" },
     { "label": "Image 3", "dataType": "image" },

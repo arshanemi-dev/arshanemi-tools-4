@@ -11,11 +11,33 @@ const TABS = [
 // (light-gray active pill). variant="dark" — the stacked group blocks on
 // the Choose Your Template page (solid black active pill), matching the
 // two distinct treatments visible across the source screenshots.
-export default function SheetTabs({ active, onChange, variant = 'light' }) {
+//
+// `sheets` — this template's own content.sheets (optional). Two things ride on it:
+//  - each sheet's `sheetName` (set at Template Settings' Kanban step, via click-to-rename; see
+//    TemplateSettingsWizard.jsx's tabLabelsFromContent) overrides that group's default label
+//    below, so a template saved with a renamed group ("Compulsory" → "Mandatory Fields") shows
+//    its own name here instead of always falling back to the generic one every template used to
+//    share.
+//  - a group with zero headers never gets a tab at all. getTemplateContent backfills every
+//    template's `content.sheets` with all 4 groups unconditionally (empty ones included) purely
+//    so server-side code can always index by group without a null check (see its own comment) —
+//    that backfill was never meant to imply every template actually *uses* every group. A
+//    template built without, say, a Prefill column mapped to anything ends up with a real
+//    `prefill` sheet object but `headers: []`; showing a tab for it just opens onto a permanently
+//    blank grid, so it's filtered out here rather than left for every template to render the same
+//    fixed 4 tabs regardless of what it was actually set up with.
+export default function SheetTabs({ active, onChange, variant = 'light', sheets = [] }) {
+  // No `sheets` supplied at all (rather than an empty array) means the caller isn't scoped to a
+  // specific template's content yet — fall back to showing every tab instead of hiding all of
+  // them, e.g. while `content` is still loading.
+  const visibleTabs = sheets.length
+    ? TABS.filter((tab) => (sheets.find((s) => s.group === tab.group)?.headers?.length ?? 0) > 0)
+    : TABS
   return (
     <div className="flex items-stretch border-b border-divider bg-card">
-      {TABS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive = tab.group === active
+        const label = sheets.find((s) => s.group === tab.group)?.sheetName || tab.label
         return (
           <button
             key={tab.group}
@@ -29,7 +51,7 @@ export default function SheetTabs({ active, onChange, variant = 'light' }) {
                 : 'text-subtle hover:text-foreground hover:bg-surface'
             }`}
           >
-            {tab.label}
+            {label}
           </button>
         )
       })}

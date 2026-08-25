@@ -10,7 +10,7 @@ import useAiFill from '@/components/listing/useAiFill'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
-import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
+import { resolveLinkedFill, buildPickerOptions, linkedIdentityGroups, keyValueOf } from '@/components/listing/linkedHeaders'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
@@ -123,6 +123,68 @@ function ScopedProductDetails({ templateId }) {
     // regardless of what's sent, so there's no reason to transmit a row we
     // already know is empty.
     persistRows(activeGroup, sheet.headers, nextRows.filter((r) => !isRowEmpty(r)))
+  }
+
+  // Un-debounced persist for an arbitrary group — used by handleDeleteRow's cross-group cascade
+  // below, which can touch several groups in one click. `persistRows` above is a single shared
+  // debounced callback (one pending call at a time); firing it once per affected group would
+  // just let the last call win and silently drop the others, so this bypasses it entirely rather
+  // than fighting that debounce for a delete, which is already a discrete, deliberate action with
+  // nothing to coalesce.
+  async function persistGroupRows(group, headers, nextRows) {
+    const res = await fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers, rows: nextRows }),
+    })
+    if (!res.ok && res.status !== 401) {
+      const data = await res.json().catch(() => ({}))
+      addToast(data.message || 'Could not save changes', 'error')
+    }
+  }
+
+  // Every row here is already a real saved row (this page has no "unsaved session" concept —
+  // see this page's own top-of-file contrast with Auto Listing), so removing one has to reach
+  // the backend, not just disappear until the next refresh brings it back — handled below via
+  // persistGroupRows, which fully replaces a group's row set the same way every cell edit
+  // already does.
+  //
+  // Unlike a cell edit, though, this group's sheet isn't the only place "this product" lives:
+  // Compulsory/Optional each carry their own disabled "Product Number" column that always
+  // mirrors design_system's (see defaultHeaders.json) — three *independently saved* sheets, no
+  // shared row-index bookkeeping between them the way Auto Listing's session state has. Deleting
+  // a row from just one of them left the same product's row sitting untouched on the other two
+  // tabs. `linkedIdentityGroups`/`keyValueOf` (components/listing/linkedHeaders.js) resolve which
+  // other groups share this exact identity and match by that value — Prefill is deliberately
+  // excluded even when it's the active tab, since a Brand row there can legitimately still be in
+  // use by other products, so deleting it here never cascades anywhere.
+  function handleDeleteRow(row) {
+    if (!sheet) return
+    const identityGroups = linkedIdentityGroups(activeGroup, sheetsByGroup)
+    const value = identityGroups.length > 1 ? keyValueOf(activeGroup, row, sheetsByGroup) : ''
+
+    if (!value) {
+      saveRows(sheet.rows.filter((r) => r !== row))
+      addToast('Row deleted', 'success')
+      return
+    }
+
+    setContent((prev) => ({
+      ...prev,
+      sheets: prev.sheets.map((s) => (
+        identityGroups.includes(s.group)
+          ? { ...s, rows: s.rows.filter((r) => keyValueOf(s.group, r, sheetsByGroup) !== value) }
+          : s
+      )),
+    }))
+    for (const group of identityGroups) {
+      const groupSheet = sheetsByGroup[group]
+      if (!groupSheet) continue
+      const nextRows = groupSheet.rows.filter((r) => keyValueOf(group, r, sheetsByGroup) !== value)
+      if (nextRows.length === groupSheet.rows.length) continue
+      persistGroupRows(group, groupSheet.headers, nextRows)
+    }
+    addToast('Row deleted', 'success')
   }
 
   // Merges AI-generated fields into one row and marks them `aiFilled` (plan
@@ -239,7 +301,7 @@ function ScopedProductDetails({ templateId }) {
       </div>
 
       <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        <SheetTabs active={activeGroup} onChange={onChangeGroup} />
+        <SheetTabs active={activeGroup} onChange={onChangeGroup} sheets={content?.sheets} />
         {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
         {sheet && (
           <SheetGrid
@@ -254,6 +316,7 @@ function ScopedProductDetails({ templateId }) {
             onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
             onHeaderChange={handleHeaderChange}
             onImageUploaded={handleImageUploaded}
+            onDeleteRow={handleDeleteRow}
           />
         )}
       </div>

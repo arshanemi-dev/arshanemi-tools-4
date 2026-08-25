@@ -12,7 +12,7 @@ import AiFillUpModal from '@/components/listing/AiFillUpModal'
 import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedSheet'
-import { resolveLinkedFill, buildPickerOptions, propagateFromGroup } from '@/components/listing/linkedHeaders'
+import { resolveLinkedFill, buildPickerOptions, propagateFromGroup, linkedIdentityGroups, keyValueOf } from '@/components/listing/linkedHeaders'
 import { findGroupKeyMatch, backfillEmptyFields, rowFromLabelKeyed } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
@@ -123,6 +123,21 @@ function ScopedAutoDetails({ templateId }) {
     [content]
   )
 
+  // Groups this template actually uses. getTemplateContent backfills every template's
+  // `content.sheets` with all 4 groups unconditionally, empty ones included (see its own
+  // comment) — purely so server code can always index by group without a null check, never
+  // meant to imply every template uses every group. A template with, say, nothing mapped into
+  // Prefill ends up with a real `prefill` sheet object but `headers: []`; every group-wise loop
+  // below (row-count-sync, the Save/Download payload, AI Fill Up's own group list) is scoped to
+  // this instead of the fixed ALL_GROUPS constant, same as SheetTabs.jsx hides that group's tab
+  // entirely. design_system can never come up empty — every template gets its default headers
+  // there (see defaultHeaders.json) — so `activeGroup`'s own ALL_GROUPS[0]/'design_system'
+  // default is always a member of this, and SheetTabs only ever offers a real group to switch to.
+  const realGroups = useMemo(
+    () => ALL_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0),
+    [sheetsByGroup]
+  )
+
   // "History" matching/auto-fill (Rule A/B, see historyFill.js and
   // linkedHeaders.js) must only ever see the current viewer's own
   // previously-saved rows, never a teammate's, on a template shared across a
@@ -180,6 +195,53 @@ function ScopedAutoDetails({ templateId }) {
     setSearch('')
   }
 
+  // Deleting a row here never hits the backend directly for the row's OWN sheet content (see the
+  // top-of-file contract — Auto Listing is a fresh entry form until Save/Download) — but the row
+  // shown here isn't necessarily fresh, untouched-by-the-server data: it can already be backed by
+  // real hub history (pulled in via Product Group auto-fill, see handleGroupSelect, or a leftover
+  // from an earlier session's Save this fresh session never re-fetches). Removing it from
+  // `sessionRows` alone wouldn't stop it resurfacing the next time that same Product Group gets
+  // looked up, so design_system's own Product Number — the one identity Product Group auto-fill
+  // keys off — also gets a best-effort delete against the hub's mirror table.
+  //
+  // Local removal is matched by VALUE, not raw index, for design_system/Compulsory/Optional
+  // (see linkedIdentityGroups) — Compulsory/Optional's own "Product Number" always mirrors
+  // design_system's (defaultHeaders.json), so this is the one robust way to be sure the same
+  // product's row disappears from all three, not just whichever tab the delete icon was clicked
+  // on. Every other group (Prefill, or any group without its own key header) falls back to plain
+  // index removal instead — Prefill's own Brand can legitimately be shared by several different
+  // products at different indices (that's the whole point of it being a roster, not
+  // one-row-per-product), so matching it by value could wipe out an unrelated, still-live
+  // product's own row; it still loses its row at this index to keep every group's row COUNT in
+  // sync, the same invariant handleRowsChange/extendRows maintain elsewhere.
+  function handleDeleteRow(row) {
+    const rowIndex = activeSessionRows.indexOf(row)
+    if (rowIndex === -1) return
+
+    const identityGroups = linkedIdentityGroups(activeGroup, sheetsByGroup)
+    const isProductIdentity = identityGroups.includes('design_system')
+    const value = isProductIdentity ? keyValueOf(activeGroup, row, sheetsByGroup) : ''
+
+    if (value) {
+      fetch(`/api/listing-tools/product-details-history?${new URLSearchParams({ templateId, productNumber: value })}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      }).catch(() => {})
+    }
+
+    setSessionRows((prev) => {
+      const next = { ...prev }
+      for (const g of realGroups) {
+        const rows = prev[g] || []
+        next[g] = (value && identityGroups.includes(g))
+          ? rows.filter((r) => keyValueOf(g, r, sheetsByGroup) !== value)
+          : rows.filter((_, i) => i !== rowIndex)
+      }
+      return next
+    })
+    addToast('Row deleted', 'success')
+  }
+
   // Existing (already-saved, fetched once) rows for a group, blanks
   // dropped, plus whatever's currently in this session, also blanks
   // dropped — the set actually sent to the server / included in an export.
@@ -192,7 +254,7 @@ function ScopedAutoDetails({ templateId }) {
   // "AI Fill Up" only ever fills this session's own in-progress rows (never
   // already-saved data — see handleAiFillUp below), so the "is there enough
   // to bulk" check counts session rows specifically, not merged/saved ones.
-  const sessionRowCount = ALL_GROUPS.reduce((sum, g) => sum + (sessionRows[g] || []).filter((r) => !isRowEmpty(r)).length, 0)
+  const sessionRowCount = realGroups.reduce((sum, g) => sum + (sessionRows[g] || []).filter((r) => !isRowEmpty(r)).length, 0)
   const hasAnyFilledRow = sessionRowCount > 1
 
   // Save/Download gate: the design_system (Product Details) sheet — one row
@@ -212,8 +274,13 @@ function ScopedAutoDetails({ templateId }) {
   // app/api/listing-tools/[templateId]/export/route.js). No separate per-group PATCH round
   // trips, and no need to carry "existing" rows from here — the server already has its own
   // fresh copy of those.
+  //
+  // Scoped to `realGroups`, not the fixed ALL_GROUPS — the export route only merges/persists/
+  // syncs history for whichever group keys are actually present in this object (see its own
+  // `if (!incoming) continue`), so a template with no real Prefill group simply never gets a
+  // `prefill` key here at all, instead of sending one every save with nothing meaningful in it.
   function sessionRowsPayload() {
-    return Object.fromEntries(ALL_GROUPS.map((g) => [g, (sessionRows[g] || []).filter((r) => !isRowEmpty(r))]))
+    return Object.fromEntries(realGroups.map((g) => [g, (sessionRows[g] || []).filter((r) => !isRowEmpty(r))]))
   }
 
   // Pads `rows` with blank rows up to `length`, using `group`'s own headers
@@ -244,7 +311,7 @@ function ScopedAutoDetails({ templateId }) {
     setSessionRows((prev) => {
       const nextAll = { ...prev, [group]: nextSessionRows }
       const targetLength = nextSessionRows.length
-      for (const g of ALL_GROUPS) {
+      for (const g of realGroups) {
         if (g === group) continue
         const rows = nextAll[g] || []
         if (rows.length < targetLength) {
@@ -443,9 +510,9 @@ function ScopedAutoDetails({ templateId }) {
 
         // Cross-group cascade — every real row (backfilled-existing or brand-new) fans its
         // matched data out into Compulsory/Prefill/Optional at the same index, same primitive
-        // handleCellReconciliation uses elsewhere. Other groups are padded to match first so
+        // handleCellReconciliation uses elsewhere. Other real groups are padded to match first so
         // there's always somewhere for row i's update to land.
-        for (const g of ALL_GROUPS) {
+        for (const g of realGroups) {
           if (g === 'design_system') continue
           working[g] = extendRows(g, working[g] || prev[g] || [], nextDesignRows.length)
         }
@@ -642,7 +709,7 @@ function ScopedAutoDetails({ templateId }) {
       const res = await fetch(`/api/listing-tools/${templateId}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groups: ALL_GROUPS, sessionRows: sessionRowsPayload() }),
+        body: JSON.stringify({ groups: realGroups, sessionRows: sessionRowsPayload() }),
       }).catch(() => null)
       if (!res) {
         addToast('Could not save — check your connection', 'error')
@@ -664,7 +731,7 @@ function ScopedAutoDetails({ templateId }) {
   // merge+persist, billing, and SKU assignment together (see useTemplateExport.js and the
   // /export route), so there's no separate persist step to run first here anymore.
   function handleDownload() {
-    runExport({ template: content, groups: ALL_GROUPS, format: 'excel', meta: template, sessionRows: sessionRowsPayload() })
+    runExport({ template: content, groups: realGroups, format: 'excel', meta: template, sessionRows: sessionRowsPayload() })
   }
 
   return (
@@ -734,7 +801,7 @@ function ScopedAutoDetails({ templateId }) {
 
       {sheet && (
         <div className="border border-divider rounded-lg overflow-hidden bg-card">
-          <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} />
+          <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} sheets={content?.sheets} />
           <SheetGrid
             headers={sheet.headers}
             rows={filteredRows}
@@ -766,6 +833,7 @@ function ScopedAutoDetails({ templateId }) {
             }}
             onHeaderChange={handleHeaderChange}
             onImageUploaded={handleImageUploaded}
+            onDeleteRow={handleDeleteRow}
           />
         </div>
       )}
@@ -780,7 +848,9 @@ function ScopedAutoDetails({ templateId }) {
           // Session rows only — AI Fill Up never touches already-saved data
           // on this page (see handleAiFillUp above), so the preview must
           // reflect exactly that, not the merged existing+session set.
-          sheets={ALL_GROUPS.map((group) => ({
+          // Scoped to realGroups — offering to AI-fill a group this template
+          // doesn't actually use would just be an empty, pickable-but-useless option.
+          sheets={realGroups.map((group) => ({
             group,
             sheetName: sheetsByGroup[group]?.sheetName,
             headers: sheetsByGroup[group]?.headers || [],

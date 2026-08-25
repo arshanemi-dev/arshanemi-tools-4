@@ -4,7 +4,23 @@ import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
   ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS, canAccessTemplate,
 } from '@/lib/listingTemplates'
-import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory, toLabelKeyedRow } from '@/lib/listingHistory'
+import {
+  recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory,
+  deleteProductDetailsHistory, deletePrefillDetailsHistory, toLabelKeyedRow,
+} from '@/lib/listingHistory'
+
+// `aiFilled`/bookkeeping aside, the set of this user's own key-header values (Product Number for
+// design_system, Brand for prefill) currently present across `rowsToScan` — used both before and
+// after this request's own write to spot a key that existed before but not after (see PATCH's own
+// comment on why that needs a real hub delete, not just letting upsert silently ignore it).
+function ownKeyValues(rowsToScan, userId, keyHeaderId) {
+  return new Set(
+    rowsToScan
+      .filter((r) => r.userId === userId)
+      .map((r) => String(r[keyHeaderId] ?? '').trim())
+      .filter(Boolean)
+  )
+}
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -45,6 +61,17 @@ export async function PATCH(req, { params }) {
   const existing = content.sheets.find((s) => s.group === group)
   const effectiveHeaders = headers || existing?.headers || []
 
+  // Snapshotted before the write below overwrites `existing` — only for the two groups the hub
+  // mirrors to Postgres (design_system/prefill). Compared against the same user's key values
+  // after the write (below) to find any key that's gone missing from this request — a row
+  // deleted outright, or one whose key field got edited to a new value — so the now-orphaned hub
+  // history record for it can be removed too, instead of lingering forever as a ghost only
+  // upsert (never delete) ever touched.
+  const historyKeyHeader = (group === 'design_system' || group === 'prefill')
+    ? effectiveHeaders.find((h) => h.isUniqueKeyPart)
+    : null
+  const beforeOwnKeys = historyKeyHeader ? ownKeyValues(existing?.rows || [], payload.userId, historyKeyHeader.id) : null
+
   const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, rows)
   const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, upserted)
   const sheetIndex = content.sheets.findIndex((s) => s.group === group)
@@ -68,26 +95,33 @@ export async function PATCH(req, { params }) {
   // the two groups those tables exist for, and only rows owned by this
   // request's user (never a teammate's, even though they may sit in the
   // same submitted/merged array).
-  if (group === 'design_system' || group === 'prefill') {
-    const keyHeader = effectiveHeaders.find((h) => h.isUniqueKeyPart)
-    if (keyHeader) {
-      const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[keyHeader.id] ?? '').trim())
-      if (group === 'design_system') {
-        const groupHeader = effectiveHeaders.find((h) => h.isProductGroupField)
-        await syncProductDetailsHistory(req, {
-          templateId, templateName: meta.templateName,
-          rows: ownRows.map((r) => ({
-            productNumber: r[keyHeader.id],
-            rowData: toLabelKeyedRow(effectiveHeaders, r),
-            groupName: groupHeader ? r[groupHeader.id] : undefined,
-          })),
-        })
-      } else {
-        await syncPrefillDetailsHistory(req, {
-          templateId, templateName: meta.templateName,
-          rows: ownRows.map((r) => ({ brand: r[keyHeader.id], rowData: r })),
-        })
-      }
+  if (historyKeyHeader) {
+    const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[historyKeyHeader.id] ?? '').trim())
+    if (group === 'design_system') {
+      const groupHeader = effectiveHeaders.find((h) => h.isProductGroupField)
+      await syncProductDetailsHistory(req, {
+        templateId, templateName: meta.templateName,
+        rows: ownRows.map((r) => ({
+          productNumber: r[historyKeyHeader.id],
+          rowData: toLabelKeyedRow(effectiveHeaders, r),
+          groupName: groupHeader ? r[groupHeader.id] : undefined,
+        })),
+      })
+    } else {
+      await syncPrefillDetailsHistory(req, {
+        templateId, templateName: meta.templateName,
+        rows: ownRows.map((r) => ({ brand: r[historyKeyHeader.id], rowData: r })),
+      })
+    }
+
+    // Any key this user had before this write but doesn't anymore — deleted outright, or renamed
+    // via its own key field — needs its stale hub history record removed, not just left behind
+    // (see beforeOwnKeys' own comment above for why upsert alone can't cover this).
+    const afterOwnKeys = ownKeyValues(normalizedRows, payload.userId, historyKeyHeader.id)
+    const removedKeys = [...beforeOwnKeys].filter((k) => !afterOwnKeys.has(k))
+    for (const key of removedKeys) {
+      if (group === 'design_system') await deleteProductDetailsHistory(req, { templateId, productNumber: key })
+      else await deletePrefillDetailsHistory(req, { templateId, brand: key })
     }
   }
 

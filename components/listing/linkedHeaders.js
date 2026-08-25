@@ -158,3 +158,43 @@ export function propagateFromGroup(sourceGroup, sourceRow, sheetsByGroup) {
   }
   return Object.keys(updates).length ? updates : null
 }
+
+// Resolves a group's own unique-key header to whichever (group, headerId) pair is the
+// CANONICAL source of that identity — a header connected to another group's own key (Rule B,
+// e.g. Compulsory/Optional's disabled "Product Number", see defaultHeaders.json, which always
+// mirrors design_system's) resolves to that target instead of itself; a header with no such
+// connection, or one whose link doesn't resolve to an actual unique key on the other end
+// (Prefill's own "Brand" links to design_system's *plain*, non-unique Brand field), is already
+// canonical. Two groups whose key headers resolve to the same canonical pair represent the same
+// identity — literally the same row's data split across sheets — even though each sheet stores
+// its own rows independently.
+function canonicalKeySource(group, sheetsByGroup) {
+  const keyHeader = (sheetsByGroup[group]?.headers || []).find((h) => h.isUniqueKeyPart)
+  if (!keyHeader) return null
+  if (keyHeader.linkedGroup && keyHeader.linkedHeaderId) {
+    const targetHeader = (sheetsByGroup[keyHeader.linkedGroup]?.headers || []).find((h) => h.id === keyHeader.linkedHeaderId)
+    if (targetHeader?.isUniqueKeyPart) return `${keyHeader.linkedGroup}::${targetHeader.id}`
+  }
+  return `${group}::${keyHeader.id}`
+}
+
+// Every group (including `group` itself) whose own unique key shares `group`'s canonical
+// identity source — deleting a row by this value in any one of them really does mean the same
+// row is gone in every one, not just that one sheet. Deliberately excludes a group like Prefill
+// that merely *looks up* this identity as a shared roster (several different products can
+// legitimately reuse the same Brand row) rather than mirroring it 1:1 per row — Prefill's own key
+// canonicalizes to itself, never to design_system's, so it never matches here.
+export function linkedIdentityGroups(group, sheetsByGroup) {
+  const canon = canonicalKeySource(group, sheetsByGroup)
+  if (!canon) return [group]
+  return Object.keys(sheetsByGroup).filter((g) => canonicalKeySource(g, sheetsByGroup) === canon)
+}
+
+// The value `group`'s own unique-key header holds on `row` — the identity value matched across
+// `linkedIdentityGroups` above. Empty/missing (no key header at all, or nothing typed into it
+// yet) is `''`, same "nothing to match on" convention as findGroupKeyMatch's own keyValueFor.
+export function keyValueOf(group, row, sheetsByGroup) {
+  const keyHeader = (sheetsByGroup[group]?.headers || []).find((h) => h.isUniqueKeyPart)
+  if (!keyHeader) return ''
+  return String(row?.[keyHeader.id] ?? '').trim()
+}

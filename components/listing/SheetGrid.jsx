@@ -1,5 +1,5 @@
 'use client'
-import { Filter, ChevronDown, Lock } from 'lucide-react'
+import { Filter, ChevronDown, Lock, Trash2 } from 'lucide-react'
 import ComboboxCell from './ComboboxCell'
 import MultiSelectCell from './MultiSelectCell'
 import ImageCell from './ImageCell'
@@ -62,6 +62,13 @@ export default function SheetGrid({
   // vision-fill with no extra click. (No per-row action column — bulk
   // "AI Fill Up" in each page's toolbar replaced that.)
   onImageUploaded,
+  // Per-row delete — optional, a caller wires this up to actually remove the row from whatever
+  // it's tracking (session state, a saved sheet) and, if that row already exists on the backend,
+  // to persist the removal there too; SheetGrid itself has no idea which of those applies, it
+  // just renders the icon and hands back the exact row object (never just its index — `rows` here
+  // may be a filtered/searched view, so an index into it wouldn't line up with the caller's own
+  // unfiltered array) plus that row's index within *this* `rows` prop for convenience.
+  onDeleteRow,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -77,12 +84,19 @@ export default function SheetGrid({
   // flagged `isUniqueKeyPart` (some Compulsory/Prefill/Optional sheets may
   // not have one), rather than guessing at some other column.
   const stickyKeyHeaderId = sortedHeaders.find((h) => h.isUniqueKeyPart)?.id
-  const stickyLeftCls = selectable ? 'left-10' : 'left-0'
-  // The checkbox column is the last (rightmost) frozen column only when there's no
+  // Delete column (if present) is pinned first, ahead of the selectable checkbox column (if
+  // present) — same 40px-per-column freeze-pane scheme as the checkbox already used, just with a
+  // variable number of leading pinned columns instead of a fixed 0 or 1.
+  const leadingStickyCols = (onDeleteRow ? 1 : 0) + (selectable ? 1 : 0)
+  const deleteLeftCls = 'left-0'
+  const checkboxLeftCls = onDeleteRow ? 'left-10' : 'left-0'
+  const stickyLeftCls = leadingStickyCols === 2 ? 'left-20' : leadingStickyCols === 1 ? 'left-10' : 'left-0'
+  // The checkbox/delete column is the last (rightmost) frozen column only when there's no
   // isUniqueKeyPart column to its right also being pinned — that's the one whose right edge is
   // the real freeze boundary and needs the harder border below, not the (thin, normal) line
   // between two columns that are both already frozen.
   const checkboxIsLastSticky = selectable && !stickyKeyHeaderId
+  const deleteIsLastSticky = onDeleteRow && !selectable && !stickyKeyHeaderId
   // Hard 2px border instead of the grid's normal 1px hairline — marks the actual freeze
   // boundary (bottom of the pinned header row, right edge of the pinned key column) so it reads
   // as a real seam, not just another gridline.
@@ -166,9 +180,16 @@ export default function SheetGrid({
       <table className="w-full border-separate border-spacing-0 text-[13px]">
         <thead>
           <tr className="bg-card">
+            {onDeleteRow && (
+              <th
+                className={`h-[80px] sticky top-0 ${deleteLeftCls} z-30 bg-card border-b-2 border-b-divider-light w-10 px-2 py-2.5 align-top ${
+                  deleteIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
+                }`}
+              />
+            )}
             {selectable && (
               <th
-                className={`h-[80px] sticky top-0 left-0 z-30 bg-card border-b-2 border-b-divider-light w-10 px-3 py-2.5 align-top ${
+                className={`h-[80px] sticky top-0 ${checkboxLeftCls} z-30 bg-card border-b-2 border-b-divider-light w-10 px-3 py-2.5 align-top ${
                   checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
                 }`}
               >
@@ -241,9 +262,27 @@ export default function SheetGrid({
         <tbody>
           {rows.map((row, rowIndex) => (
             <tr key={rowIndex} className="hover:bg-surface/80 group">
+              {onDeleteRow && (
+                <td
+                  className={`sticky ${deleteLeftCls} z-10 bg-card group-hover:bg-surface border-b border-divider px-2 py-2 ${
+                    deleteIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
+                  }`}
+                >
+                  {!isRowEmpty(row) && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteRow(row, rowIndex)}
+                      title="Delete this row"
+                      className="flex items-center justify-center rounded p-1 text-subtle hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </td>
+              )}
               {selectable && (
                 <td
-                  className={`sticky left-0 z-10 bg-card group-hover:bg-surface border-b border-divider px-3 py-2 ${
+                  className={`sticky ${checkboxLeftCls} z-10 bg-card group-hover:bg-surface border-b border-divider px-3 py-2 ${
                     checkboxIsLastSticky ? stickyRightBorderCls : plainRightBorderCls
                   }`}
                 >
