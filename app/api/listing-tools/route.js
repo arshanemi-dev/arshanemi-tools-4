@@ -93,7 +93,10 @@ export async function POST(req) {
       category2: body.category2,
       category3: body.category3,
       category4: body.category4,
+      category5: body.category5,
+      category6: body.category6,
       exportVersion: body.exportVersion,
+      finalName: body.finalName,
       aiRules: body.aiRules,
       rowCounts,
     })

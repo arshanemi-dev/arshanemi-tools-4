@@ -33,7 +33,12 @@ export default function ChooseTemplatePage() {
   const filtered = (templates || []).filter((t) => {
     if (!search.trim()) return true
     const q = search.toLowerCase()
-    return t.templateName.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)
+    return (
+      t.templateName.toLowerCase().includes(q) ||
+      (t.finalName || '').toLowerCase().includes(q) ||
+      (t.templateNumber || '').toLowerCase().includes(q) ||
+      (t.description || '').toLowerCase().includes(q)
+    )
   })
 
   // Full-replace PUT — the hub deletes-then-reinserts this user's whole
@@ -85,6 +90,9 @@ export default function ChooseTemplatePage() {
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-card border-b border-divider">
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template #</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template Name</th>
+              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template Final Name</th>
               <th className="px-4 py-2.5 text-left font-semibold text-foreground w-52">My Template</th>
               <th className="px-4 py-2.5 text-left font-semibold text-foreground w-52">All Template</th>
               <th className="px-4 py-2.5 text-left font-semibold text-foreground">Description</th>

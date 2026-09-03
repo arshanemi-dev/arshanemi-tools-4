@@ -20,6 +20,7 @@ import {
 import PillButton from '@/components/listing/PillButton'
 import TemplateBadge from '@/components/listing/TemplateBadge'
 import ConfirmDialog from '@/components/admin/ConfirmDialog'
+import Modal from '@/components/admin/Modal'
 import { useToast } from '@/components/admin/Toast'
 
 const BULK_COLUMNS = ['Template Name', 'Template Description', 'Title', 'Description', 'Keywords', 'Rules', 'Rule-1', 'Rule-2']
@@ -44,6 +45,32 @@ function rulesOf(template) {
   }
 }
 
+// Preset inputs shown in the "Edit Template" dialog — same set the New
+// Design's top form uses at create time.
+function presetOf(template) {
+  return {
+    marketplaceName: template.marketplaceName || '',
+    category1: template.category1 || '',
+    category2: template.category2 || '',
+    category3: template.category3 || '',
+    category4: template.category4 || '',
+    category5: template.category5 || '',
+    category6: template.category6 || '',
+    exportVersion: template.exportVersion || '',
+  }
+}
+// Same composition rules as NewTemplateDesign.jsx: Template Name =
+// Marketplace + Category 6; Final Name = Marketplace + Category 1…6 + Version.
+function composeTemplateName(p) {
+  return [p.marketplaceName, p.category6].map((s) => (s || '').trim()).filter(Boolean).join('_')
+}
+function composeFinalName(p) {
+  return [p.marketplaceName, p.category1, p.category2, p.category3, p.category4, p.category5, p.category6, p.exportVersion]
+    .map((s) => (s || '').trim())
+    .filter(Boolean)
+    .join('_')
+}
+
 // Single Row Component with Checkbox and Inline Table Editing
 function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, onDeleted }) {
   const { addToast } = useToast()
@@ -54,6 +81,12 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
   const [togglingVisibility, setTogglingVisibility] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // "Edit Template" mini-dialog — same preset inputs as template-create time.
+  // Template Name and Template Final Name are composed read-only from these,
+  // exactly like the New Design's top form.
+  const [editNamesOpen, setEditNamesOpen] = useState(false)
+  const [savingNames, setSavingNames] = useState(false)
+  const [presetDraft, setPresetDraft] = useState(() => presetOf(template))
 
   const totalRows = Object.values(template.rowCounts || {}).reduce((sum, n) => sum + (n || 0), 0)
   const isUsed = totalRows > 0
@@ -79,6 +112,45 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
     setDraft(rulesOf(template))
     setDescDraft(template.description || '')
     setEditingRules(false)
+  }
+
+  function openEditNames() {
+    setPresetDraft(presetOf(template))
+    setEditNamesOpen(true)
+  }
+  function setPreset(key, value) {
+    setPresetDraft((p) => ({ ...p, [key]: value }))
+  }
+  const composedName = composeTemplateName(presetDraft)
+  const composedFinal = composeFinalName(presetDraft)
+
+  async function handleSaveNames() {
+    if (!composedName) {
+      addToast('Enter a Marketplace Name and Category 6 — the Template Name is built from them.', 'error')
+      return
+    }
+    setSavingNames(true)
+    try {
+      const updated = await patchTemplate({
+        templateName: composedName,
+        finalName: composedFinal,
+        marketplaceName: presetDraft.marketplaceName.trim(),
+        category1: presetDraft.category1.trim(),
+        category2: presetDraft.category2.trim(),
+        category3: presetDraft.category3.trim(),
+        category4: presetDraft.category4.trim(),
+        category5: presetDraft.category5.trim(),
+        category6: presetDraft.category6.trim(),
+        exportVersion: presetDraft.exportVersion.trim(),
+      })
+      addToast('Template updated.', 'success')
+      setEditNamesOpen(false)
+      onUpdated(updated)
+    } catch (err) {
+      addToast(err.message, 'error')
+    } finally {
+      setSavingNames(false)
+    }
   }
 
   function handleCopyRules() {
@@ -196,10 +268,8 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
             <TemplateBadge badge={template.viewerBadge} />
           </span>
         </td>
-         <td className="px-3 py-3 text-subtle whitespace-nowrap">
-          {template.marketplaceName || template.category1
-            ? `${template.marketplaceName || '—'} / ${template.category1 || '—'}`
-            : '—'}
+        <td className="px-3 py-3 text-subtle font-mono text-[12.5px] max-w-[220px]">
+          <span className="block truncate" title={template.finalName || '—'}>{template.finalName || '—'}</span>
         </td>
         <td className="px-3 py-3 text-subtle max-w-[180px]">
           {editingRules ? (
@@ -261,11 +331,14 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
                 <Link href={`/listing-tools/template-settings/${template.id}/details`}>
                   <PillButton variant="view" icon={Eye}>View</PillButton>
                 </Link>
-                {/* <Link href={`/listing-tools/template-settings/${template.id}`}>
-                  <PillButton variant="edit" icon={Pencil} title="Edit this template's groups, headers, dropdown sources, preset and AI rules">
-                    Edit Template
-                  </PillButton>
-                </Link> */}
+                <PillButton
+                  variant="ghost"
+                  icon={Pencil}
+                  onClick={openEditNames}
+                  title="Edit the Template Name and Template Final Name"
+                >
+                  Edit Template
+                </PillButton>
                 <PillButton variant="ghost" icon={Pencil} onClick={startEditRules}>
                   Edit Rules
                 </PillButton>
@@ -297,6 +370,83 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
         onConfirm={handleDelete}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      <Modal
+        open={editNamesOpen}
+        onClose={() => setEditNamesOpen(false)}
+        title="Edit Template"
+        maxWidth="max-w-xl"
+        footer={
+          <>
+            <PillButton variant="upload" icon={Check} loading={savingNames} onClick={handleSaveNames}>
+              Save
+            </PillButton>
+            <PillButton variant="ghost" icon={X} onClick={() => setEditNamesOpen(false)}>
+              Cancel
+            </PillButton>
+          </>
+        }
+      >
+        {(() => {
+          const labelCls = 'text-[11.5px] font-semibold text-muted'
+          const fieldCls =
+            'w-full px-3 py-2 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light'
+          const roCls = `${fieldCls} bg-surface font-mono font-semibold text-muted`
+          return (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <label className="flex flex-col gap-1 col-span-2 sm:col-span-3">
+                  <span className={labelCls}>Marketplace Name</span>
+                  <input
+                    type="text"
+                    value={presetDraft.marketplaceName}
+                    onChange={(e) => setPreset('marketplaceName', e.target.value)}
+                    placeholder="Meesho"
+                    className={fieldCls}
+                  />
+                </label>
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <label key={n} className="flex flex-col gap-1">
+                    <span className={labelCls}>Category {n}</span>
+                    <input
+                      type="text"
+                      value={presetDraft[`category${n}`]}
+                      onChange={(e) => setPreset(`category${n}`, e.target.value)}
+                      className={fieldCls}
+                    />
+                  </label>
+                ))}
+                <label className="flex flex-col gap-1">
+                  <span className={labelCls}>Version</span>
+                  <input
+                    type="text"
+                    value={presetDraft.exportVersion}
+                    onChange={(e) => setPreset('exportVersion', e.target.value)}
+                    placeholder="v1.0"
+                    className={fieldCls}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-1 border-t border-divider pt-4 grid gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className={labelCls}>Template Name — auto (Marketplace + Category 6)</span>
+                  <input readOnly value={composedName} placeholder="Meesho_Blouses" className={roCls} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className={labelCls}>Template Final Name — auto (Marketplace + Category 1–6 + Version)</span>
+                  <input
+                    readOnly
+                    value={composedFinal}
+                    placeholder="Meesho_Women Fashion_..._v1.0"
+                    className={roCls}
+                  />
+                </label>
+              </div>
+            </>
+          )
+        })()}
+      </Modal>
     </>
   )
 }
@@ -563,7 +713,7 @@ export default function TemplateSettingsListPage() {
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Visible</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template #</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template Name</th>
-              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Marketplace / Category</th>
+              <th className="px-3 py-2.5 text-left font-semibold text-foreground">Template Final Name</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Description</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule Title</th>
               <th className="px-3 py-2.5 text-left font-semibold text-foreground">Rule Description</th>

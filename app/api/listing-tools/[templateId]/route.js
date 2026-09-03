@@ -50,10 +50,18 @@ export async function PATCH(req, { params }) {
     if ('category2' in body) patch.category2 = body.category2?.trim() || ''
     if ('category3' in body) patch.category3 = body.category3?.trim() || ''
     if ('category4' in body) patch.category4 = body.category4?.trim() || ''
+    if ('category5' in body) patch.category5 = body.category5?.trim() || ''
+    if ('category6' in body) patch.category6 = body.category6?.trim() || ''
     if ('exportVersion' in body) patch.exportVersion = body.exportVersion?.trim() || ''
     if ('aiRules' in body) patch.aiRules = body.aiRules
     if ('isAllowedToShow' in body) patch.isAllowedToShow = !!body.isAllowedToShow
-    if ('marketplaceName' in body || 'category1' in body || 'exportVersion' in body) {
+    // An explicit finalName (Template Settings' "Edit Template" mini-dialog, or
+    // the New Design's composed preview) wins and is stored verbatim. Only
+    // fall back to recomputing it from marketplace/category1/version when the
+    // caller didn't send one of its own.
+    if ('finalName' in body) {
+      patch.finalName = body.finalName?.trim() || ''
+    } else if ('marketplaceName' in body || 'category1' in body || 'exportVersion' in body) {
       const mp = 'marketplaceName' in body ? body.marketplaceName : meta.marketplaceName
       const cat = 'category1' in body ? body.category1 : meta.category1
       const ver = 'exportVersion' in body ? body.exportVersion : meta.exportVersion

@@ -10,6 +10,7 @@ import PresetExportSection from './PresetExportSection'
 import AiRulesSection from './AiRulesSection'
 import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX } from '@/lib/listingSheetLayout'
 import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
+import NewTemplateDesign from './NewTemplateDesign'
 
 // Same 3 groups every other Listing Tools screen renders against (see
 // SheetTabs.jsx's TABS / lib/listingTemplates.js GROUPS) — kept as its own
@@ -46,7 +47,7 @@ const GROUPS = [
 const TABS = [{ id: UNMAPPED_TAB_ID, label: 'Unselected' }, ...GROUPS]
 
 const DEFAULT_PRESET = { marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' }
-const DEFAULT_CATEGORIES = { category1: '', category2: '', category3: '', category4: '' }
+const DEFAULT_CATEGORIES = { category1: '', category2: '', category3: '', category4: '', category5: '', category6: '' }
 const DEFAULT_AI_RULES = { marketplace: '', category: '', title: '', description: '', keyword: '', otherRules: '' }
 
 function slugify(label) {
@@ -536,6 +537,32 @@ function RowNumberInput({ label, value, onChange }) {
   )
 }
 
+// The two designs for this whole flow, switched by the segmented control in
+// the page header. "Old Design" is every section rendered below this
+// component's own `return`; "New Design" is components/listing/NewTemplateDesign.jsx
+// (a 1:1 port of source/arshanemi-tools-4.html). Both are pure presentation
+// over the exact same state/handlers/save flow assembled in `api` — the
+// choice is remembered per browser, defaulting to New.
+const DESIGN_MODE_KEY = 'barmeto-tpl-design-mode'
+function DesignModeTabs({ mode, onChange }) {
+  return (
+    <div className="inline-flex flex-shrink-0 rounded-lg border border-divider bg-card p-0.5 text-[12.5px] font-semibold">
+      {[['new', 'New Design'], ['old', 'Old Design']].map(([m, label]) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`rounded-md px-3 py-1.5 transition-colors ${
+            mode === m ? 'bg-accent text-white shadow-sm' : 'text-subtle hover:text-foreground'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Single-page template creation/edit flow. Create mode: upload → pick the
 // Product Data Sheet (+ optional Dropdown Reference Sheet) → group the
 // resulting fields on a Kanban board → configure export preset + AI rules →
@@ -599,6 +626,21 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [loadingExisting, setLoadingExisting] = useState(isEditMode)
   const [loadError, setLoadError] = useState(false)
 
+  // Old vs New design (see DesignModeTabs above) — presentation only; both
+  // designs share this component's state and the exact same parse/group/save
+  // flow, so the choice never affects how an uploaded sheet is grouped.
+  const [designMode, setDesignMode] = useState('new')
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DESIGN_MODE_KEY)
+      if (saved === 'old' || saved === 'new') setDesignMode(saved)
+    } catch {}
+  }, [])
+  function chooseDesignMode(mode) {
+    setDesignMode(mode)
+    try { localStorage.setItem(DESIGN_MODE_KEY, mode) } catch {}
+  }
+
   // Edit mode only — loads the template once and drops it straight onto the
   // Kanban board (skips Sections 1-2 entirely).
   useEffect(() => {
@@ -618,6 +660,8 @@ export default function TemplateSettingsWizard({ templateId }) {
           category2: data.template.category2 || '',
           category3: data.template.category3 || '',
           category4: data.template.category4 || '',
+          category5: data.template.category5 || '',
+          category6: data.template.category6 || '',
         })
         setPresetData({
           marketplaceName: data.template.marketplaceName || '',
@@ -735,6 +779,9 @@ export default function TemplateSettingsWizard({ templateId }) {
       const dropHeaderRowIdx = parseRowInput(dropdownHeaderRow, 0)
       const dropValuesRowIdx = parseRowInput(dropdownValuesRow, dropHeaderRowIdx + 1)
       const cols = buildDropdownColumns(XLSX, workbook, dropdownSheetName, dropHeaderRowIdx, dropValuesRowIdx)
+      // buildFields already auto-separates every header by the sheet's own
+      // group-label row (matchGroupLabel), and anything it can't recognise
+      // falls to Unselected / "Other" — same behaviour in both designs now.
       const built = buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx)
       setDropdownColumns(cols)
       setFields(withDefaultHeaders(built))
@@ -750,23 +797,94 @@ export default function TemplateSettingsWizard({ templateId }) {
   function bulkAssignFields(ids, groupId) {
     setFields((prev) => prev.map((f) => (ids.includes(f.id) ? { ...f, groupId } : f)))
   }
+  // New Design drag-and-drop: reorder a header relative to another one
+  // (Old Design's GroupTabsStep only ever moved a card *between* groups,
+  // never within). Splice `dragId` out and drop it back in at whatever
+  // index `targetId` currently sits at.
+  function moveFieldBefore(dragId, targetId, after = false) {
+    if (dragId === targetId) return
+    setFields((prev) => {
+      const from = prev.findIndex((f) => f.id === dragId)
+      if (from === -1) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      let to = next.findIndex((f) => f.id === targetId)
+      if (to === -1) return prev
+      if (after) to += 1 // drop landed on the target's trailing half
+      next.splice(to, 0, moved)
+      return next
+    })
+  }
+  // New Design's "Sort Group" / "Sort Original" — reorders headers *inside*
+  // each group only, never across groups. mode 'label' = A→Z by label,
+  // 'original' = by the header's original sheet-column index. Built-in
+  // default headers always stay pinned at the top of their group in their
+  // existing relative order (they can't be moved — see NewTemplateDesign).
+  function sortFieldsWithinGroups(mode) {
+    setFields((prev) => {
+      const groupsInOrder = []
+      const buckets = new Map()
+      for (const f of prev) {
+        if (!buckets.has(f.groupId)) { buckets.set(f.groupId, []); groupsInOrder.push(f.groupId) }
+        buckets.get(f.groupId).push(f)
+      }
+      const cmp = (a, b) => {
+        const ad = a.source === 'default' ? 0 : 1
+        const bd = b.source === 'default' ? 0 : 1
+        if (ad !== bd) return ad - bd
+        if (ad === 0) return 0 // keep defaults' own order
+        if (mode === 'original') return (a.sourceColIndex ?? 1e9) - (b.sourceColIndex ?? 1e9)
+        return String(a.label || '').localeCompare(String(b.label || ''))
+      }
+      const out = []
+      for (const gid of groupsInOrder) out.push(...buckets.get(gid).slice().sort(cmp))
+      return out
+    })
+  }
+  // Section 2's two sheet <select>s for the New Design — kept here so the
+  // row-input re-defaulting logic lives in one spot. Old Design has its own
+  // inline copy on its selects; both do the exact same thing.
+  function selectDataSheet(val) {
+    setDataSheetName(val)
+    setDataGroupRow(val ? GROUP_LABEL_ROW_INDEX + 1 : '')
+    setDataHeaderRow(val ? HEADER_ROW_INDEX + 1 : '')
+    if (!val) { setShowGroups(false); setFields([]); setDropdownColumns({}) }
+  }
+  function selectDropdownSheet(val) {
+    setDropdownSheetName(val)
+    if (!val || !workbook) { setDropdownHeaderRow(''); setDropdownValuesRow(''); return }
+    import('xlsx').then((XLSX) => {
+      const { header, values } = computeDropdownRowDefaults(XLSX, workbook, val)
+      setDropdownHeaderRow(header + 1)
+      setDropdownValuesRow(values + 1)
+    })
+  }
   // A manually-added field, not extracted from the upload — dropped straight
   // into whichever group's "+ Add Header" was clicked, dummy-named and
   // ready to rename/configure like any other card.
   function addHeaderToGroup(groupId) {
     const id = `hdr_new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    setFields((prev) => [...prev, {
-      id,
-      label: 'Header New',
-      groupId,
-      dataType: 'text',
-      dropdownColumn: '',
-      dropdownValues: [],
-      isUniqueKeyPart: false,
-      // Identity — hand-added via "+ Add Header", not extracted from an
-      // upload (source: 'upload') or a built-in default (source: 'default').
-      source: 'manual',
-    }])
+    setFields((prev) => {
+      // Auto-name "Header 1", "Header 2", … — one past the highest such label
+      // already present, so repeated clicks keep counting up.
+      const used = prev
+        .map((f) => /^header\s+(\d+)$/i.exec(String(f.label || '').trim()))
+        .filter(Boolean)
+        .map((m) => Number(m[1]))
+      const nextNo = used.length ? Math.max(...used) + 1 : 1
+      return [...prev, {
+        id,
+        label: `Header ${nextNo}`,
+        groupId,
+        dataType: 'text',
+        dropdownColumn: '',
+        dropdownValues: [],
+        isUniqueKeyPart: false,
+        // Identity — hand-added via "Add Header", not extracted from an
+        // upload (source: 'upload') or a built-in default (source: 'default').
+        source: 'manual',
+      }]
+    })
   }
   // Removes a header entirely — not a move to Unselected, gone from `fields`
   // for good (until Save, nothing's persisted either way).
@@ -860,7 +978,16 @@ export default function TemplateSettingsWizard({ templateId }) {
     setSavedTemplate(null)
   }
 
-  async function handleSave() {
+  async function handleSave(opts) {
+    // New Design (create mode) composes the Template Name automatically from
+    // Marketplace + Category 6 and passes it here, so it isn't kept in
+    // `templateNameInput` state. Everything else — Old Design, and edit mode —
+    // still uses the typed `templateNameInput`. `opts` may be a DOM event
+    // (some buttons wire `onClick={handleSave}` directly), hence the shape check.
+    const templateNameToSave = (opts && typeof opts.templateName === 'string' ? opts.templateName : templateNameInput || '').trim()
+    // New Design also passes its composed "Save Final Name" so the stored
+    // value matches the preview; omitted everywhere else (server computes it).
+    const finalNameToSave = opts && typeof opts.finalName === 'string' ? opts.finalName.trim() : undefined
     // Defense in depth — the Save button is already disabled while any
     // header sits in a custom group (see hasStuckFields below), but guard
     // here too in case that state ever gets out of sync.
@@ -868,7 +995,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       addToast('Move headers out of custom groups before saving — see the notice above Save.', 'error')
       return
     }
-    if (!templateNameInput.trim()) {
+    if (!templateNameToSave) {
       addToast('Enter a Template Name before saving.', 'error')
       return
     }
@@ -926,13 +1053,16 @@ export default function TemplateSettingsWizard({ templateId }) {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            templateName: templateNameInput,
+            templateName: templateNameToSave,
+            ...(finalNameToSave !== undefined ? { finalName: finalNameToSave } : {}),
             description: presetData.description,
             marketplaceName: presetData.marketplaceName,
             category1: categoriesData.category1,
             category2: categoriesData.category2,
             category3: categoriesData.category3,
             category4: categoriesData.category4,
+            category5: categoriesData.category5,
+            category6: categoriesData.category6,
             exportVersion: presetData.exportVersion,
             aiRules: aiRulesData,
             sheets: allGrouped,
@@ -944,7 +1074,8 @@ export default function TemplateSettingsWizard({ templateId }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            templateName: templateNameInput,
+            templateName: templateNameToSave,
+            ...(finalNameToSave !== undefined ? { finalName: finalNameToSave } : {}),
             description: presetData.description,
             sourceFileName: fileName,
             sourceFileUrl: sourceFileUrl || null,
@@ -958,6 +1089,8 @@ export default function TemplateSettingsWizard({ templateId }) {
             category2: categoriesData.category2,
             category3: categoriesData.category3,
             category4: categoriesData.category4,
+            category5: categoriesData.category5,
+            category6: categoriesData.category6,
             exportVersion: presetData.exportVersion,
             aiRules: aiRulesData,
           }),
@@ -1003,6 +1136,23 @@ export default function TemplateSettingsWizard({ templateId }) {
   // save if we let it through, so Save stays disabled until these are empty.
   const stuckFields = fields.filter((f) => customTabIds.has(f.groupId))
   const stuckGroupNames = [...new Set(stuckFields.map((f) => tabLabels[f.groupId] || customTabs.find((t) => t.id === f.groupId)?.label || f.groupId))]
+
+  // Everything the New Design (components/listing/NewTemplateDesign.jsx)
+  // needs — the same state + handlers the Old Design sections below read
+  // straight from scope, bundled so both drive one identical
+  // parse / group / preset / save flow.
+  const api = {
+    isEditMode, showGroups,
+    fileName, parsing, sheetMeta, uploadingSource, sourceFileUrl, handleFile,
+    dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
+    dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
+    dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
+    fields, updateField, deleteHeader, addHeaderToGroup, moveFieldBefore, sortFieldsWithinGroups, bulkAssignFields,
+    templateNameInput, setTemplateNameInput, templateNumber,
+    categoriesData, setCategoriesData, presetData, setPresetData, savePreset, currentPreset,
+    handleSave, saving, savedTemplate, resetWizard, stuckFields,
+  }
+
   if (isEditMode && loadingExisting) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -1024,16 +1174,21 @@ export default function TemplateSettingsWizard({ templateId }) {
 
   return (
     <div className="w-full mx-auto px-6 py-8 space-y-5">
-      <div>
-        <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
-        <p className="text-[13px] text-subtle mt-0.5">
-          {isEditMode
-            ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
-            : "Upload a master sheet and pick its Product Data Sheet — its headers appear on the Kanban board below automatically. Drag headers between groups, or bulk-assign several at once."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
+          <p className="text-[13px] text-subtle mt-0.5">
+            {isEditMode
+              ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
+              : 'Upload a master sheet, group its headers, drag them where they belong, set the export preset, and save.'}
+          </p>
+        </div>
+        <DesignModeTabs mode={designMode} onChange={chooseDesignMode} />
       </div>
 
-      {!isEditMode && (
+      {designMode === 'new' && <NewTemplateDesign api={api} />}
+
+      {designMode === 'old' && !isEditMode && (
         <>
           {/* Section 1 — Upload */}
           <div className="border border-divider rounded-lg overflow-hidden bg-card">
@@ -1150,6 +1305,8 @@ export default function TemplateSettingsWizard({ templateId }) {
         </>
       )}
 
+      {designMode === 'old' && (
+      <>
       {/* Section 3 — Kanban groups + mapping */}
       <div className="border border-divider rounded-lg overflow-hidden bg-card">
         <div className="px-4 py-2.5 bg-surface border-b border-divider flex items-center justify-between">
@@ -1254,6 +1411,8 @@ export default function TemplateSettingsWizard({ templateId }) {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }
