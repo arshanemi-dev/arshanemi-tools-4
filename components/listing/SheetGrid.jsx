@@ -5,6 +5,7 @@ import MultiSelectCell from './MultiSelectCell'
 import ImageCell from './ImageCell'
 import FormulaCell from './FormulaCell'
 import AutoGrowTextarea from './AutoGrowTextarea'
+import HeaderInfoTip from './HeaderInfoTip'
 import { recomputeFormulas } from './formula'
 import { useBulkImageUpload } from './useBulkImageUpload'
 
@@ -69,6 +70,11 @@ export default function SheetGrid({
   // may be a filtered/searched view, so an index into it wouldn't line up with the caller's own
   // unfiltered array) plus that row's index within *this* `rows` prop for convenience.
   onDeleteRow,
+  // Opt-in "ⓘ" note button on the right of every column header (see
+  // HeaderInfoTip.jsx) — on for the stacked Auto Details / Product Details
+  // layout, off everywhere else so other SheetGrid callers are visually
+  // unchanged.
+  headerInfo = false,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -209,7 +215,7 @@ export default function SheetGrid({
                 }`}
               >
                 <div className="flex items-center gap-1.5">
-                  <span title={h.description || undefined}>{h.label}</span>
+                  <span title={headerInfo ? undefined : h.description || undefined}>{h.label}</span>
                   {(h.dataType === 'dropdown' || h.dataType === 'multiselect' || pickerOptions[h.id]?.length > 0) && (
                     <ChevronDown className="w-3 h-3 text-subtle" />
                   )}
@@ -223,6 +229,7 @@ export default function SheetGrid({
                       <Filter className="w-3 h-3" />
                     </button>
                   )}
+                  {headerInfo && <HeaderInfoTip label={h.label} description={h.description} className="ml-auto" />}
                 </div>
                 {activeFilterHeaderId === h.id && (
                   <input

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { X } from 'lucide-react'
 import { usePathname, useSearchParams } from 'next/navigation'
 
 // Static dark sidebar — the only nav this app has now that the local
@@ -24,7 +25,7 @@ const BASE_NAV_ITEMS = [
 const TEMPLATE_SETTINGS_ITEM = { href: '/listing-tools/template-settings', label: 'Template Settings' }
 const TEMPLATE_ACCESS_ITEM = { href: '/listing-tools/template-access', label: 'Template Access' }
 
-export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
+export default function ListingToolsSidebar({ role, templateSettingsAllowed, mobileOpen = false, onClose = () => {} }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [myTemplates, setMyTemplates] = useState([])
@@ -52,6 +53,10 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
     return () => { cancelled = true }
   }, [])
 
+  // Close the mobile drawer whenever the route changes — a tapped nav link
+  // should navigate and dismiss the overlay, not leave it sitting open.
+  useEffect(() => { onClose() }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const isActive = (href) => (href === '/listing-tools' ? pathname === '/listing-tools' : pathname.startsWith(href))
   // Which of the three dropdown-driven group pages (Auto Listing, Product Details, Brand
   // Details) the viewer is currently on, and which template's ?template= is open there — drives
@@ -64,9 +69,29 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
   const activeTemplateId = activateTemplateNav ? searchParams.get('template') : null
 
   return (
-    <aside className="w-48 flex-shrink-0 h-full bg-background flex flex-col overflow-y-auto py-5
+    <>
+      {/* Mobile drawer backdrop */}
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-56 h-full bg-background flex flex-col overflow-y-auto py-5
+      border-r border-divider shadow-xl transition-transform duration-300 ease-out
+      lg:static lg:z-auto lg:w-48 lg:flex-shrink-0 lg:translate-x-0 lg:border-r-0 lg:shadow-none
+      ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
       [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:transparent
-      [&::-webkit-scrollbar-thumb]:bg-foreground/20 [&::-webkit-scrollbar-thumb]:rounded-full">
+      [&::-webkit-scrollbar-thumb]:bg-foreground/20 [&::-webkit-scrollbar-thumb]:rounded-full`}>
+      <button
+        onClick={onClose}
+        aria-label="Close menu"
+        className="lg:hidden self-end mr-4 mb-2 -mt-1 p-1.5 rounded-lg text-foreground/60 hover:text-foreground hover:bg-foreground/5 transition-colors"
+      >
+        <X size={18} />
+      </button>
       <nav className="flex flex-col">
         {navItems.map((item, i) =>
           i === 0|| i === 1|| i === 2 ? (
@@ -107,6 +132,7 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed }) {
           )
         )}
       </nav>
-    </aside>
+      </aside>
+    </>
   )
 }

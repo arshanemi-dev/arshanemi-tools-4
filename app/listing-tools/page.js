@@ -26,7 +26,7 @@ export default function AutoListingPage() {
   })
 
   return (
-    <div className="min-h-[70vh] bg-surface px-6 py-6">
+    <div className="min-h-[70vh] bg-surface px-4 sm:px-6 py-6">
       <div className="relative max-w-md mb-5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
         <input
@@ -37,8 +37,8 @@ export default function AutoListingPage() {
         />
       </div>
 
-      <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        <table className="w-full text-[13px]">
+      <div className="border border-divider rounded-lg overflow-x-auto bg-card">
+        <table className="w-full min-w-[640px] text-[13px]">
           <thead>
             <tr className="bg-card border-b border-divider">
               <th className="px-4 py-2.5 text-left font-semibold text-foreground w-40">My Template</th>

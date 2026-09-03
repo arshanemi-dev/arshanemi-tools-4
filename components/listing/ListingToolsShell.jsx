@@ -15,6 +15,7 @@ import DashboardTopbar from '@/components/dashboard/DashboardTopbar'
 export default function ListingToolsShell({ initialUser, initialTemplateSettingsAllowed, headerHidden, children }) {
   const [user, setUser] = useState(initialUser)
   const [templateSettingsAllowed, setTemplateSettingsAllowed] = useState(initialTemplateSettingsAllowed)
+  const [navOpen, setNavOpen] = useState(false)
 
   useEffect(() => {
     if (initialUser || !isLoggedIn()) return
@@ -32,11 +33,16 @@ export default function ListingToolsShell({ initialUser, initialTemplateSettings
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      {!headerHidden && <DashboardTopbar user={user} />}
+      {!headerHidden && <DashboardTopbar user={user} onMenuClick={() => setNavOpen(true)} />}
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <ListingToolsSidebar role={user?.role} templateSettingsAllowed={templateSettingsAllowed} />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <ListingToolsSidebar
+          role={user?.role}
+          templateSettingsAllowed={templateSettingsAllowed}
+          mobileOpen={navOpen}
+          onClose={() => setNavOpen(false)}
+        />
+        <main className="flex-1 overflow-y-auto min-w-0">{children}</main>
       </div>
     </div>
   )

@@ -101,15 +101,26 @@ export default function ChooseTemplatePage() {
           </thead>
           <tbody>
             {(templates === null || mine === null) && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">Loading…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-subtle">Loading…</td></tr>
             )}
             {templates !== null && mine !== null && filtered.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-subtle">No templates yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-subtle">No templates yet.</td></tr>
             )}
             {templates !== null && mine !== null && filtered.map((t) => {
               const isMine = mine.has(t.id)
               return (
                 <tr key={t.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
+                  <td className="px-4 py-3 text-subtle font-mono whitespace-nowrap">{t.templateNumber || '—'}</td>
+                  <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{t.templateName || '—'}</td>
+                  <td className="px-4 py-3 max-w-[220px]">
+                    <span
+                      className="block truncate font-mono text-[12.5px] text-subtle"
+                      title={t.finalName || '—'}
+                    >
+                      {t.finalName || '—'}
+                    </span>
+                  </td>
+
                   {/* My Template — a badge only appears once you've actually
                       added this template; the − removes it. */}
                   <td className="px-4 py-3">

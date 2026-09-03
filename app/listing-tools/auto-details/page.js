@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Search, Download, UploadCloud, PlusCircle, Save, Sparkles, Monitor } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
-import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
+import FlexSheet from '@/components/listing/FlexSheet'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
@@ -67,7 +67,6 @@ function ScopedAutoDetails({ templateId }) {
   const [search, setSearch] = useState('')
   const [content, setContent] = useState(null)
   const [sessionRows, setSessionRows] = useState({})
-  const [activeGroup, setActiveGroup] = useState(ALL_GROUPS[0])
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveGate, setSaveGate] = useState(null)
@@ -165,11 +164,14 @@ function ScopedAutoDetails({ templateId }) {
   // toolbar dropdown. Only design_system ever carries this header.
   const productGroupHeaderId = sheetsByGroup.design_system?.headers.find((h) => h.isProductGroupField)?.id
 
-  const sheet = sheetsByGroup[activeGroup]
-  const activeSessionRows = useMemo(
-    () => sessionRows[activeGroup] || (sheet ? [blankRow(sheet.headers)] : []),
-    [sessionRows, activeGroup, sheet]
-  )
+  // Per-group derivations — every real group is rendered at once now (no tab
+  // strip), so what used to be the single `activeGroup` sheet / session rows
+  // / picker options / filtered rows each become a small function of the
+  // group being rendered. Behaviour for any one group is unchanged.
+  function sessionRowsFor(group) {
+    const gsheet = sheetsByGroup[group]
+    return sessionRows[group] || (gsheet ? [blankRow(gsheet.headers)] : [])
+  }
 
   // Same "browsable but still free-typeable" datalist treatment Product
   // Number's own cell already gets (buildPickerOptions/selectorOptionsFor,
@@ -179,20 +181,18 @@ function ScopedAutoDetails({ templateId }) {
   // toolbar dropdown used to source. Picking a suggested value fires the
   // exact same onChange path as typing, so debouncedGroupAutoFill below
   // still fires and backfills the rest of this sheet from it.
-  const pickerOptions = useMemo(() => {
-    const base = sheet ? buildPickerOptions(sheet.headers, ownSheetsByGroup) : {}
+  function pickerOptionsFor(group) {
+    const gsheet = sheetsByGroup[group]
+    const base = gsheet ? buildPickerOptions(gsheet.headers, ownSheetsByGroup) : {}
     if (productGroupHeaderId && groupNames.length) base[productGroupHeaderId] = groupNames
     return base
-  }, [sheet, ownSheetsByGroup, productGroupHeaderId, groupNames])
-  const filteredRows = useMemo(() => {
-    if (!search.trim()) return activeSessionRows
-    const q = search.toLowerCase()
-    return activeSessionRows.filter((r, i) => i === activeSessionRows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
-  }, [activeSessionRows, search])
+  }
 
-  function onChangeGroup(g) {
-    setActiveGroup(g)
-    setSearch('')
+  function filteredRowsFor(group) {
+    const rows = sessionRowsFor(group)
+    if (!search.trim()) return rows
+    const q = search.toLowerCase()
+    return rows.filter((r, i) => i === rows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
   }
 
   // Deleting a row here never hits the backend directly for the row's OWN sheet content (see the
@@ -214,13 +214,13 @@ function ScopedAutoDetails({ templateId }) {
   // one-row-per-product), so matching it by value could wipe out an unrelated, still-live
   // product's own row; it still loses its row at this index to keep every group's row COUNT in
   // sync, the same invariant handleRowsChange/extendRows maintain elsewhere.
-  function handleDeleteRow(row) {
-    const rowIndex = activeSessionRows.indexOf(row)
+  function handleDeleteRow(group, row) {
+    const rowIndex = (sessionRows[group] || []).indexOf(row)
     if (rowIndex === -1) return
 
-    const identityGroups = linkedIdentityGroups(activeGroup, sheetsByGroup)
+    const identityGroups = linkedIdentityGroups(group, sheetsByGroup)
     const isProductIdentity = identityGroups.includes('design_system')
-    const value = isProductIdentity ? keyValueOf(activeGroup, row, sheetsByGroup) : ''
+    const value = isProductIdentity ? keyValueOf(group, row, sheetsByGroup) : ''
 
     if (value) {
       fetch(`/api/listing-tools/product-details-history?${new URLSearchParams({ templateId, productNumber: value })}`, {
@@ -578,26 +578,27 @@ function ScopedAutoDetails({ templateId }) {
   // Defense in depth: see product-details/page.js's own copy of this
   // comment — a field that already has a value is never overwritten here,
   // no matter what the response contained.
-  function handleAiFillRow(rowIndex, fields) {
-    const nextRows = activeSessionRows.map((r, i) => {
+  function handleAiFillRow(group, rowIndex, fields) {
+    const nextRows = (sessionRows[group] || []).map((r, i) => {
       if (i !== rowIndex) return r
       const toApply = Object.fromEntries(Object.entries(fields).filter(([k]) => !String(r[k] ?? '').trim()))
       if (Object.keys(toApply).length === 0) return r
       const nextAiFilled = Array.from(new Set([...(r.aiFilled || []), ...Object.keys(toApply)]))
       return { ...r, ...toApply, aiFilled: nextAiFilled }
     })
-    handleRowsChange(activeGroup, nextRows)
+    handleRowsChange(group, nextRows)
   }
 
   // Auto-triggered the moment an image cell gets a usable value (plan §6) —
   // only actually calls the AI route when the row has an empty
   // Brand/Highlights header to fill, so it's never a wasted coin.
-  function handleImageUploaded(rowIndex, headerId, url) {
-    const row = activeSessionRows[rowIndex]
-    if (!row || !sheet) return
-    const targets = computeVisionTargets({ headers: sheet.headers, row: { ...row, [headerId]: url } })
+  function handleImageUploaded(group, rowIndex, headerId, url) {
+    const gsheet = sheetsByGroup[group]
+    const row = (sessionRows[group] || [])[rowIndex]
+    if (!row || !gsheet) return
+    const targets = computeVisionTargets({ headers: gsheet.headers, row: { ...row, [headerId]: url } })
     if (targets.length === 0) return
-    fillRowFromImage(activeGroup, rowIndex, headerId, handleAiFillRow)
+    fillRowFromImage(group, rowIndex, headerId, (ri, fields) => handleAiFillRow(group, ri, fields))
   }
 
   // "AI Fill Up" — runs whatever scope the AiFillUpModal picker confirmed
@@ -658,14 +659,15 @@ function ScopedAutoDetails({ templateId }) {
   // header-row formula box) — persists via the same sheet PATCH route,
   // sending the merged (existing + this session's) rows alongside the
   // updated headers so an in-progress session's rows aren't dropped.
-  function handleHeaderChange(headerId, patch) {
-    if (!sheet) return
-    const nextHeaders = sheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
-    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, headers: nextHeaders } : s)) }))
-    fetch(`/api/listing-tools/${templateId}/sheets/${activeGroup}`, {
+  function handleHeaderChange(group, headerId, patch) {
+    const gsheet = sheetsByGroup[group]
+    if (!gsheet) return
+    const nextHeaders = gsheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === group ? { ...s, headers: nextHeaders } : s)) }))
+    fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: nextHeaders, rows: mergedRowsFor(activeGroup, sessionRows[activeGroup]) }),
+      body: JSON.stringify({ headers: nextHeaders, rows: mergedRowsFor(group, sessionRows[group]) }),
     }).then(async (res) => {
       if (!res.ok && res.status !== 401) {
         const data = await res.json().catch(() => ({}))
@@ -799,44 +801,53 @@ function ScopedAutoDetails({ templateId }) {
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
 
-      {sheet && (
-        <div className="border border-divider rounded-lg overflow-hidden bg-card">
-          <SheetTabs variant="dark" active={activeGroup} onChange={onChangeGroup} sheets={content?.sheets} />
-          <SheetGrid
-            headers={sheet.headers}
-            rows={filteredRows}
-            onRowsChange={(nextRows) => handleRowsChange(activeGroup, nextRows)}
-            uploadUrl={`/api/listing-tools/${templateId}/images`}
-            pickerOptions={pickerOptions}
-            loadingCells={loadingCells}
-            onCellChange={(headerId, value, rowIndex, row) => {
-              const sameGroupExtra = resolveLinkedFill(sheet.headers, headerId, value, -1, ownSheetsByGroup)
-              // `row` already has this edit applied (see SheetGrid.jsx's
-              // resolveRow); merge in whatever Rule A just resolved too, so
-              // picking an *existing* record propagates its full row, not
-              // just the one field that was clicked. Always attempted, for
-              // whichever group is currently active — connected headers
-              // work the same regardless of which group is the source; a
-              // group with nothing linked back to it is just a no-op here.
-              const fullRow = { ...row, ...(sameGroupExtra || {}) }
-              const crossGroupUpdates = propagateFromGroup(activeGroup, fullRow, ownSheetsByGroup)
-              handleCellReconciliation(rowIndex, headerId, activeGroup, fullRow, crossGroupUpdates)
+      {/* Every real group on one screen at once — no tab strip. Product
+          Details keeps the real scrolling SheetGrid table; the rest render as
+          flex blocks (FlexSheet), no group-name heading. Same handlers,
+          scoped per block instead of via a single active group. */}
+      {content && realGroups.map((g) => {
+        const gsheet = sheetsByGroup[g]
+        const blockProps = {
+          headers: gsheet.headers,
+          rows: filteredRowsFor(g),
+          onRowsChange: (nextRows) => handleRowsChange(g, nextRows),
+          uploadUrl: `/api/listing-tools/${templateId}/images`,
+          pickerOptions: pickerOptionsFor(g),
+          loadingCells,
+          onCellChange: (headerId, value, rowIndex, row) => {
+            const sameGroupExtra = resolveLinkedFill(gsheet.headers, headerId, value, -1, ownSheetsByGroup)
+            // `row` already has this edit applied (see SheetGrid.jsx's
+            // resolveRow); merge in whatever Rule A just resolved too, so
+            // picking an *existing* record propagates its full row, not
+            // just the one field that was clicked. Always attempted, for
+            // whichever group this block is — connected headers work the
+            // same regardless of which group is the source; a group with
+            // nothing linked back to it is just a no-op here.
+            const fullRow = { ...row, ...(sameGroupExtra || {}) }
+            const crossGroupUpdates = propagateFromGroup(g, fullRow, ownSheetsByGroup)
+            handleCellReconciliation(rowIndex, headerId, g, fullRow, crossGroupUpdates)
 
-              // Typing into the Product Group cell itself is what now triggers the group
-              // backfill (see handleGroupSelect/debouncedGroupAutoFill) — no more manual
-              // toolbar dropdown to click first.
-              if (productGroupHeaderId && headerId === productGroupHeaderId) {
-                debouncedGroupAutoFill(value, rowIndex)
-              }
+            // Typing into the Product Group cell itself is what triggers the group
+            // backfill (see handleGroupSelect/debouncedGroupAutoFill) — that header
+            // only ever lives on the design_system block.
+            if (productGroupHeaderId && headerId === productGroupHeaderId) {
+              debouncedGroupAutoFill(value, rowIndex)
+            }
 
-              return sameGroupExtra
-            }}
-            onHeaderChange={handleHeaderChange}
-            onImageUploaded={handleImageUploaded}
-            onDeleteRow={handleDeleteRow}
-          />
-        </div>
-      )}
+            return sameGroupExtra
+          },
+          onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
+          onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
+          onDeleteRow: (row) => handleDeleteRow(g, row),
+        }
+        return (
+          <div key={g}>
+            {g === 'design_system'
+              ? <SheetGrid headerInfo {...blockProps} />
+              : <FlexSheet {...blockProps} />}
+          </div>
+        )
+      })}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
       <BillingGateModal gate={saveGate} onClose={() => setSaveGate(null)} onRetry={handleSave} />
@@ -856,7 +867,7 @@ function ScopedAutoDetails({ templateId }) {
             headers: sheetsByGroup[group]?.headers || [],
             rows: sessionRows[group] || [],
           }))}
-          defaultGroup={activeGroup}
+          defaultGroup={realGroups[0]}
           onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}
         />
       )}

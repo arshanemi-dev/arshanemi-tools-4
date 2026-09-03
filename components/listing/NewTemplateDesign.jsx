@@ -1,10 +1,18 @@
 'use client'
 import { useRef, useState } from 'react'
 import Link from 'next/link'
-import { UploadCloud, Save, Bookmark, Plus, Trash2, Check, Loader2, ArrowLeft, X, FileSpreadsheet } from 'lucide-react'
+import { UploadCloud, Save, Bookmark, Plus, Trash2, Check, Loader2, ArrowLeft, X, FileSpreadsheet, Link2 } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 import { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import NewDesignColumnModal from './NewDesignColumnModal'
+import Tooltip from './Tooltip'
+
+// Ids a header auto-fills from — the newer multi-select `linkedHeaderIds`
+// array, falling back to the single legacy `linkedHeaderId`.
+function linkedIdsOf(field) {
+  if (Array.isArray(field?.linkedHeaderIds) && field.linkedHeaderIds.length) return field.linkedHeaderIds
+  return field?.linkedHeaderId ? [field.linkedHeaderId] : []
+}
 
 // New Design — a 1:1 port of source/arshanemi-tools-4.html, driven entirely
 // by the shared `api` bag assembled in TemplateSettingsWizard.jsx. Nothing
@@ -32,49 +40,46 @@ import NewDesignColumnModal from './NewDesignColumnModal'
 //  - "Save" (the blue button) = save preset; the Template No field is always
 //    read-only and is filled in automatically once the template is saved
 const SECTIONS = [
-  { id: 'design_system', title: 'Product Details', flag: 'blue' },
+  { id: 'design_system', title: 'Product Details', flag: 'red' }, // same red as the "Fix" flag
   { id: 'compulsory', title: 'Compulsory', flag: 'green' },
-  { id: 'prefill', title: 'Brand Details', flag: 'amber' }, // highlighted
+  { id: 'prefill', title: 'Brand Details', flag: 'blue' },
   { id: UNMAPPED_TAB_ID, title: 'Other', flag: 'gray' }, // muted / de-emphasised staging bucket
 ]
 // Every flag box ALWAYS shows its own colour border. Only the tick (and a
 // faint tint) appears when it's the active choice. Written as full literal
-// class strings so Tailwind's scanner keeps them. Brand Details = amber
-// (highlighted); Other = plain gray (the low-emphasis "unassigned" bucket).
+// class strings so Tailwind's scanner keeps them. Product Details = red
+// (shares the Fix red), Brand Details = blue, Other = plain gray.
 const FLAG_BORDER = {
-  blue: 'border-[#2563eb]',
-  green: 'border-[#16a34a]',
-  amber: 'border-[#d97706]',
-  gray: 'border-[#9aa2ad]',
   red: 'border-[#e02424]',
+  green: 'border-[#16a34a]',
+  blue: 'border-[#2563eb]',
+  gray: 'border-[#9aa2ad]',
 }
 const FLAG_TICK = {
-  blue: 'text-[#2563eb]',
-  green: 'text-[#16a34a]',
-  amber: 'text-[#b45309]',
-  gray: 'text-[#6b7280]',
   red: 'text-[#e02424]',
+  green: 'text-[#16a34a]',
+  blue: 'text-[#2563eb]',
+  gray: 'text-[#6b7280]',
 }
 const FLAG_TINT = {
-  blue: 'bg-[#2563eb]/10',
-  green: 'bg-[#16a34a]/10',
-  amber: 'bg-[#f59e0b]/15',
-  gray: 'bg-[#9aa2ad]/12',
   red: 'bg-[#e02424]/10',
+  green: 'bg-[#16a34a]/10',
+  blue: 'bg-[#2563eb]/10',
+  gray: 'bg-[#9aa2ad]/12',
 }
 // Per-group heading colour. "Other" stays muted (text-subtle) so it reads as
 // the low-emphasis staging bucket.
 const SECTION_TITLE = {
-  blue: 'text-[#2563eb]',
+  red: 'text-[#e02424]',
   green: 'text-[#16a34a]',
-  amber: 'text-[#b45309]',
+  blue: 'text-[#2563eb]',
   gray: 'text-subtle',
 }
 // Card flag order follows the group order above: Product Details, Compulsory,
 // Brand Details, Other.
-const GROUP_FLAGS = ['blue', 'green', 'amber', 'gray']
-const FLAG_TO_GROUP = { blue: 'design_system', green: 'compulsory', amber: 'prefill', gray: UNMAPPED_TAB_ID }
-const GROUP_TO_FLAG = { design_system: 'blue', compulsory: 'green', prefill: 'amber', [UNMAPPED_TAB_ID]: 'gray' }
+const GROUP_FLAGS = ['red', 'green', 'blue', 'gray']
+const FLAG_TO_GROUP = { red: 'design_system', green: 'compulsory', blue: 'prefill', gray: UNMAPPED_TAB_ID }
+const GROUP_TO_FLAG = { design_system: 'red', compulsory: 'green', prefill: 'blue', [UNMAPPED_TAB_ID]: 'gray' }
 
 const inputCls =
   'w-full h-[38px] rounded-md border border-[#d7dce2] bg-background px-2.5 text-[14px] text-foreground outline-none focus:border-[#9dbfe8] placeholder:text-subtle'
@@ -497,13 +502,13 @@ export default function NewTemplateDesign({ api }) {
             Add Header
           </button>
           {[
-            ['blue', 'Product details'],
+            ['red', 'Product details'],
             ['green', 'Cumpulsery'],
-            ['amber', 'Brand Details'],
+            ['blue', 'Brand Details'],
             ['gray', 'Other'],
             ['red', 'Fix'],
           ].map(([k, label]) => (
-            <span key={k} className="ml-4 flex items-center whitespace-nowrap text-[14.5px] text-muted">
+            <span key={label} className="ml-4 flex items-center whitespace-nowrap text-[14.5px] text-muted">
               <span className="mr-2">
                 <FlagBox kind={k} on />
               </span>
@@ -545,6 +550,9 @@ export default function NewTemplateDesign({ api }) {
                 ) : (
                   cards.map((field) => {
                     const locked = isLocked(field)
+                    const linkedNames = linkedIdsOf(field)
+                      .map((id) => fields.find((f) => f.id === id)?.label)
+                      .filter(Boolean)
                     return (
                       <div
                         key={field.id}
@@ -561,7 +569,7 @@ export default function NewTemplateDesign({ api }) {
                         onDrop={(e) => onCardDrop(e, field)}
                         className="mb-1 shrink-0 grow-0 basis-full px-[7px] sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5 2xl:basis-[12.5%]"
                       >
-                        <div className="mb-1 flex gap-2 pl-1">
+                        <div className="mb-1 flex items-center gap-2 pl-1">
                           {/* Default header: ONLY the red (locked, checked)
                               flag shows. A header from the sheet or added by
                               hand shows the four group flags and NO red flag —
@@ -579,9 +587,39 @@ export default function NewTemplateDesign({ api }) {
                               />
                             ))
                           )}
+
+                          {/* Right end: shows when this header auto-fills from
+                              at least one other header. Click → how many + which. */}
+                          {linkedNames.length > 0 && (
+                            <Tooltip
+                              trigger="click"
+                              align="end"
+                              className="ml-auto"
+                              content={
+                                <div>
+                                  <p className="font-semibold">
+                                    {linkedNames.length} field{linkedNames.length === 1 ? '' : 's'} mapped
+                                  </p>
+                                  <ul className="mt-1 space-y-0.5 text-white/75">
+                                    {linkedNames.map((n) => (
+                                      <li key={n} className="max-w-[220px] truncate">• {n}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              }
+                            >
+                              <button
+                                type="button"
+                                title="Mapped fields"
+                                className="flex h-5 w-5 items-center justify-center rounded-full text-[#2563eb] hover:bg-[#2563eb]/10"
+                              >
+                                <Link2 className="h-3.5 w-3.5" />
+                              </button>
+                            </Tooltip>
+                          )}
                         </div>
                         <div
-                          className={`group relative flex h-[46px] items-center rounded-[7px] border px-2.5 ${
+                          className={`relative flex h-[46px] items-center rounded-[7px] border px-2.5 ${
                             locked ? 'border-[#e59a9a] bg-[#e02424]/[0.04]' : 'border-divider bg-background'
                           }`}
                         >
@@ -603,25 +641,26 @@ export default function NewTemplateDesign({ api }) {
                               <Trash2 className="h-3 w-3 text-[#d14343]" />
                             </button>
                           )}
-                          <input
-                            value={field.label}
-                            readOnly={locked}
-                            onChange={locked ? undefined : (e) => updateField(field.id, { label: e.target.value })}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            placeholder="Column name"
-                            title={locked ? 'Default header name can’t be changed' : undefined}
-                            className={`ml-2 w-full min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1.5 py-1 text-[14.5px] outline-none ${
-                              locked
-                                ? 'cursor-default text-muted'
-                                : 'text-foreground hover:bg-card focus:border-[#9dbfe8] focus:bg-background'
-                            }`}
-                          />
-                          <span
-                            aria-hidden
-                            className="pointer-events-none absolute -top-9 left-0 z-40 hidden max-w-[340px] truncate rounded-md bg-[#1f2937] px-2.5 py-1.5 text-[12px] text-white shadow-lg group-focus-within:block"
+                          <Tooltip
+                            trigger="hover"
+                            className="ml-2 min-w-0 flex-1"
+                            childrenWrapperClassName="w-full"
+                            content={field.label || 'Column name'}
                           >
-                            {field.label || 'Column name'}
-                          </span>
+                            <input
+                              value={field.label}
+                              readOnly={locked}
+                              onChange={locked ? undefined : (e) => updateField(field.id, { label: e.target.value })}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              placeholder="Column name"
+                              title={locked ? 'Default header name can’t be changed' : undefined}
+                              className={`w-full min-w-0 truncate rounded border border-transparent bg-transparent px-1.5 py-1 text-[14.5px] outline-none ${
+                                locked
+                                  ? 'cursor-default text-muted'
+                                  : 'text-foreground hover:bg-card focus:border-[#9dbfe8] focus:bg-background'
+                              }`}
+                            />
+                          </Tooltip>
                         </div>
                       </div>
                     )

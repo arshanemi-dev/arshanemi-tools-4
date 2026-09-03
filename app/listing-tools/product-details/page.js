@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search,Download, UploadCloud, ArrowLeft } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
-import SheetTabs from '@/components/listing/SheetTabs'
 import SheetGrid from '@/components/listing/SheetGrid'
+import FlexSheet from '@/components/listing/FlexSheet'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import BillingGateModal from '@/components/billing/BillingGateModal'
@@ -20,12 +20,17 @@ function isRowEmpty(row) {
   return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
 }
 
+// The groups this page can show, in stack order: Product Details on top as a
+// real scrolling table, the rest below as flex blocks (no group-name
+// heading). Same three groups the old tab strip covered.
+const STACK_GROUPS = ['design_system', 'compulsory', 'prefill']
+
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
 // clicked. Clicking sets ?template= (same destination the sidebar's
 // per-template links already use) and switches into that template's own
-// scoped workspace, tabs across all 4 groups, headers/rows belonging only
-// to that template.
+// scoped workspace — every group visible at once (no tab strip), headers/rows
+// belonging only to that template.
 export default function ProductDetailsPage() {
   const searchParams = useSearchParams()
   const templateId = searchParams.get('template')
@@ -39,10 +44,15 @@ function ScopedProductDetails({ templateId }) {
   const router = useRouter()
   const [template, setTemplate] = useState(null)
   const [content, setContent] = useState(null)
-   const [search, setSearch] = useState('')
+  const [search, setSearch] = useState('')
+  // Which block "Download Final Sheet" targets. It used to be the selected
+  // tab; now it's whichever block you last interacted with (set on pointer
+  // down, see the block wrapper below). Defaults to the Product Details
+  // sheet, exactly as the first tab did.
   const [activeGroup, setActiveGroup] = useState('design_system')
-  const [activeFilterKey, setActiveFilterKey] = useState(null)
-  const [filterValue, setFilterValue] = useState('')
+  // Per-column filter, kept per group: { [group]: { key, value } }. Only a
+  // sheet's unique-key column offers the filter toggle.
+  const [filter, setFilter] = useState({})
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
@@ -55,53 +65,56 @@ function ScopedProductDetails({ templateId }) {
     return () => { cancelled = true }
   }, [templateId])
 
-  const sheet = content?.sheets.find((s) => s.group === activeGroup)
-  const keyHeaderId = sheet?.headers.find((h) => h.isUniqueKeyPart)?.id
-
-  // Download exports only the active group's own sheet — gate it on that
-  // sheet having *more than one* real row (not the trailing empty row every
-  // sheet always carries, and not just because headers exist).
-  const filledRowCount = (sheet?.rows || []).filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
-  const hasAnyFilledRow = filledRowCount > 1
-
   const sheetsByGroup = useMemo(
     () => Object.fromEntries((content?.sheets || []).map((s) => [s.group, s])),
     [content]
   )
 
-  const filteredRows = useMemo(() => {
-    if (!sheet) return []
-    let out = sheet.rows
-    if (activeFilterKey && filterValue.trim()) {
-      const fq = filterValue.toLowerCase()
-      out = out.filter((r, i) => i === sheet.rows.length - 1 || String(r[activeFilterKey] ?? '').toLowerCase().includes(fq))
+  // Groups this template actually uses — same empty-group filter SheetTabs
+  // applied before it was removed (a template with nothing mapped into, say,
+  // Brand Details has a real `prefill` sheet object but `headers: []`).
+  const realGroups = useMemo(
+    () => STACK_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0),
+    [sheetsByGroup]
+  )
+
+  const activeSheet = sheetsByGroup[activeGroup]
+
+  // Download exports only the active block's own sheet — gate it on that
+  // sheet having *more than one* real row (not the trailing empty row every
+  // sheet always carries, and not just because headers exist).
+  const filledRowCount = (activeSheet?.rows || []).filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
+  const hasAnyFilledRow = filledRowCount > 1
+
+  // Same filter + search pipeline as before, now resolved per group.
+  function filteredRowsFor(group) {
+    const gsheet = sheetsByGroup[group]
+    if (!gsheet) return []
+    let out = gsheet.rows
+    const f = filter[group]
+    if (f?.key && String(f.value).trim()) {
+      const fq = String(f.value).toLowerCase()
+      out = out.filter((r, i) => i === gsheet.rows.length - 1 || String(r[f.key] ?? '').toLowerCase().includes(fq))
     }
     if (search.trim()) {
       const sq = search.toLowerCase()
       out = out.filter((r, i) => i === out.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(sq)))
     }
     return out
-  }, [sheet, activeFilterKey, filterValue, search])
-
-  function onFilterChange(headerId, value) {
-    if (value === undefined) {
-      setActiveFilterKey((prev) => (prev === headerId ? null : headerId))
-      setFilterValue('')
-    } else {
-      setFilterValue(value)
-    }
   }
 
-  function onChangeGroup(g) {
-    setActiveGroup(g)
-    setActiveFilterKey(null)
-    setFilterValue('')
+  function onFilterChange(group, headerId, value) {
+    if (value === undefined) {
+      setFilter((prev) => ({ ...prev, [group]: prev[group]?.key === headerId ? { key: null, value: '' } : { key: headerId, value: '' } }))
+    } else {
+      setFilter((prev) => ({ ...prev, [group]: { key: prev[group]?.key ?? headerId, value } }))
+    }
   }
 
   // Row edits persist on a short 50ms idle debounce (unlike header/formula edits below, which
   // still save immediately — those are template-structure changes, not per-listing row data).
   // `group`/`headers` are passed in at call time rather than read from component state when the
-  // debounce fires, so a tab switch inside that 50ms window can't send the save to the wrong
+  // debounce fires, so a block switch inside that 50ms window can't send the save to the wrong
   // group's endpoint.
   const persistRows = useDebouncedCallback(async (group, headers, nextRows) => {
     const res = await fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
@@ -115,14 +128,14 @@ function ScopedProductDetails({ templateId }) {
     }
   }, 50)
 
-  function saveRows(nextRows) {
-    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, rows: nextRows } : s)) }))
+  function saveRows(group, nextRows) {
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === group ? { ...s, rows: nextRows } : s)) }))
     // Local grid state keeps the always-one-trailing-blank row (so there's
     // still somewhere to type the next entry); the server never needs it —
     // it re-derives its own single trailing blank via ensureTrailingEmptyRow
     // regardless of what's sent, so there's no reason to transmit a row we
     // already know is empty.
-    persistRows(activeGroup, sheet.headers, nextRows.filter((r) => !isRowEmpty(r)))
+    persistRows(group, sheetsByGroup[group].headers, nextRows.filter((r) => !isRowEmpty(r)))
   }
 
   // Un-debounced persist for an arbitrary group — used by handleDeleteRow's cross-group cascade
@@ -154,17 +167,18 @@ function ScopedProductDetails({ templateId }) {
   // mirrors design_system's (see defaultHeaders.json) — three *independently saved* sheets, no
   // shared row-index bookkeeping between them the way Auto Listing's session state has. Deleting
   // a row from just one of them left the same product's row sitting untouched on the other two
-  // tabs. `linkedIdentityGroups`/`keyValueOf` (components/listing/linkedHeaders.js) resolve which
+  // blocks. `linkedIdentityGroups`/`keyValueOf` (components/listing/linkedHeaders.js) resolve which
   // other groups share this exact identity and match by that value — Prefill is deliberately
-  // excluded even when it's the active tab, since a Brand row there can legitimately still be in
+  // excluded even when it's the active block, since a Brand row there can legitimately still be in
   // use by other products, so deleting it here never cascades anywhere.
-  function handleDeleteRow(row) {
-    if (!sheet) return
-    const identityGroups = linkedIdentityGroups(activeGroup, sheetsByGroup)
-    const value = identityGroups.length > 1 ? keyValueOf(activeGroup, row, sheetsByGroup) : ''
+  function handleDeleteRow(group, row) {
+    const groupSheet = sheetsByGroup[group]
+    if (!groupSheet) return
+    const identityGroups = linkedIdentityGroups(group, sheetsByGroup)
+    const value = identityGroups.length > 1 ? keyValueOf(group, row, sheetsByGroup) : ''
 
     if (!value) {
-      saveRows(sheet.rows.filter((r) => r !== row))
+      saveRows(group, groupSheet.rows.filter((r) => r !== row))
       addToast('Row deleted', 'success')
       return
     }
@@ -177,12 +191,12 @@ function ScopedProductDetails({ templateId }) {
           : s
       )),
     }))
-    for (const group of identityGroups) {
-      const groupSheet = sheetsByGroup[group]
-      if (!groupSheet) continue
-      const nextRows = groupSheet.rows.filter((r) => keyValueOf(group, r, sheetsByGroup) !== value)
-      if (nextRows.length === groupSheet.rows.length) continue
-      persistGroupRows(group, groupSheet.headers, nextRows)
+    for (const ig of identityGroups) {
+      const igSheet = sheetsByGroup[ig]
+      if (!igSheet) continue
+      const nextRows = igSheet.rows.filter((r) => keyValueOf(ig, r, sheetsByGroup) !== value)
+      if (nextRows.length === igSheet.rows.length) continue
+      persistGroupRows(ig, igSheet.headers, nextRows)
     }
     addToast('Row deleted', 'success')
   }
@@ -195,16 +209,17 @@ function ScopedProductDetails({ templateId }) {
   // exclude non-blank cells), but this re-checks the row's *current* value
   // right before merging too — a field that already has a value is never
   // overwritten here, no matter what the response contained.
-  function handleAiFillRow(rowIndex, fields) {
-    if (!sheet) return
-    const nextRows = sheet.rows.map((r, i) => {
+  function handleAiFillRow(group, rowIndex, fields) {
+    const groupSheet = sheetsByGroup[group]
+    if (!groupSheet) return
+    const nextRows = groupSheet.rows.map((r, i) => {
       if (i !== rowIndex) return r
       const toApply = Object.fromEntries(Object.entries(fields).filter(([k]) => !String(r[k] ?? '').trim()))
       if (Object.keys(toApply).length === 0) return r
       const nextAiFilled = Array.from(new Set([...(r.aiFilled || []), ...Object.keys(toApply)]))
       return { ...r, ...toApply, aiFilled: nextAiFilled }
     })
-    saveRows(nextRows)
+    saveRows(group, nextRows)
   }
 
   // Auto-triggered the moment an image cell gets a usable value (plan §6) —
@@ -213,26 +228,28 @@ function ScopedProductDetails({ templateId }) {
   // route when the row has an empty Brand/Highlights header to fill, so
   // uploading into a template with neither header — or a row that already
   // has both — is a no-op, not a wasted coin.
-  function handleImageUploaded(rowIndex, headerId, url) {
-    const row = sheet?.rows[rowIndex]
+  function handleImageUploaded(group, rowIndex, headerId, url) {
+    const groupSheet = sheetsByGroup[group]
+    const row = groupSheet?.rows[rowIndex]
     if (!row) return
-    const targets = computeVisionTargets({ headers: sheet.headers, row: { ...row, [headerId]: url } })
+    const targets = computeVisionTargets({ headers: groupSheet.headers, row: { ...row, [headerId]: url } })
     if (targets.length === 0) return
-    fillRowFromImage(activeGroup, rowIndex, headerId, handleAiFillRow)
+    fillRowFromImage(group, rowIndex, headerId, (ri, fields) => handleAiFillRow(group, ri, fields))
   }
 
   // Formula headers are editable right from the grid (see SheetGrid.jsx's
   // header-row formula box) — persists the same way a row edit does, via
   // the sheet's PATCH route, just with an updated `headers` array instead
   // of `rows`.
-  function handleHeaderChange(headerId, patch) {
-    if (!sheet) return
-    const nextHeaders = sheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
-    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === activeGroup ? { ...s, headers: nextHeaders } : s)) }))
-    fetch(`/api/listing-tools/${templateId}/sheets/${activeGroup}`, {
+  function handleHeaderChange(group, headerId, patch) {
+    const groupSheet = sheetsByGroup[group]
+    if (!groupSheet) return
+    const nextHeaders = groupSheet.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h))
+    setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === group ? { ...s, headers: nextHeaders } : s)) }))
+    fetch(`/api/listing-tools/${templateId}/sheets/${group}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: nextHeaders, rows: sheet.rows }),
+      body: JSON.stringify({ headers: nextHeaders, rows: groupSheet.rows }),
     }).then(async (res) => {
       if (!res.ok && res.status !== 401) {
         const data = await res.json().catch(() => ({}))
@@ -250,7 +267,8 @@ function ScopedProductDetails({ templateId }) {
         addToast("Couldn't match that file's columns to any sheet in this template.", 'error')
         return
       }
-      if (result.group !== activeGroup) onChangeGroup(result.group)
+      setActiveGroup(result.group)
+      setFilter((prev) => ({ ...prev, [result.group]: { key: null, value: '' } }))
       setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === result.group ? { ...s, rows: result.rows } : s)) }))
       await fetch(`/api/listing-tools/${templateId}/sheets/${result.group}`, {
         method: 'PATCH',
@@ -300,26 +318,43 @@ function ScopedProductDetails({ templateId }) {
         </div>
       </div>
 
-      <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        <SheetTabs active={activeGroup} onChange={onChangeGroup} sheets={content?.sheets} />
-        {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
-        {sheet && (
-          <SheetGrid
-            headers={sheet.headers}
-            rows={filteredRows}
-            onRowsChange={saveRows}
-            uploadUrl={`/api/listing-tools/${templateId}/images`}
-            activeFilterHeaderId={activeFilterKey}
-            filterValue={filterValue}
-            onFilterChange={keyHeaderId ? onFilterChange : undefined}
-            pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
-            onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(sheet.headers, headerId, value, rowIndex, sheetsByGroup)}
-            onHeaderChange={handleHeaderChange}
-            onImageUploaded={handleImageUploaded}
-            onDeleteRow={handleDeleteRow}
-          />
-        )}
-      </div>
+      {!content && (
+        <div className="border border-divider rounded-lg overflow-hidden bg-card">
+          <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>
+        </div>
+      )}
+
+      {content && realGroups.map((g) => {
+        const gsheet = sheetsByGroup[g]
+        const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
+        const gRows = filteredRowsFor(g)
+        const gPicker = buildPickerOptions(gsheet.headers, sheetsByGroup)
+        const commonProps = {
+          headers: gsheet.headers,
+          rows: gRows,
+          onRowsChange: (nextRows) => saveRows(g, nextRows),
+          uploadUrl: `/api/listing-tools/${templateId}/images`,
+          activeFilterHeaderId: filter[g]?.key || null,
+          filterValue: filter[g]?.value || '',
+          onFilterChange: gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined,
+          pickerOptions: gPicker,
+          onCellChange: (headerId, value, rowIndex) => resolveLinkedFill(gsheet.headers, headerId, value, rowIndex, sheetsByGroup),
+          onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
+          onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
+          onDeleteRow: (row) => handleDeleteRow(g, row),
+        }
+        return (
+          <div
+            key={g}
+            onPointerDownCapture={() => setActiveGroup(g)}
+            className={`rounded-lg transition-shadow ${activeGroup === g ? 'ring-2 ring-accent/30' : ''}`}
+          >
+            {g === 'design_system'
+              ? <SheetGrid headerInfo {...commonProps} />
+              : <FlexSheet {...commonProps} />}
+          </div>
+        )
+      })}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: [activeGroup], format: 'excel', meta: template })} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />
