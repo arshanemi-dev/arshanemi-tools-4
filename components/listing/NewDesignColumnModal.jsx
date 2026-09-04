@@ -32,15 +32,17 @@ const MODES = {
 // New Design modal is self-contained.
 let COPIED = null
 
-// "Auto-Fill From" — ONE searchable dropdown of every other header (label +
-// its group). Picking one sets both linkedHeaderId and linkedGroup, so the
-// group no longer needs a separate select. The header being edited is never
-// in the list.
-function HeaderLinkCombobox({ options, value, onSelect, onClear }) {
+// "Auto-Fill From" — one searchable, MULTI-select dropdown of every other
+// header (label + its group). A header can be linked to several source
+// headers; the first one still drives linkedHeaderId / linkedGroup so the
+// fill-time auto-fill (linkedHeaders.js) keeps working unchanged. The header
+// being edited is never in the list.
+function HeaderLinkCombobox({ options, values, onChange }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const wrapRef = useRef(null)
-  const selected = options.find((o) => o.id === value) || null
+  const selectedSet = new Set(values)
+  const selectedOpts = options.filter((o) => selectedSet.has(o.id))
 
   useEffect(() => {
     if (!open) return
@@ -54,6 +56,10 @@ function HeaderLinkCombobox({ options, value, onSelect, onClear }) {
   const q = query.trim().toLowerCase()
   const filtered = q ? options.filter((o) => `${o.label} ${o.groupTitle}`.toLowerCase().includes(q)) : options
 
+  function toggle(id) {
+    onChange(selectedSet.has(id) ? values.filter((v) => v !== id) : [...values, id])
+  }
+
   return (
     <div ref={wrapRef} className="relative">
       <button
@@ -62,21 +68,47 @@ function HeaderLinkCombobox({ options, value, onSelect, onClear }) {
           setQuery('')
           setOpen((v) => !v)
         }}
-        className="flex h-12 w-full items-center justify-between gap-2 rounded-lg border border-divider bg-card px-3.5 text-left text-[15px] text-foreground outline-none focus:border-[#a9bce9]"
+        className="flex min-h-12 w-full items-center justify-between gap-2 rounded-lg border border-divider bg-card px-3 py-2 text-left text-[15px] text-foreground outline-none focus:border-[#a9bce9]"
       >
-        <span className={`min-w-0 truncate ${selected ? 'text-foreground' : 'italic text-subtle'}`}>
-          {selected ? `${selected.label} · ${selected.groupTitle}` : 'Not connected'}
+        <span className="min-w-0 flex-1">
+          {selectedOpts.length === 0 ? (
+            <span className="italic text-subtle">Not connected</span>
+          ) : (
+            <span className="flex flex-wrap gap-1.5">
+              {selectedOpts.map((o) => (
+                <span
+                  key={o.id}
+                  className="inline-flex items-center gap-1 rounded-md bg-[#4356d6]/10 px-1.5 py-0.5 text-[12px] text-foreground"
+                >
+                  <span className="max-w-[150px] truncate">{o.label}</span>
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    title="Remove"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggle(o.id)
+                    }}
+                    className="text-subtle hover:text-red-500"
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                </span>
+              ))}
+            </span>
+          )}
         </span>
-        <span className="flex flex-shrink-0 items-center gap-1">
-          {selected && (
+        <span className="flex flex-shrink-0 items-center gap-1 self-start pt-1">
+          {selectedOpts.length > 0 && (
             <span
               role="button"
               tabIndex={-1}
-              title="Clear"
+              title="Clear all"
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation()
-                onClear()
+                onChange([])
                 setOpen(false)
               }}
               className="rounded p-0.5 text-subtle hover:bg-red-50 hover:text-red-500"
@@ -104,26 +136,29 @@ function HeaderLinkCombobox({ options, value, onSelect, onClear }) {
             {filtered.length === 0 ? (
               <p className="px-3 py-6 text-center text-[12.5px] text-subtle">No matching header.</p>
             ) : (
-              filtered.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => {
-                    onSelect(o)
-                    setOpen(false)
-                  }}
-                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition-colors ${
-                    o.id === value ? 'bg-[#4356d6]/10 font-medium text-foreground' : 'text-muted hover:bg-surface'
-                  }`}
-                >
-                  <span className="min-w-0 truncate">
-                    {o.label} <span className="text-subtle">· {o.groupTitle}</span>
-                  </span>
-                  {o.id === value && <Check className="h-3.5 w-3.5 flex-shrink-0 text-[#4356d6]" />}
-                </button>
-              ))
+              filtered.map((o) => {
+                const on = selectedSet.has(o.id)
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => toggle(o.id)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition-colors ${
+                      on ? 'bg-[#4356d6]/10 font-medium text-foreground' : 'text-muted hover:bg-surface'
+                    }`}
+                  >
+                    <span className="min-w-0 truncate">
+                      {o.label} <span className="text-subtle">· {o.groupTitle}</span>
+                    </span>
+                    {on && <Check className="h-3.5 w-3.5 flex-shrink-0 text-[#4356d6]" />}
+                  </button>
+                )
+              })
             )}
           </div>
+          {values.length > 0 && (
+            <div className="border-t border-divider px-3 py-1.5 text-[10.5px] text-subtle">{values.length} selected</div>
+          )}
         </div>
       )}
     </div>
@@ -161,6 +196,14 @@ export default function NewDesignColumnModal({ field, sections, allFields, onUpd
       groupId: f.groupId,
       groupTitle: groupTitleById[f.groupId] || f.groupId,
     }))
+  // Multi-select value — the newer array, falling back to the single legacy id.
+  const linkedIds = (
+    Array.isArray(field.linkedHeaderIds) && field.linkedHeaderIds.length
+      ? field.linkedHeaderIds
+      : field.linkedHeaderId
+      ? [field.linkedHeaderId]
+      : []
+  ).filter((id) => linkOptions.some((o) => o.id === id))
 
   function setType(id) {
     onUpdateField(field.id, {
@@ -182,9 +225,9 @@ export default function NewDesignColumnModal({ field, sections, allFields, onUpd
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="my-auto w-[777px] max-w-full rounded-2xl border border-divider bg-background p-5 shadow-2xl sm:p-6">
+      <div className="my-auto flex max-h-[85vh] w-[777px] max-w-full flex-col rounded-2xl border border-divider bg-background p-5 shadow-2xl sm:p-6">
         {/* name row — title at the start, close at the end */}
-        <div className="mb-3.5 flex items-center justify-between gap-3 border-b border-divider pb-3">
+        <div className="mb-3.5 flex flex-shrink-0 items-center justify-between gap-3 border-b border-divider pb-3">
           <b className="min-w-0 flex-1 truncate text-left text-[18px] font-semibold text-foreground">
             {field.label || 'Untitled column'}
           </b>
@@ -199,7 +242,7 @@ export default function NewDesignColumnModal({ field, sections, allFields, onUpd
         </div>
 
         {/* type tabs + save */}
-        <div className="mb-5 flex flex-wrap items-center gap-y-1.5">
+        <div className="mb-4 flex flex-shrink-0 flex-wrap items-center gap-y-1.5">
           <div className="flex flex-1 flex-wrap gap-2.5">
             {TABS.map((t) => (
               <button
@@ -225,8 +268,8 @@ export default function NewDesignColumnModal({ field, sections, allFields, onUpd
           </button>
         </div>
 
-        {/* body */}
-        <div className="flex flex-wrap items-start gap-y-5">
+        {/* body — capped height, scrolls internally so the modal never grows tall */}
+        <div className="-mr-1 flex min-h-0 flex-1 flex-wrap items-start gap-y-5 overflow-y-auto pr-1 pb-1">
           {(mode.values || mode.formula) && (
             <div className="min-w-0 flex-1 basis-[340px] sm:pr-5">
               {mode.values && (
@@ -309,12 +352,18 @@ export default function NewDesignColumnModal({ field, sections, allFields, onUpd
             <span className="mb-2.5 block text-[16.5px] text-muted">Auto-Fill From</span>
             <HeaderLinkCombobox
               options={linkOptions}
-              value={field.linkedHeaderId || null}
-              onSelect={(o) => onUpdateField(field.id, { linkedHeaderId: o.id, linkedGroup: o.groupId })}
-              onClear={() => onUpdateField(field.id, { linkedHeaderId: null, linkedGroup: null })}
+              values={linkedIds}
+              onChange={(ids) => {
+                const first = ids[0] ? linkOptions.find((o) => o.id === ids[0]) : null
+                onUpdateField(field.id, {
+                  linkedHeaderIds: ids,
+                  linkedHeaderId: first ? first.id : null,
+                  linkedGroup: first ? first.groupId : null,
+                })
+              }}
             />
             <p className="mt-2 text-[12.5px] text-subtle">
-              Pick any header — its group is linked automatically.
+              Pick one or more headers — searchable, and each header&apos;s group is linked automatically.
             </p>
 
             <label className="mt-5 flex cursor-pointer items-center gap-3.5 select-none">

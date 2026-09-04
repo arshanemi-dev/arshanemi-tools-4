@@ -41,15 +41,27 @@ export default function ChooseTemplatePage() {
     )
   })
 
+  // Tells the left sidebar (components/listing/ListingToolsSidebar.jsx, a
+  // separate tree in the layout) the "My Template" set changed, so its list
+  // shows/hides without a page reload. Detail carries the full new list.
+  function broadcastMine(list) {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent('listing-tools:my-templates', { detail: list }))
+  }
+  function listFromSet(set) {
+    return (templates || [])
+      .filter((t) => set.has(t.id))
+      .map((t) => ({ templateId: t.id, templateName: t.templateName }))
+  }
+
   // Full-replace PUT — the hub deletes-then-reinserts this user's whole
   // assignment row, so every add/remove sends the complete desired set, not
   // a delta.
   async function syncMine(next) {
     const prev = mine
     setMine(next)
-    const list = (templates || [])
-      .filter((t) => next.has(t.id))
-      .map((t) => ({ templateId: t.id, templateName: t.templateName }))
+    const list = listFromSet(next)
+    broadcastMine(list) // optimistic — sidebar updates instantly
     const res = await fetch('/api/listing-tools/assignments/me', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -57,6 +69,7 @@ export default function ChooseTemplatePage() {
     })
     if (!res.ok) {
       setMine(prev)
+      broadcastMine(listFromSet(prev)) // roll the sidebar back too
       // A 401 already triggered the shared login-required modal (see
       // lib/authGate.js) — don't also show a generic, unhelpful toast for
       // the same failure.
@@ -66,12 +79,14 @@ export default function ChooseTemplatePage() {
   function addMine(template) {
     if (mine.has(template.id)) return
     syncMine(new Set(mine).add(template.id))
+    addToast(`“${template.templateName}” added to My Template.`, 'success')
   }
   function removeMine(template) {
     if (!mine.has(template.id)) return
     const next = new Set(mine)
     next.delete(template.id)
     syncMine(next)
+    addToast(`“${template.templateName}” removed from My Template.`, 'success')
   }
 
   return (

@@ -1,4 +1,5 @@
 'use client'
+import { Fragment } from 'react'
 import { Filter, ChevronDown, Lock, Trash2 } from 'lucide-react'
 import ComboboxCell from './ComboboxCell'
 import MultiSelectCell from './MultiSelectCell'
@@ -75,6 +76,18 @@ export default function SheetGrid({
   // layout, off everywhere else so other SheetGrid callers are visually
   // unchanged.
   headerInfo = false,
+  // Opt-in — renders `renderRowSubRow(rowIndex, row)` as an extra full-width
+  // row injected directly under every data row (Auto Details / Product Details
+  // put each row's Compulsory + Brand fields there). The sub-row is pinned to
+  // the left edge and sized to the scroll viewport (`100cqi` against the
+  // scroll container's `container-type`, added only when this prop is set), so
+  // it only ever scrolls *vertically* while the main row scrolls sideways. Off
+  // everywhere else.
+  renderRowSubRow,
+  // When false, typing into the last row no longer auto-appends a fresh blank
+  // row — new rows are added only on demand by the caller (an "Add Product"
+  // button). Default keeps the old always-one-trailing-blank behaviour.
+  autoAppendRow = true,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -94,6 +107,8 @@ export default function SheetGrid({
   // present) — same 40px-per-column freeze-pane scheme as the checkbox already used, just with a
   // variable number of leading pinned columns instead of a fixed 0 or 1.
   const leadingStickyCols = (onDeleteRow ? 1 : 0) + (selectable ? 1 : 0)
+  // Total column count, for the injected sub-row's `colSpan` (see renderRowSubRow below).
+  const colCount = leadingStickyCols + sortedHeaders.length
   const deleteLeftCls = 'left-0'
   const checkboxLeftCls = onDeleteRow ? 'left-10' : 'left-0'
   const stickyLeftCls = leadingStickyCols === 2 ? 'left-20' : leadingStickyCols === 1 ? 'left-10' : 'left-0'
@@ -136,9 +151,10 @@ export default function SheetGrid({
 
   // Appends one blank trailing row once the edited row (only ever the
   // sheet's previous last row) is no longer empty — the usual
-  // always-one-trailing-blank-row invariant.
+  // always-one-trailing-blank-row invariant. Skipped entirely when
+  // `autoAppendRow` is false (rows are added by an explicit button instead).
   function withTrailingBlankRow(next, rowIndex) {
-    if (rowIndex !== rows.length - 1 || isRowEmpty(next[rowIndex])) return next
+    if (!autoAppendRow || rowIndex !== rows.length - 1 || isRowEmpty(next[rowIndex])) return next
     return [...next, Object.fromEntries(sortedHeaders.map((h) => [h.id, '']))]
   }
 
@@ -175,7 +191,9 @@ export default function SheetGrid({
           <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-subtle'}`}>{bulk.message.text}</p>
         </div>
       )}
-      <div className="max-h-[70vh] overflow-auto">
+      {/* `container-type` (so the sub-row can size itself to the viewport with
+          `100cqi`) only when sub-rows are in use — other callers untouched. */}
+      <div className={`max-h-[80vh] overflow-auto ${renderRowSubRow ? '[container-type:inline-size]' : ''}`}>
       {/* `border-separate` (not `collapse`) is required for the sticky header/column borders
           above to stay visible while scrolling — `border-collapse` shares a border between two
           adjacent cells, and once one of them is repositioned by `position: sticky`, browsers
@@ -268,7 +286,8 @@ export default function SheetGrid({
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="hover:bg-surface/80 group">
+            <Fragment key={rowIndex}>
+            <tr className="hover:bg-surface/80 group">
               {onDeleteRow && (
                 <td
                   className={`sticky ${deleteLeftCls} z-10 bg-card group-hover:bg-surface border-b border-divider px-2 py-2 ${
@@ -361,6 +380,25 @@ export default function SheetGrid({
                 </td>
               )})}
             </tr>
+            {renderRowSubRow && (
+              <tr>
+                <td colSpan={colCount} className="p-0 border-b-2 border-divider-light bg-surface/40">
+                  {/* `sticky left-0` (no overflow of its own — that was what
+                      swallowed the scroll gesture) pins the block to the
+                      viewport's left edge and `w-[100cqi]` sizes it to the
+                      scroll container. The inner div is the real scroller:
+                      `overflow-auto` both ways (a big group's 3× boxes can run
+                      wider than the viewport), capped height, `scrollbar-gutter`
+                      keeps a gap between the fields and the scrollbar. */}
+                  <div className="sticky left-0 w-[100cqi] max-w-[100cqi]">
+                    <div className="">
+                      {renderRowSubRow(rowIndex, row)}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            )}
+            </Fragment>
           ))}
         </tbody>
       </table>

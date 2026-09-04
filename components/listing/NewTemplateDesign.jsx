@@ -39,44 +39,62 @@ function linkedIdsOf(field) {
 //    grid entirely (still saved).
 //  - "Save" (the blue button) = save preset; the Template No field is always
 //    read-only and is filled in automatically once the template is saved
+// Grid sections. Most map 1:1 to a real persisted group; "Big" and "Image
+// Link" are New-Design-only display buckets — a header dropped there is
+// tagged `uiBucket` but its real `group` stays design_system (Product
+// Details), so images / big-text columns still flow into the finished sheet
+// and every other page just shows them under Product Details.
 const SECTIONS = [
-  { id: 'design_system', title: 'Product Details', flag: 'red' }, // same red as the "Fix" flag
-  { id: 'compulsory', title: 'Compulsory', flag: 'green' },
-  { id: 'prefill', title: 'Brand Details', flag: 'blue' },
-  { id: UNMAPPED_TAB_ID, title: 'Other', flag: 'gray' }, // muted / de-emphasised staging bucket
+  { id: 'design_system', title: 'Product Details', flag: 'red', group: 'design_system', bucket: null },
+  { id: 'compulsory', title: 'Compulsory', flag: 'green', group: 'compulsory', bucket: null },
+  { id: 'big', title: 'Big', flag: 'big', group: 'design_system', bucket: 'big' },
+  { id: 'prefill', title: 'Brand Details', flag: 'blue', group: 'prefill', bucket: null },
+  { id: 'image_link', title: 'Image Link', flag: 'imglink', group: 'design_system', bucket: 'image_link' },
+  { id: UNMAPPED_TAB_ID, title: 'Other', flag: 'gray', group: UNMAPPED_TAB_ID, bucket: null },
 ]
+// Which section a field currently sits in (uiBucket wins over the real group).
+const sectionKeyOf = (f) =>
+  f?.uiBucket === 'big' ? 'big' : f?.uiBucket === 'image_link' ? 'image_link' : f?.groupId
+
 // Every flag box ALWAYS shows its own colour border. Only the tick (and a
 // faint tint) appears when it's the active choice. Written as full literal
 // class strings so Tailwind's scanner keeps them. Product Details = red
-// (shares the Fix red), Brand Details = blue, Other = plain gray.
+// (shares the Fix red), Brand Details = blue, Other = gray, Big = #4B0082,
+// Image Link = #FFFF00 (heading/tick use a darker amber so it stays legible).
 const FLAG_BORDER = {
   red: 'border-[#e02424]',
   green: 'border-[#16a34a]',
   blue: 'border-[#2563eb]',
   gray: 'border-[#9aa2ad]',
+  big: 'border-[#4B0082]',
+  imglink: 'border-[#FFFF00]',
 }
 const FLAG_TICK = {
   red: 'text-[#e02424]',
   green: 'text-[#16a34a]',
   blue: 'text-[#2563eb]',
   gray: 'text-[#6b7280]',
+  big: 'text-[#4B0082]',
+  imglink: 'text-[#a16207]',
 }
 const FLAG_TINT = {
   red: 'bg-[#e02424]/10',
   green: 'bg-[#16a34a]/10',
   blue: 'bg-[#2563eb]/10',
   gray: 'bg-[#9aa2ad]/12',
+  big: 'bg-[#4B0082]/10',
+  imglink: 'bg-[#FFFF00]/25',
 }
-// Per-group heading colour. "Other" stays muted (text-subtle) so it reads as
-// the low-emphasis staging bucket.
 const SECTION_TITLE = {
   red: 'text-[#e02424]',
   green: 'text-[#16a34a]',
   blue: 'text-[#2563eb]',
   gray: 'text-subtle',
+  big: 'text-[#4B0082]',
+  imglink: 'text-[#a16207]',
 }
-// Card flag order follows the group order above: Product Details, Compulsory,
-// Brand Details, Other.
+// Card flag boxes stay the four REAL groups — "Big" / "Image Link" are
+// reached by dragging a card into their section (which also clears any bucket).
 const GROUP_FLAGS = ['red', 'green', 'blue', 'gray']
 const FLAG_TO_GROUP = { red: 'design_system', green: 'compulsory', blue: 'prefill', gray: UNMAPPED_TAB_ID }
 const GROUP_TO_FLAG = { design_system: 'red', compulsory: 'green', prefill: 'blue', [UNMAPPED_TAB_ID]: 'gray' }
@@ -194,6 +212,11 @@ export default function NewTemplateDesign({ api }) {
 
   const modalField = modalId ? fields.find((f) => f.id === modalId) : null
 
+  // Move a header into a section: real group from sec.group, uiBucket from
+  // sec.bucket (null for the four real groups).
+  function assignToSection(id, sec) {
+    updateField(id, { groupId: sec.group, uiBucket: sec.bucket })
+  }
   function onCardDrop(e, target) {
     e.preventDefault()
     e.stopPropagation()
@@ -201,23 +224,31 @@ export default function NewTemplateDesign({ api }) {
     const dragId = e.dataTransfer.getData('text/plain')
     if (!dragId || dragId === target.id) return
     const drag = fields.find((f) => f.id === dragId)
-    if (isLocked(drag)) return // default headers never move
+    const targetSec = SECTIONS.find((s) => s.id === sectionKeyOf(target))
     // Drop on the target card's right half → land AFTER it; left half → BEFORE
     // it. Without this the card always inserts before the target, so it ends
     // up one slot earlier than where it was dropped.
     const rect = e.currentTarget.getBoundingClientRect()
     const after = e.clientX > rect.left + rect.width / 2
-    if (drag && drag.groupId !== target.groupId) updateField(dragId, { groupId: target.groupId })
+    if (isLocked(drag)) {
+      // A default ("Fix") header can only be REORDERED inside its own section,
+      // never moved to another group / bucket.
+      if (sectionKeyOf(drag) !== sectionKeyOf(target)) return
+      moveFieldBefore(dragId, target.id, after)
+      setSortMode(null)
+      return
+    }
+    if (targetSec && sectionKeyOf(drag) !== targetSec.id) assignToSection(dragId, targetSec)
     moveFieldBefore(dragId, target.id, after)
     setSortMode(null)
   }
-  function onSectionDrop(e, groupId) {
+  function onSectionDrop(e, sec) {
     e.preventDefault()
     setDragOverSec(null)
     const dragId = e.dataTransfer.getData('text/plain')
     if (!dragId) return
     if (isLocked(fields.find((f) => f.id === dragId))) return
-    updateField(dragId, { groupId })
+    assignToSection(dragId, sec)
     setSortMode(null)
   }
 
@@ -504,7 +535,9 @@ export default function NewTemplateDesign({ api }) {
           {[
             ['red', 'Product details'],
             ['green', 'Cumpulsery'],
+            ['big', 'Big'],
             ['blue', 'Brand Details'],
+            ['imglink', 'Image Link'],
             ['gray', 'Other'],
             ['red', 'Fix'],
           ].map(([k, label]) => (
@@ -518,12 +551,13 @@ export default function NewTemplateDesign({ api }) {
         </div>
       </div>
 
-      {/* grid — one section per group (Product Details → Compulsory → Brand
-          Details → Other). Drag a card to reorder it inside its group or drop
-          it on another group. Built-in default headers are locked. */}
+      {/* grid — one section per group: Product Details → Compulsory → Brand
+          Details → Big → Image Link → Other. "Big" / "Image Link" are display
+          buckets over Product Details. Drag a card to reorder or move it.
+          Built-in default headers reorder within their own section only. */}
       <div className="mt-2">
         {SECTIONS.map((sec) => {
-          const cards = fields.filter((f) => f.groupId === sec.id && !isHiddenDefault(f))
+          const cards = fields.filter((f) => sectionKeyOf(f) === sec.id && !isHiddenDefault(f))
           return (
             <div
               key={sec.id}
@@ -532,7 +566,7 @@ export default function NewTemplateDesign({ api }) {
                 if (dragOverSec !== sec.id) setDragOverSec(sec.id)
               }}
               onDragLeave={() => setDragOverSec((c) => (c === sec.id ? null : c))}
-              onDrop={(e) => onSectionDrop(e, sec.id)}
+              onDrop={(e) => onSectionDrop(e, sec)}
             >
               <div className={`mb-1 mt-1 flex items-center gap-2 text-[18px] font-bold ${SECTION_TITLE[sec.flag]}`}>
                 <span className={`h-4 w-1.5 rounded-full ${FLAG_TINT[sec.flag]} ${FLAG_BORDER[sec.flag]} border`} aria-hidden />
@@ -550,24 +584,29 @@ export default function NewTemplateDesign({ api }) {
                 ) : (
                   cards.map((field) => {
                     const locked = isLocked(field)
+                    // Default ("Fix") headers can be dragged only to reorder
+                    // inside Product Details — never into another group.
+                    const canDrag = !locked || field.groupId === 'design_system'
                     const linkedNames = linkedIdsOf(field)
                       .map((id) => fields.find((f) => f.id === id)?.label)
                       .filter(Boolean)
                     return (
                       <div
                         key={field.id}
-                        draggable={!locked}
+                        draggable={canDrag}
                         onDragStart={
-                          locked
-                            ? undefined
-                            : (e) => {
+                          canDrag
+                            ? (e) => {
                                 e.dataTransfer.setData('text/plain', field.id)
                                 e.dataTransfer.effectAllowed = 'move'
                               }
+                            : undefined
                         }
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => onCardDrop(e, field)}
-                        className="mb-1 shrink-0 grow-0 basis-full px-[7px] sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5 2xl:basis-[12.5%]"
+                        className={`mb-1 shrink-0 grow-0 basis-full px-[7px] sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5 2xl:basis-[12.5%] ${
+                          canDrag ? 'cursor-grab active:cursor-grabbing' : ''
+                        }`}
                       >
                         <div className="mb-1 flex items-center gap-2 pl-1">
                           {/* Default header: ONLY the red (locked, checked)
@@ -581,8 +620,8 @@ export default function NewTemplateDesign({ api }) {
                               <FlagBox
                                 key={fl}
                                 kind={fl}
-                                on={GROUP_TO_FLAG[field.groupId] === fl}
-                                onClick={() => updateField(field.id, { groupId: FLAG_TO_GROUP[fl] })}
+                                on={!field.uiBucket && GROUP_TO_FLAG[field.groupId] === fl}
+                                onClick={() => updateField(field.id, { groupId: FLAG_TO_GROUP[fl], uiBucket: null })}
                                 title={SECTIONS.find((s) => s.id === FLAG_TO_GROUP[fl])?.title}
                               />
                             ))

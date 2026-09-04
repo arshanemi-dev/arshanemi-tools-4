@@ -53,6 +53,17 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed, mob
     return () => { cancelled = true }
   }, [])
 
+  // Live update when Choose Your Template adds/removes a "My Template" — its
+  // page dispatches this with the full new list (see templates/page.js's
+  // broadcastMine), so the sidebar list appears/updates/hides instantly.
+  useEffect(() => {
+    function onChange(e) {
+      if (Array.isArray(e.detail)) setMyTemplates(e.detail)
+    }
+    window.addEventListener('listing-tools:my-templates', onChange)
+    return () => window.removeEventListener('listing-tools:my-templates', onChange)
+  }, [])
+
   // Close the mobile drawer whenever the route changes — a tapped nav link
   // should navigate and dismiss the overlay, not leave it sitting open.
   useEffect(() => { onClose() }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps

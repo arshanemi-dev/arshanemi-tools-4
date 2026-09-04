@@ -39,7 +39,12 @@ function isValidImageUrl(str) {
 // shared session, when a bulk operation elsewhere targeted this exact
 // row/box — there's no separate progress bar anywhere; every box shows its
 // own queued/uploading/retrying/error state right here as it happens.
-export default function ImageCell({ value, onChange, uploadUrl, disabled, onMultipleFiles, bulkStatus }) {
+//
+// `urlOnly` (optional) — the merged Compulsory/Brand block shows image
+// headers as just the plain URL field, sized like every other input there.
+// The thumbnail/dropzone `<div>` is kept mounted but `hidden` (not removed),
+// so paste-a-URL still works exactly the same and nothing downstream changes.
+export default function ImageCell({ value, onChange, uploadUrl, disabled, onMultipleFiles, bulkStatus, urlOnly = false }) {
   const [dragging, setDragging] = useState(false)
   const [urlDraft, setUrlDraft] = useState(value || '')
   const [urlInvalid, setUrlInvalid] = useState(false)
@@ -93,14 +98,14 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
   }
 
   return (
-    <div className="flex flex-col items-center gap-1 w-full min-w-[120px] px-1.5 py-1.5">
+    <div className={`flex w-full flex-col gap-1 ${urlOnly ? '' : 'items-center min-w-[120px] px-1.5 py-1.5'}`}>
       <div
         onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={disabled ? undefined : onDrop}
         onClick={() => !disabled && !isBusy && !isQueued && !value && inputRef.current?.click()}
         title={hasError ? `${status.error} — click to retry` : isQueued ? 'Queued…' : isRetrying ? `Retrying (${status.attempt}/3)…` : undefined}
-        className={`relative group flex items-center justify-center w-full h-20 flex-shrink-0 rounded border overflow-hidden transition-colors ${
+        className={`${urlOnly ? 'hidden ' : ''}relative group flex items-center justify-center w-full h-20 flex-shrink-0 rounded border overflow-hidden transition-colors ${
           value ? 'border-divider bg-surface' : 'border-dashed'
         } ${
           disabled ? 'opacity-50 cursor-not-allowed border-divider' :
@@ -152,12 +157,14 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
           placeholder="Paste image URL…"
           title={value || undefined}
-          className={`w-full text-[10.5px] px-1.5 py-0.5 border rounded text-subtle focus:outline-none focus:ring-1 ${
-            urlInvalid ? 'border-red-300 focus:ring-red-400' : 'border-divider focus:ring-accent-light'
-          }`}
+          className={
+            urlOnly
+              ? `w-full bg-transparent px-3 py-2 text-[13px] text-foreground focus:outline-none focus:ring-1 focus:ring-inset ${urlInvalid ? 'ring-1 ring-red-400' : 'focus:ring-accent-light'}`
+              : `w-full text-[10.5px] px-1.5 py-0.5 border rounded text-subtle focus:outline-none focus:ring-1 ${urlInvalid ? 'border-red-300 focus:ring-red-400' : 'border-divider focus:ring-accent-light'}`
+          }
         />
       )}
-      {urlInvalid && <span className="text-[10px] text-red-500 leading-none">Not a valid URL</span>}
+      {urlInvalid && <span className={`text-[10px] text-red-500 leading-none ${urlOnly ? 'px-3' : ''}`}>Not a valid URL</span>}
     </div>
   )
 }

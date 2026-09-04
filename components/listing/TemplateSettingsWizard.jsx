@@ -481,6 +481,17 @@ function fieldsFromContent(content) {
         sourceColIndex: h.sourceColIndex,
         linkedGroup: h.linkedGroup || null,
         linkedHeaderId: h.linkedHeaderId || null,
+        // New Design's multi-select "Auto-Fill From" — array of source header
+        // ids. linkedHeaderId above stays the first one for the unchanged
+        // fill-time logic (linkedHeaders.js).
+        linkedHeaderIds: Array.isArray(h.linkedHeaderIds)
+          ? h.linkedHeaderIds
+          : h.linkedHeaderId
+          ? [h.linkedHeaderId]
+          : [],
+        // New Design display bucket ('big' | 'image_link' | null) — real
+        // `group` above is unchanged; other pages ignore this.
+        uiBucket: h.uiBucket || null,
         formula: h.formula || '',
         disabled: !!h.disabled,
         // Templates saved before this existed have no `source` at all —
@@ -784,7 +795,14 @@ export default function TemplateSettingsWizard({ templateId }) {
       // falls to Unselected / "Other" — same behaviour in both designs now.
       const built = buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx)
       setDropdownColumns(cols)
-      setFields(withDefaultHeaders(built))
+      // Every image-type header (from the sheet OR a built-in Image N default)
+      // is auto-tagged into the New Design's "Image Link" bucket — its real
+      // group stays whatever it was, so exports/fill pages are unaffected.
+      setFields(
+        withDefaultHeaders(built).map((f) =>
+          f.dataType === 'image' ? { ...f, uiBucket: 'image_link' } : f,
+        ),
+      )
       setShowGroups(true)
       setBulkTargetId(UNMAPPED_TAB_ID)
     })
@@ -824,9 +842,14 @@ export default function TemplateSettingsWizard({ templateId }) {
     setFields((prev) => {
       const groupsInOrder = []
       const buckets = new Map()
+      // Key by the New Design display bucket when set, else the real group —
+      // so "Big" / "Image Link" sort as their own section, not lumped with
+      // the rest of Product Details.
+      const keyOf = (f) => f.uiBucket || f.groupId
       for (const f of prev) {
-        if (!buckets.has(f.groupId)) { buckets.set(f.groupId, []); groupsInOrder.push(f.groupId) }
-        buckets.get(f.groupId).push(f)
+        const k = keyOf(f)
+        if (!buckets.has(k)) { buckets.set(k, []); groupsInOrder.push(k) }
+        buckets.get(k).push(f)
       }
       const cmp = (a, b) => {
         const ad = a.source === 'default' ? 0 : 1
@@ -892,9 +915,25 @@ export default function TemplateSettingsWizard({ templateId }) {
   // it (components/listing/linkedHeaders.js) — otherwise that other header
   // would keep a linkedHeaderId referencing an id that no longer exists.
   function deleteHeader(fieldId) {
-    setFields((prev) => prev
-      .filter((f) => f.id !== fieldId)
-      .map((f) => (f.linkedHeaderId === fieldId ? { ...f, linkedGroup: null, linkedHeaderId: null } : f)))
+    setFields((prev) => {
+      const remaining = prev.filter((f) => f.id !== fieldId)
+      return remaining.map((f) => {
+        const ids = Array.isArray(f.linkedHeaderIds) && f.linkedHeaderIds.length
+          ? f.linkedHeaderIds
+          : f.linkedHeaderId
+          ? [f.linkedHeaderId]
+          : []
+        if (!ids.includes(fieldId)) return f
+        const nextIds = ids.filter((id) => id !== fieldId)
+        const firstId = nextIds[0] || null
+        return {
+          ...f,
+          linkedHeaderIds: nextIds,
+          linkedHeaderId: firstId,
+          linkedGroup: firstId ? remaining.find((r) => r.id === firstId)?.groupId ?? null : null,
+        }
+      })
+    })
   }
   function renameTab(id, label) {
     setTabLabels((prev) => ({ ...prev, [id]: label }))
@@ -1015,6 +1054,12 @@ export default function TemplateSettingsWizard({ templateId }) {
         sourceColIndex: f.sourceColIndex,
         linkedGroup: f.linkedGroup || null,
         linkedHeaderId: f.linkedHeaderId || null,
+        linkedHeaderIds: Array.isArray(f.linkedHeaderIds) && f.linkedHeaderIds.length
+          ? f.linkedHeaderIds
+          : f.linkedHeaderId
+          ? [f.linkedHeaderId]
+          : [],
+        uiBucket: f.uiBucket || null,
         formula: f.formula || '',
         disabled: !!f.disabled,
         source: f.source || 'upload',
@@ -1259,7 +1304,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                       <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                     <RowNumberInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
                     <RowNumberInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
                   </div>
@@ -1294,7 +1339,7 @@ export default function TemplateSettingsWizard({ templateId }) {
                       <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                     <RowNumberInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
                     <RowNumberInput label="Dropdown Values Row" value={dropdownValuesRow} onChange={setDropdownValuesRow} />
                   </div>

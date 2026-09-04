@@ -44,7 +44,7 @@ export function CardSkeleton({ count = 3 }) {
     <div className="flex flex-col gap-4">
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="bg-card rounded-2xl border border-divider shadow-sm p-5 flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[0, 1].map((j) => (
               <div key={j} className="flex flex-col gap-1.5">
                 <Skeleton className="h-3.5 w-20" />

@@ -1,10 +1,10 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Search,Download, UploadCloud, ArrowLeft } from 'lucide-react'
+import { Search,Download, UploadCloud, ArrowLeft, Plus } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
-import FlexSheet from '@/components/listing/FlexSheet'
+import MergedRowFields from '@/components/listing/MergedRowFields'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import BillingGateModal from '@/components/billing/BillingGateModal'
@@ -19,11 +19,22 @@ import useDebouncedCallback from '@/hooks/useDebouncedCallback'
 function isRowEmpty(row) {
   return Object.entries(row || {}).every(([k, v]) => k === 'aiFilled' || v === undefined || v === null || String(v).trim() === '')
 }
+function blankRow(headers) {
+  return Object.fromEntries((headers || []).map((h) => [h.id, '']))
+}
+// Rows are added by the "Add Product" button now, not automatically — so drop
+// the server's trailing empty row(s) on load (keeping at least one row to type
+// into if the whole sheet is empty).
+function stripTrailingEmpty(rows = []) {
+  let end = rows.length
+  while (end > 0 && isRowEmpty(rows[end - 1])) end--
+  return rows.slice(0, Math.max(1, end))
+}
 
-// The groups this page can show, in stack order: Product Details on top as a
-// real scrolling table, the rest below as flex blocks (no group-name
-// heading). Same three groups the old tab strip covered.
-const STACK_GROUPS = ['design_system', 'compulsory', 'prefill']
+// Product Details renders as its own scrolling table; every other group
+// (Compulsory + Brand Details) is shown per-row, injected directly under each
+// Product Details row as a sub-row (SheetGrid renderRowSubRow → MergedRowFields).
+const MERGE_GROUPS = ['compulsory', 'prefill']
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
@@ -61,7 +72,11 @@ function ScopedProductDetails({ templateId }) {
     let cancelled = false
     fetch(`/api/listing-tools/${templateId}`, { credentials: 'include' })
       .then((r) => r.json())
-      .then((d) => { if (!cancelled) { setTemplate(d.template); setContent(d.content) } })
+      .then((d) => {
+        if (cancelled) return
+        setTemplate(d.template)
+        setContent(d.content ? { ...d.content, sheets: d.content.sheets.map((s) => ({ ...s, rows: stripTrailingEmpty(s.rows) })) } : d.content)
+      })
     return () => { cancelled = true }
   }, [templateId])
 
@@ -70,11 +85,12 @@ function ScopedProductDetails({ templateId }) {
     [content]
   )
 
-  // Groups this template actually uses — same empty-group filter SheetTabs
-  // applied before it was removed (a template with nothing mapped into, say,
-  // Brand Details has a real `prefill` sheet object but `headers: []`).
-  const realGroups = useMemo(
-    () => STACK_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0),
+  // The Compulsory/Brand groups this template actually uses — same empty-group
+  // filter SheetTabs applied before it was removed (a template with nothing
+  // mapped into, say, Brand Details has a real `prefill` sheet object but
+  // `headers: []`).
+  const mergeGroups = useMemo(
+    () => MERGE_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0),
     [sheetsByGroup]
   )
 
@@ -201,6 +217,35 @@ function ScopedProductDetails({ templateId }) {
     addToast('Row deleted', 'success')
   }
 
+  // Deleting a Product Details row now also has to clear that row's sub-row
+  // fields (Compulsory + Brand). handleDeleteRow('design_system', row) already
+  // cascades to Compulsory (same Product Number identity) and shows the toast;
+  // Brand Details is an independent roster, so its aligned row is dropped by
+  // index here.
+  function handleDeleteProductRow(row, rowIndex) {
+    handleDeleteRow('design_system', row)
+    const prefSheet = sheetsByGroup.prefill
+    if (prefSheet && rowIndex != null && rowIndex < prefSheet.rows.length) {
+      const nextRows = prefSheet.rows.filter((_, i) => i !== rowIndex)
+      setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === 'prefill' ? { ...s, rows: nextRows } : s)) }))
+      persistGroupRows('prefill', prefSheet.headers, nextRows)
+    }
+  }
+
+  // Explicit "Add Product" — the only way to grow the row count now that the
+  // grid no longer auto-appends a blank when the last row fills. Adds one
+  // blank row to Product Details and each merged group; no-op if a spare
+  // empty row is already sitting at the bottom.
+  function handleAddProduct() {
+    const ds = sheetsByGroup.design_system
+    if (!ds) return
+    if (ds.rows.length && isRowEmpty(ds.rows[ds.rows.length - 1])) return
+    for (const g of ['design_system', ...mergeGroups]) {
+      const gs = sheetsByGroup[g]
+      if (gs) saveRows(g, [...gs.rows, blankRow(gs.headers)])
+    }
+  }
+
   // Merges AI-generated fields into one row and marks them `aiFilled` (plan
   // §14) — reuses the same debounced sheet save every other row edit goes
   // through, so the result persists exactly like a manual cell edit would.
@@ -294,6 +339,9 @@ function ScopedProductDetails({ templateId }) {
           />
         </div>
         <div className="flex items-center gap-2">
+          <PillButton variant="edit" icon={Plus} onClick={handleAddProduct} disabled={!content}>
+            Add Product
+          </PillButton>
           <TemplateHistoryPanel templateId={templateId} />
           <PillButton variant="upload" icon={UploadCloud} onClick={() => uploadInputRef.current?.click()}>
             Upload Old Sheet
@@ -324,37 +372,86 @@ function ScopedProductDetails({ templateId }) {
         </div>
       )}
 
-      {content && realGroups.map((g) => {
+      {/* Product Details is the scrolling table; each of its rows is followed
+          by that row's Compulsory + Brand fields as a sub-row (renderRowSubRow
+          → MergedRowFields). */}
+      {content && (sheetsByGroup.design_system?.headers?.length ?? 0) > 0 && (() => {
+        const g = 'design_system'
         const gsheet = sheetsByGroup[g]
         const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
-        const gRows = filteredRowsFor(g)
-        const gPicker = buildPickerOptions(gsheet.headers, sheetsByGroup)
-        const commonProps = {
-          headers: gsheet.headers,
-          rows: gRows,
-          onRowsChange: (nextRows) => saveRows(g, nextRows),
-          uploadUrl: `/api/listing-tools/${templateId}/images`,
-          activeFilterHeaderId: filter[g]?.key || null,
-          filterValue: filter[g]?.value || '',
-          onFilterChange: gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined,
-          pickerOptions: gPicker,
-          onCellChange: (headerId, value, rowIndex) => resolveLinkedFill(gsheet.headers, headerId, value, rowIndex, sheetsByGroup),
-          onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
-          onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
-          onDeleteRow: (row) => handleDeleteRow(g, row),
+        // Product Details table = core columns only; "Big" / "Image Link"
+        // (design_system headers tagged `uiBucket`) show in the sub-row as
+        // their own groups instead.
+        const coreHeaders = gsheet.headers.filter((h) => !h.uiBucket)
+        const dsOnCellChange = (headerId, value, rowIndex) => resolveLinkedFill(gsheet.headers, headerId, value, rowIndex, sheetsByGroup)
+
+        const groupSections = mergeGroups.map((mg) => {
+          const ms = sheetsByGroup[mg]
+          return {
+            group: mg,
+            label: ms.sheetName || (mg === 'compulsory' ? 'Compulsory' : 'Brand Details'),
+            headers: ms.headers,
+            rows: filteredRowsFor(mg),
+            onRowsChange: (nextRows) => saveRows(mg, nextRows),
+            onCellChange: (headerId, value, rowIndex) => resolveLinkedFill(ms.headers, headerId, value, rowIndex, sheetsByGroup),
+            onHeaderChange: (headerId, patch) => handleHeaderChange(mg, headerId, patch),
+            onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(mg, rowIndex, headerId, url),
+            pickerOptions: buildPickerOptions(ms.headers, sheetsByGroup),
+          }
+        })
+
+        const bucketSection = (bucket, label) => {
+          const ids = new Set(gsheet.headers.filter((h) => h.uiBucket === bucket && !h.disabled).map((h) => h.id))
+          if (!ids.size) return null
+          return {
+            group: g,
+            label,
+            bucket,
+            headers: gsheet.headers,
+            visibleHeaderIds: ids,
+            rows: filteredRowsFor(g),
+            onRowsChange: (nextRows) => saveRows(g, nextRows),
+            onCellChange: dsOnCellChange,
+            onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
+            onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
+            pickerOptions: buildPickerOptions(gsheet.headers, sheetsByGroup),
+          }
         }
+        // Order: Compulsory → Big → Brand Details → Image Link.
+        const subSections = [
+          groupSections.find((s) => s.group === 'compulsory'),
+          bucketSection('big', 'Big'),
+          groupSections.find((s) => s.group === 'prefill'),
+          bucketSection('image_link', 'Image Link'),
+        ].filter(Boolean)
+
         return (
-          <div
-            key={g}
-            onPointerDownCapture={() => setActiveGroup(g)}
-            className={`rounded-lg transition-shadow ${activeGroup === g ? 'ring-2 ring-accent/30' : ''}`}
-          >
-            {g === 'design_system'
-              ? <SheetGrid headerInfo {...commonProps} />
-              : <FlexSheet {...commonProps} />}
-          </div>
+          <SheetGrid
+            headerInfo
+            autoAppendRow={false}
+            headers={coreHeaders}
+            rows={filteredRowsFor(g)}
+            onRowsChange={(nextRows) => saveRows(g, nextRows)}
+            uploadUrl={`/api/listing-tools/${templateId}/images`}
+            activeFilterHeaderId={filter[g]?.key || null}
+            filterValue={filter[g]?.value || ''}
+            onFilterChange={gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined}
+            pickerOptions={buildPickerOptions(gsheet.headers, sheetsByGroup)}
+            onCellChange={dsOnCellChange}
+            onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}
+            onImageUploaded={(rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url)}
+            onDeleteRow={(row, rowIndex) => handleDeleteProductRow(row, rowIndex)}
+            renderRowSubRow={subSections.length ? ((rowIndex) => (
+              <MergedRowFields
+                rowIndex={rowIndex}
+                autoAppendRow={false}
+                uploadUrl={`/api/listing-tools/${templateId}/images`}
+                sections={subSections}
+              />
+            )) : undefined}
+          />
         )
-      })}
+      })()}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: [activeGroup], format: 'excel', meta: template })} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />

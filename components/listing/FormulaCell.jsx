@@ -26,7 +26,7 @@ function splitParts(value) {
 // convention as every other cell in this grid) by rejoining the *committed* segments (blanks
 // dropped) with ", " — the header itself counts as "currently being edited" throughout, so
 // formula.js's recomputeFormulas skips it rather than fighting whichever box has focus.
-export default function FormulaCell({ value, formula, headers, row, disabled, onChange }) {
+export default function FormulaCell({ value, formula, headers, row, disabled, onChange, compact = false }) {
   const [editing, setEditing] = useState(false)
   const [draftParts, setDraftParts] = useState(null)
 
@@ -34,6 +34,22 @@ export default function FormulaCell({ value, formula, headers, row, disabled, on
   const isMulti = parts.length > 1
 
   if (!isMulti) {
+    // `compact` — the merged Compulsory/Brand block wants every field the same
+    // small size, so skip AutoGrowTextarea's fixed 140px box for a 1-row one.
+    const cls = 'w-full min-w-[110px] resize-none bg-transparent px-3 py-2 text-[13px] leading-tight italic text-foreground focus:outline-none focus:ring-1 focus:ring-inset focus:ring-accent-light disabled:text-subtle placeholder:not-italic placeholder:text-subtle'
+    if (compact) {
+      return (
+        <textarea
+          rows={1}
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={String(evaluateFormula(formula, row, headers) ?? '') || undefined}
+          disabled={disabled}
+          title={formula || undefined}
+          className={cls}
+        />
+      )
+    }
     return (
       <AutoGrowTextarea
         value={value ?? ''}

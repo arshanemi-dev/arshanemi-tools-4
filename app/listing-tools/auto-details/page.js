@@ -1,10 +1,10 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Search, Download, UploadCloud, PlusCircle, Save, Sparkles, Monitor } from 'lucide-react'
+import { Search, Download, UploadCloud, PlusCircle, Plus, Save, Sparkles, Monitor } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
-import FlexSheet from '@/components/listing/FlexSheet'
+import MergedRowFields from '@/components/listing/MergedRowFields'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
@@ -571,6 +571,24 @@ function ScopedAutoDetails({ templateId }) {
     setSessionRows(blankSessionFor(content?.sheets))
   }
 
+  // Explicit "Add Product" — the only thing that grows the row count now that
+  // SheetGrid/MergedRowFields no longer auto-append a blank when the last row
+  // fills (autoAppendRow={false}). Adds one blank row to every real group so
+  // Product Details and its sub-row fields stay in lock-step.
+  function handleAddProduct() {
+    setSessionRows((prev) => {
+      const dsRows = prev.design_system || []
+      // A spare empty row is already sitting at the bottom — nothing to add.
+      if (dsRows.length && isRowEmpty(dsRows[dsRows.length - 1])) return prev
+      const maxLen = Math.max(0, ...realGroups.map((g) => (prev[g] || []).length))
+      const nextAll = { ...prev }
+      for (const g of realGroups) {
+        nextAll[g] = extendRows(g, prev[g] || [], maxLen + 1)
+      }
+      return nextAll
+    })
+  }
+
   // Merges AI-generated fields into the active group's current session row
   // and marks them `aiFilled` (plan §14) — goes through the same
   // handleRowsChange every manual edit in this group uses, so it stays
@@ -737,7 +755,7 @@ function ScopedAutoDetails({ templateId }) {
   }
 
   return (
-    <div className="min-h-[70vh] bg-surface px-6 py-6 space-y-4">
+    <div className="min-h-[80vh] bg-surface px-6 py-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
@@ -749,6 +767,9 @@ function ScopedAutoDetails({ templateId }) {
           />
         </div>
         <div className="flex items-center gap-2">
+          <PillButton variant="edit" icon={Plus} onClick={handleAddProduct} disabled={!content}>
+            Add Product
+          </PillButton>
           <PillButton
             variant="ai"
             icon={Sparkles}
@@ -801,53 +822,108 @@ function ScopedAutoDetails({ templateId }) {
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
 
-      {/* Every real group on one screen at once — no tab strip. Product
-          Details keeps the real scrolling SheetGrid table; the rest render as
-          flex blocks (FlexSheet), no group-name heading. Same handlers,
-          scoped per block instead of via a single active group. */}
-      {content && realGroups.map((g) => {
+      {/* No tab strip. Product Details is the scrolling SheetGrid table; each
+          of its rows is immediately followed by that same row's Compulsory +
+          Brand Details fields, injected as a sub-row (renderRowSubRow →
+          MergedRowFields). Every handler is scoped per group. */}
+      {content && realGroups.includes('design_system') && (() => {
+        const g = 'design_system'
         const gsheet = sheetsByGroup[g]
-        const blockProps = {
-          headers: gsheet.headers,
-          rows: filteredRowsFor(g),
-          onRowsChange: (nextRows) => handleRowsChange(g, nextRows),
-          uploadUrl: `/api/listing-tools/${templateId}/images`,
-          pickerOptions: pickerOptionsFor(g),
-          loadingCells,
-          onCellChange: (headerId, value, rowIndex, row) => {
-            const sameGroupExtra = resolveLinkedFill(gsheet.headers, headerId, value, -1, ownSheetsByGroup)
-            // `row` already has this edit applied (see SheetGrid.jsx's
-            // resolveRow); merge in whatever Rule A just resolved too, so
-            // picking an *existing* record propagates its full row, not
-            // just the one field that was clicked. Always attempted, for
-            // whichever group this block is — connected headers work the
-            // same regardless of which group is the source; a group with
-            // nothing linked back to it is just a no-op here.
-            const fullRow = { ...row, ...(sameGroupExtra || {}) }
-            const crossGroupUpdates = propagateFromGroup(g, fullRow, ownSheetsByGroup)
-            handleCellReconciliation(rowIndex, headerId, g, fullRow, crossGroupUpdates)
+        // Product Details table shows only the *core* Product Details columns —
+        // the "Big" / "Image Link" buckets (design_system headers tagged
+        // `uiBucket`, see NewTemplateDesign.jsx) drop out of the table and show
+        // in the sub-row as their own groups instead.
+        const coreHeaders = gsheet.headers.filter((h) => !h.uiBucket)
 
-            // Typing into the Product Group cell itself is what triggers the group
-            // backfill (see handleGroupSelect/debouncedGroupAutoFill) — that header
-            // only ever lives on the design_system block.
-            if (productGroupHeaderId && headerId === productGroupHeaderId) {
-              debouncedGroupAutoFill(value, rowIndex)
-            }
-
-            return sameGroupExtra
-          },
-          onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
-          onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
-          onDeleteRow: (row) => handleDeleteRow(g, row),
+        // Shared design_system edit handlers — reused by the bucket sub-sections
+        // below, whose real group is still design_system.
+        const dsOnCellChange = (headerId, value, rowIndex, row) => {
+          const sameGroupExtra = resolveLinkedFill(gsheet.headers, headerId, value, -1, ownSheetsByGroup)
+          const fullRow = { ...row, ...(sameGroupExtra || {}) }
+          const crossGroupUpdates = propagateFromGroup(g, fullRow, ownSheetsByGroup)
+          handleCellReconciliation(rowIndex, headerId, g, fullRow, crossGroupUpdates)
+          if (productGroupHeaderId && headerId === productGroupHeaderId) {
+            debouncedGroupAutoFill(value, rowIndex)
+          }
+          return sameGroupExtra
         }
+
+        const subGroups = realGroups.filter((x) => x !== 'design_system')
+        const groupSections = subGroups.map((mg) => {
+          const ms = sheetsByGroup[mg]
+          return {
+            group: mg,
+            label: ms.sheetName || (mg === 'compulsory' ? 'Compulsory' : 'Brand Details'),
+            headers: ms.headers,
+            rows: filteredRowsFor(mg),
+            onRowsChange: (nextRows) => handleRowsChange(mg, nextRows),
+            onCellChange: (headerId, value, rowIndex, row) => {
+              const sameGroupExtra = resolveLinkedFill(ms.headers, headerId, value, -1, ownSheetsByGroup)
+              const fullRow = { ...row, ...(sameGroupExtra || {}) }
+              const crossGroupUpdates = propagateFromGroup(mg, fullRow, ownSheetsByGroup)
+              handleCellReconciliation(rowIndex, headerId, mg, fullRow, crossGroupUpdates)
+              return sameGroupExtra
+            },
+            onHeaderChange: (headerId, patch) => handleHeaderChange(mg, headerId, patch),
+            onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(mg, rowIndex, headerId, url),
+            pickerOptions: pickerOptionsFor(mg),
+          }
+        })
+
+        // "Big" / "Image Link" — design_system headers carrying that `uiBucket`,
+        // shown as their own sub-row groups. Same design_system rows + handlers
+        // as the table (they ARE design_system), just a filtered header view.
+        const bucketSection = (bucket, label) => {
+          const ids = new Set(gsheet.headers.filter((h) => h.uiBucket === bucket && !h.disabled).map((h) => h.id))
+          if (!ids.size) return null
+          return {
+            group: g,
+            label,
+            bucket,
+            headers: gsheet.headers,
+            visibleHeaderIds: ids,
+            rows: filteredRowsFor(g),
+            onRowsChange: (nextRows) => handleRowsChange(g, nextRows),
+            onCellChange: dsOnCellChange,
+            onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
+            onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url),
+            pickerOptions: pickerOptionsFor(g),
+          }
+        }
+        // Order: Compulsory → Big → Brand Details → Image Link.
+        const subSections = [
+          groupSections.find((s) => s.group === 'compulsory'),
+          bucketSection('big', 'Big'),
+          groupSections.find((s) => s.group === 'prefill'),
+          bucketSection('image_link', 'Image Link'),
+        ].filter(Boolean)
+
         return (
-          <div key={g}>
-            {g === 'design_system'
-              ? <SheetGrid headerInfo {...blockProps} />
-              : <FlexSheet {...blockProps} />}
-          </div>
+          <SheetGrid
+            headerInfo
+            autoAppendRow={false}
+            headers={coreHeaders}
+            rows={filteredRowsFor(g)}
+            onRowsChange={(nextRows) => handleRowsChange(g, nextRows)}
+            uploadUrl={`/api/listing-tools/${templateId}/images`}
+            pickerOptions={pickerOptionsFor(g)}
+            loadingCells={loadingCells}
+            onCellChange={dsOnCellChange}
+            onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}
+            onImageUploaded={(rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url)}
+            onDeleteRow={(row) => handleDeleteRow(g, row)}
+            renderRowSubRow={subSections.length ? ((rowIndex) => (
+              <MergedRowFields
+                rowIndex={rowIndex}
+                autoAppendRow={false}
+                uploadUrl={`/api/listing-tools/${templateId}/images`}
+                loadingCells={loadingCells}
+                sections={subSections}
+              />
+            )) : undefined}
+          />
         )
-      })}
+      })()}
 
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
       <BillingGateModal gate={saveGate} onClose={() => setSaveGate(null)} onRetry={handleSave} />
