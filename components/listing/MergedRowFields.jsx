@@ -79,7 +79,8 @@ export default function MergedRowFields({ sections = [], rowIndex, uploadUrl, lo
   // normal HEIGHT (not width — Task, round 8). Extra right padding + the
   // scroll container's `scrollbar-gutter` (SheetGrid) keep a gap between the
   // fields and the scrollbar.
-  const FIELD_W = 'w-[13.65%] min-w-[140px] max-w-full'
+  const FIELD_W = 'w-[11.85%] min-w-[140px] max-w-full';
+  const FIELD_B_W = 'w-[23.7%] min-w-[140px] max-w-full';
   const BOX_BASE = 'block overflow-hidden rounded-md border'
 
   return (
@@ -89,9 +90,9 @@ export default function MergedRowFields({ sections = [], rowIndex, uploadUrl, lo
         const tall = s.bucket === 'big'
         return (
           <div key={s.bucket || s.group} className="min-w-0">
-            <p className="mb-2 border-b border-divider/70 pb-1 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+            {/* <p className="mb-2 border-b border-divider/70 pb-1 text-[11px] font-semibold uppercase tracking-wide text-subtle">
               {groupName || s.group}
-            </p>
+            </p> */}
             <div className="flex flex-wrap gap-3">
               {s.visibleHeaders.map((h) => {
                 const rowObj = s.rows[rowIndex] || {}
@@ -100,7 +101,7 @@ export default function MergedRowFields({ sections = [], rowIndex, uploadUrl, lo
                 const isFormulaSetter = h.dataType === 'formula' && !!s.onHeaderChange
                 const boxCls = `${BOX_BASE} ${tall ? 'min-h-[128px]' : 'min-h-[40px]'} ${aiFilled ? 'border-l-2 border-l-accent-light border-divider bg-accent/10' : 'border-divider bg-background'}`
                 return (
-                  <div key={`${s.bucket || s.group}:${h.id}`} className={FIELD_W}>
+                  <div key={`${s.bucket || s.group}:${h.id}`} className={groupName.includes('Big') ? FIELD_B_W : FIELD_W}>
                     <div className="mb-1 flex items-center gap-1">
                       <span className={`truncate text-[12px] font-semibold text-foreground ${isFormulaSetter ? 'min-w-0 max-w-[45%]' : ''}`}>{h.label}</span>
                       {(h.dataType === 'dropdown' || h.dataType === 'multiselect' || isPicker) && (

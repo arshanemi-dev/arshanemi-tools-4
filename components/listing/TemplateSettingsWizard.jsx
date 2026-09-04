@@ -795,12 +795,13 @@ export default function TemplateSettingsWizard({ templateId }) {
       // falls to Unselected / "Other" — same behaviour in both designs now.
       const built = buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx)
       setDropdownColumns(cols)
-      // Every image-type header (from the sheet OR a built-in Image N default)
-      // is auto-tagged into the New Design's "Image Link" bucket — its real
-      // group stays whatever it was, so exports/fill pages are unaffected.
+      // ONLY image headers auto-detected from the uploaded SHEET (source
+      // 'upload') get tagged into the New Design's "Image Link" bucket —
+      // built-in Image N defaults and hand-added headers are left in their
+      // group. Real `group` is untouched, so exports/fill pages are unaffected.
       setFields(
         withDefaultHeaders(built).map((f) =>
-          f.dataType === 'image' ? { ...f, uiBucket: 'image_link' } : f,
+          f.dataType === 'image' && f.source === 'upload' ? { ...f, uiBucket: 'image_link' } : f,
         ),
       )
       setShowGroups(true)
@@ -843,7 +844,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       const groupsInOrder = []
       const buckets = new Map()
       // Key by the New Design display bucket when set, else the real group —
-      // so "Big" / "Image Link" sort as their own section, not lumped with
+      // so "Big" / "Image Link" sort as their own section, not lumped in with
       // the rest of Product Details.
       const keyOf = (f) => f.uiBucket || f.groupId
       for (const f of prev) {

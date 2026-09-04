@@ -52,7 +52,10 @@ const SECTIONS = [
   { id: 'image_link', title: 'Image Link', flag: 'imglink', group: 'design_system', bucket: 'image_link' },
   { id: UNMAPPED_TAB_ID, title: 'Other', flag: 'gray', group: UNMAPPED_TAB_ID, bucket: null },
 ]
-// Which section a field currently sits in (uiBucket wins over the real group).
+// Which section a field currently sits in — purely its `uiBucket`, else the
+// real group. Only headers auto-detected as images while a SHEET is parsed
+// get `uiBucket: 'image_link'` (see the wizard's parse effect); built-in
+// default image headers and hand-added ones are left in their group.
 const sectionKeyOf = (f) =>
   f?.uiBucket === 'big' ? 'big' : f?.uiBucket === 'image_link' ? 'image_link' : f?.groupId
 
