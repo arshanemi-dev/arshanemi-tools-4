@@ -337,7 +337,7 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
                   onClick={openEditNames}
                   title="Edit the Template Name and Template Final Name"
                 >
-                  Edit Template
+                  Edit Name
                 </PillButton>
                 <PillButton variant="ghost" icon={Pencil} onClick={startEditRules}>
                   Edit Rules
