@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { nanoid } from 'nanoid'
 import { getAuthPayload } from '@/lib/auth'
 import { uploadFile } from '@/lib/storage/dropbox'
-import { getTemplateMeta, canAccessTemplate } from '@/lib/listingTemplates'
+import { getTemplateMeta, canAccessTemplate } from '@/lib/listingStore'
 
 const MAX_MB = 5
 

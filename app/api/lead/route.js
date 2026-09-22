@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { buildLeadEmail, sendEmail } from '@/lib/mailer';
 import { getSingleton, createItem } from '@/lib/db';
 import { COMPANY_EMAIL } from '@/data/company';
+import { env } from '@/lib/env';
 
 export async function POST(req) {
   try {
@@ -33,7 +34,7 @@ export async function POST(req) {
     const { subject, html } = buildLeadEmail({ name, email, phone, interest });
 
     await sendEmail({
-      from: `"Barmeto Website" <${process.env.SMTP_USER}>`,
+      from: `"Barmeto Website" <${env.SMTP_USER}>`,
       replyTo: `"${name}" <${email}>`,
       to: toEmail,
       subject,

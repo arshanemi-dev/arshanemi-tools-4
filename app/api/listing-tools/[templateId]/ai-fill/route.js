@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, findSimilarRows, canAccessTemplate } from '@/lib/listingTemplates'
+import { getTemplateMeta, getTemplateContent, findSimilarRows, canAccessTemplate } from '@/lib/listingStore'
 import {
   computeFillTargets, computeVisionTargets, toTargetSpec, keyLabelsAndValues,
   buildCrossGroupFacts, buildPrompt, sanitizeGeneratedFields,

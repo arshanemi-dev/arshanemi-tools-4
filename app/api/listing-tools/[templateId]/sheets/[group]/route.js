@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
-  getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
-  ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS, canAccessTemplate,
-} from '@/lib/listingTemplates'
+  getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta, canAccessTemplate,
+} from '@/lib/listingStore'
+import { ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS } from '@/lib/listingTemplates'
 import {
   recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory,
   deleteProductDetailsHistory, deletePrefillDetailsHistory, toLabelKeyedRow,

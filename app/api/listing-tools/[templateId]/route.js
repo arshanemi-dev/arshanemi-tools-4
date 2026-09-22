@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, updateTemplateMeta, deleteTemplate,
-  saveTemplateContent, ensureTrailingEmptyRow, detectDataType, GROUPS, templateBadgeFor, canAccessTemplate,
-} from '@/lib/listingTemplates'
+  saveTemplateContent, canAccessTemplate,
+} from '@/lib/listingStore'
+import { ensureTrailingEmptyRow, detectDataType, GROUPS, templateBadgeFor } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 

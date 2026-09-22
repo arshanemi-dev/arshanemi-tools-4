@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, saveTemplateContent, assignSkusToRows, canAccessTemplate } from '@/lib/listingTemplates'
+import { getTemplateMeta, getTemplateContent, saveTemplateContent, assignSkusToRows, canAccessTemplate } from '@/lib/listingStore'
 
 function guessKeyHeaderIds(headers) {
   const find = (re) => headers.find((h) => re.test(h.label || ''))?.id

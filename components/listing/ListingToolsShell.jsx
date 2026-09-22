@@ -1,8 +1,17 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { isLoggedIn, authFetch } from '@/lib/tokenStore'
 import ListingToolsSidebar from './ListingToolsSidebar'
 import DashboardTopbar from '@/components/dashboard/DashboardTopbar'
+
+// Routes that want the full width with no main nav — same "sidebar-less"
+// pattern DashboardTopbar already supports for /profile (omit onMenuClick
+// and it just doesn't render the hamburger). The bulk mapping page is
+// already a two-pane layout of its own (BulkRuleSidebar + the working
+// panel); a second, unrelated nav column alongside it left no real room to
+// work.
+const NO_SIDEBAR_PREFIXES = ['/listing-tools/template-settings/new-bulk']
 
 // Reconciles the server-rendered session (app/listing-tools/layout.js reads
 // an httpOnly cookie, which a cross-app SSO handoff visitor doesn't have
@@ -16,6 +25,8 @@ export default function ListingToolsShell({ initialUser, initialTemplateSettings
   const [user, setUser] = useState(initialUser)
   const [templateSettingsAllowed, setTemplateSettingsAllowed] = useState(initialTemplateSettingsAllowed)
   const [navOpen, setNavOpen] = useState(false)
+  const pathname = usePathname()
+  const hideMainSidebar = NO_SIDEBAR_PREFIXES.some((p) => pathname?.startsWith(p))
 
   useEffect(() => {
     if (initialUser || !isLoggedIn()) return
@@ -33,15 +44,17 @@ export default function ListingToolsShell({ initialUser, initialTemplateSettings
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      {!headerHidden && <DashboardTopbar user={user} onMenuClick={() => setNavOpen(true)} />}
+      {!headerHidden && <DashboardTopbar user={user} onMenuClick={hideMainSidebar ? undefined : () => setNavOpen(true)} />}
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <ListingToolsSidebar
-          role={user?.role}
-          templateSettingsAllowed={templateSettingsAllowed}
-          mobileOpen={navOpen}
-          onClose={() => setNavOpen(false)}
-        />
+        {!hideMainSidebar && (
+          <ListingToolsSidebar
+            role={user?.role}
+            templateSettingsAllowed={templateSettingsAllowed}
+            mobileOpen={navOpen}
+            onClose={() => setNavOpen(false)}
+          />
+        )}
         <main className="flex-1 overflow-y-auto min-w-0">{children}</main>
       </div>
     </div>

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
-  listTemplates, listVisibleTemplatesForViewer, templateBadgeFor,
-  createTemplateMeta, saveTemplateContent, ensureTrailingEmptyRow, detectDataType,
-} from '@/lib/listingTemplates'
+  listTemplates, listVisibleTemplatesForViewer,
+  createTemplateMeta, saveTemplateContent,
+} from '@/lib/listingStore'
+import { templateBadgeFor, ensureTrailingEmptyRow, detectDataType } from '@/lib/listingTemplates'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 
 async function authorize(req) {

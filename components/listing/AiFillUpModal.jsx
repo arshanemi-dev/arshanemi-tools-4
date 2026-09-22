@@ -215,7 +215,7 @@ export default function AiFillUpModal({ onClose, sheets, defaultGroup, onRun }) 
               type="button"
               disabled={totalFields === 0}
               onClick={handleConfirm}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[12.5px] font-medium text-foreground bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[12.5px] font-medium text-white bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5" /> Run AI Fill
             </button>

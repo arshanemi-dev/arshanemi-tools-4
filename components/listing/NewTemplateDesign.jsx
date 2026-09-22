@@ -1,11 +1,15 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { UploadCloud, Save, Bookmark, Plus, Trash2, Check, Loader2, ArrowLeft, X, FileSpreadsheet, Link2 } from 'lucide-react'
+import { Save, Bookmark, Plus, Trash2, Check, Loader2, ArrowLeft, Link2 } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 import { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import NewDesignColumnModal from './NewDesignColumnModal'
 import Tooltip from './Tooltip'
+import ExtractionProgressModal from './ExtractionProgressModal'
+import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
+import SourceFileUploadControl from './SourceFileUploadControl'
+import SheetSelectorFields from './SheetSelectorFields'
 
 // Ids a header auto-fills from — the newer multi-select `linkedHeaderIds`
 // array, falling back to the single legacy `linkedHeaderId`.
@@ -102,9 +106,6 @@ const GROUP_FLAGS = ['red', 'green', 'blue', 'gray']
 const FLAG_TO_GROUP = { red: 'design_system', green: 'compulsory', blue: 'prefill', gray: UNMAPPED_TAB_ID }
 const GROUP_TO_FLAG = { design_system: 'red', compulsory: 'green', prefill: 'blue', [UNMAPPED_TAB_ID]: 'gray' }
 
-const inputCls =
-  'w-full h-[38px] rounded-md border border-[#d7dce2] bg-background px-2.5 text-[14px] text-foreground outline-none focus:border-[#9dbfe8] placeholder:text-subtle'
-
 function FlagBox({ kind, on, onClick, locked, title }) {
   const interactive = !!onClick && !locked
   return (
@@ -124,40 +125,15 @@ function FlagBox({ kind, on, onClick, locked, title }) {
   )
 }
 
-function Field({ label, className = '', children }) {
-  return (
-    <div className={`min-w-0 px-1.5 ${className}`}>
-      <label className="my-1.5 block truncate text-[14.5px] text-muted">{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function MiniInput({ label, value, onChange, defaultValue, readOnly }) {
-  const cls =
-    'h-[34px] w-full min-w-[56px] rounded-md border border-[#d7dce2] bg-background px-2.5 text-[14px] text-foreground outline-none focus:border-[#9dbfe8]'
-  return (
-    <label className="flex min-w-0 flex-[1_1_150px] items-center gap-2 text-[14.5px] text-muted">
-      <span className="whitespace-nowrap">{label}</span>
-      {onChange ? (
-        <input type="number" min={1} value={value} onChange={(e) => onChange(e.target.value)} className={cls} />
-      ) : (
-        <input defaultValue={defaultValue} readOnly={readOnly} className={cls} />
-      )}
-    </label>
-  )
-}
-
 export default function NewTemplateDesign({ api }) {
   const { addToast } = useToast()
-  const fileRef = useRef(null)
   const [collapsed, setCollapsed] = useState(false)
   const [modalId, setModalId] = useState(null)
   const [sortMode, setSortMode] = useState(null) // last-applied per-group sort: null | 'label' | 'original'
   const [dragOverSec, setDragOverSec] = useState(null)
 
   const {
-    isEditMode, fields, parsing, sheetMeta, uploadingSource,
+    isEditMode, fields, parsing, extraction, sheetMeta, uploadingSource,
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
     dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
@@ -191,25 +167,17 @@ export default function NewTemplateDesign({ api }) {
   }
 
   const cat = (n) => categoriesData[`category${n}`] || ''
-  const setCat = (n, v) => setCategoriesData({ ...categoriesData, [`category${n}`]: v })
-  const setPreset = (k, v) => setPresetData({ ...presetData, [k]: v })
 
-  // Both composed names join with "_". Save Final Name also appends the
-  // Version at the very end (marketplace_cat1…cat6_version).
-  const finalName = [presetData.marketplaceName, cat(1), cat(2), cat(3), cat(4), cat(5), cat(6), presetData.exportVersion]
-    .map((s) => (s || '').trim())
-    .filter(Boolean)
-    .join('_')
-
+  // Both composed names join with "_" — shared with TemplateNamingFields
+  // (which renders the actual inputs below) and the bulk mapping page, so
+  // every caller composes them identically.
+  const finalName = composeFinalName(presetData, categoriesData)
   // Create mode: Template Name is composed automatically from Marketplace +
   // Category 6 ("Meesho_Blouses") and is read-only. It isn't stored in the
   // wizard's `templateNameInput` state — it's passed straight to handleSave()
   // below. Edit mode keeps the saved name editable (Category 6 isn't
   // persisted, so it can't be recomposed).
-  const autoTemplateName = [presetData.marketplaceName, cat(6)]
-    .map((s) => (s || '').trim())
-    .filter(Boolean)
-    .join('_')
+  const autoTemplateName = composeAutoTemplateName(presetData, categoriesData)
   const saveTemplate = () =>
     handleSave({ ...(isEditMode ? {} : { templateName: autoTemplateName }), finalName })
 
@@ -265,9 +233,6 @@ export default function NewTemplateDesign({ api }) {
     setCollapsed(true)
   }
 
-  const btnBase =
-    'flex w-full items-center justify-center gap-2 rounded-full h-10 mb-3 text-[15px] font-semibold text-white disabled:opacity-60'
-
   return (
     <div className="text-[14px]">
       {savedTemplate && isEditMode && (
@@ -309,197 +274,79 @@ export default function NewTemplateDesign({ api }) {
         </div>
       )}
 
-      {/* top form */}
+      {/* title + small action buttons, side by side */}
       {!collapsed && (
-        <div className="flex flex-wrap items-stretch">
-          <div className="min-w-0 flex-[1_1_520px] rounded-[7px] border border-divider p-3">
-            <div className="flex flex-wrap">
-              <Field label="Marketplace Name" className="flex-[1_1_170px]">
-                <input
-                  className={inputCls}
-                  placeholder="Meesho"
-                  value={presetData.marketplaceName || ''}
-                  onChange={(e) => setPreset('marketplaceName', e.target.value)}
-                />
-              </Field>
-              {[1, 2, 3, 4, 5, 6].map((n) => (
-                <Field key={n} label={`Category ${n}`} className="flex-[1_1_170px]">
-                  <input className={inputCls} value={cat(n)} onChange={(e) => setCat(n, e.target.value)} />
-                </Field>
-              ))}
-              <Field label="Version" className="flex-[0_1_105px]">
-                <input
-                  className={inputCls}
-                  placeholder="v1.0"
-                  value={presetData.exportVersion || ''}
-                  onChange={(e) => setPreset('exportVersion', e.target.value)}
-                />
-              </Field>
-            </div>
-
-            <div className="flex flex-wrap">
-              <Field label="Save Final Name" className="flex-[5_1_260px]">
-                <input
-                  readOnly
-                  className={`${inputCls} bg-surface font-semibold text-muted`}
-                  value={finalName}
-                  placeholder="marketplace_category_version"
-                />
-              </Field>
-              <Field label="Template Name" className="flex-[2.4_1_170px]">
-                {isEditMode ? (
-                  <input
-                    className={inputCls}
-                    placeholder="Meesho_Blouses"
-                    value={templateNameInput}
-                    onChange={(e) => setTemplateNameInput(e.target.value)}
-                  />
-                ) : (
-                  <input
-                    readOnly
-                    title="Auto — Marketplace + Category 6"
-                    className={`${inputCls} bg-surface font-semibold text-muted`}
-                    placeholder="Marketplace_Category 6"
-                    value={autoTemplateName}
-                  />
-                )}
-              </Field>
-              <Field label="Template No" className="flex-[0.95_1_110px]">
-                <input
-                  readOnly
-                  disabled
-                  title="Assigned automatically on save — not editable"
-                  className={`${inputCls} bg-surface font-semibold text-muted`}
-                  value={templateNumber || 'On save'}
-                />
-              </Field>
-              <Field label="Description" className="flex-[6_1_200px]">
-                <input
-                  className={inputCls}
-                  placeholder="Other"
-                  value={presetData.description || ''}
-                  onChange={(e) => setPreset('description', e.target.value)}
-                />
-              </Field>
-            </div>
-
-            {currentPreset && (
-              <p className="mt-1.5 px-1.5 text-[12px] text-emerald-600">
-                Preset saved: {currentPreset.marketplaceName || 'marketplace'} /{' '}
-                {currentPreset.category1 || 'category'} / {currentPreset.exportVersion || 'v1.0'}
-              </p>
-            )}
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
+            <p className="text-[13px] text-subtle mt-0.5">
+              {isEditMode
+                ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
+                : 'Upload a master sheet, group its headers, drag them where they belong, set the export preset, and save.'}
+            </p>
           </div>
-
-          <div className="mt-3 flex w-full flex-shrink-0 flex-col sm:ml-3.5 sm:mt-0 sm:w-[200px]">
+          <div className="flex flex-wrap items-center gap-2">
             {!isEditMode && (
-              <>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={(e) => {
-                    handleFile(e.target.files?.[0])
-                    e.target.value = ''
-                  }}
-                />
-                {fileName ? (
-                  /* Upload done → show the file name + a × that resets everything below */
-                  <div className="mb-3 flex h-10 items-center gap-2 rounded-lg border border-divider bg-surface px-2.5">
-                    {parsing ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#16a34a]" />
-                    ) : (
-                      <FileSpreadsheet className="h-4 w-4 shrink-0 text-[#16a34a]" />
-                    )}
-                    <span
-                      className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground"
-                      title={fileName}
-                    >
-                      {fileName}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleClearUpload}
-                      title="Remove sheet & reset the form below"
-                      className="shrink-0 rounded-full p-1 text-subtle hover:bg-[#fdeeee] hover:text-[#e02424]"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={parsing}
-                    className={`${btnBase} bg-[#101828]`}
-                  >
-                    {parsing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <UploadCloud className="h-4 w-4 text-emerald-400" />
-                    )}
-                    Upload Sheet
-                  </button>
-                )}
-              </>
+              <SourceFileUploadControl
+                fileName={fileName}
+                parsing={parsing}
+                onPick={handleFile}
+                onClear={handleClearUpload}
+                label="Upload Sheet"
+              />
             )}
-            <button type="button" onClick={handleSavePreset} className={`${btnBase} bg-[#2f6fd0]`}>
-              <Save className="h-4 w-4" /> Save
+            <button
+              type="button"
+              onClick={handleSavePreset}
+              className="flex items-center gap-1.5 rounded-full bg-[#2f6fd0] px-4 py-2 text-[14px] font-medium text-white"
+            >
+              <Save className="h-3.5 w-3.5" /> Save
             </button>
-            <button type="button" onClick={saveTemplate} disabled={saving} className={`${btnBase} bg-[#ec1e63]`}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />} Save to template
+            <button
+              type="button"
+              onClick={saveTemplate}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />} Save to template
             </button>
-            {uploadingSource && <p className="text-[11px] text-subtle">Saving original file…</p>}
           </div>
         </div>
+      )}
+      {!collapsed && uploadingSource && <p className="mb-2 text-[11px] text-subtle">Saving original file…</p>}
+
+      {/* top form */}
+      {!collapsed && (
+        <TemplateNamingFields
+          isEditMode={isEditMode}
+          presetData={presetData}
+          setPresetData={setPresetData}
+          categoriesData={categoriesData}
+          setCategoriesData={setCategoriesData}
+          templateNameInput={templateNameInput}
+          setTemplateNameInput={setTemplateNameInput}
+          templateNumber={templateNumber}
+          currentPreset={currentPreset}
+        />
       )}
 
       {/* sheet selectors (create mode only, like Old Design) */}
       {!collapsed && !isEditMode && (
-        <div className="mt-2.5 rounded-[7px] border border-divider p-3">
-          <div className="flex flex-wrap gap-y-3.5">
-            <div className="min-w-0 flex-[1_1_330px] sm:pr-5">
-              <div className="mb-2 text-[14.5px] text-muted">Product fill sheet</div>
-              <select value={dataSheetName} onChange={(e) => selectDataSheet(e.target.value)} className={inputCls}>
-                <option value="">-- Select sheet --</option>
-                {sheetMeta.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.colCount} columns - {s.rowCount} rows)
-                  </option>
-                ))}
-              </select>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-                <MiniInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
-                <MiniInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
-                <MiniInput label="I section" defaultValue="2" readOnly />
-              </div>
-            </div>
-            <div className="min-w-0 flex-[1_1_330px] sm:pl-5">
-              <div className="mb-2 text-[14.5px] text-muted">Dropdowns Reference Sheet</div>
-              <select
-                value={dropdownSheetName}
-                onChange={(e) => selectDropdownSheet(e.target.value)}
-                className={inputCls}
-              >
-                <option value="">-- None --</option>
-                {sheetMeta.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.colCount} columns - {s.rowCount} rows)
-                  </option>
-                ))}
-              </select>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-                <MiniInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
-                <MiniInput
-                  label="Dropdown Values Row"
-                  value={dropdownValuesRow}
-                  onChange={setDropdownValuesRow}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+        <SheetSelectorFields
+          sheetMeta={sheetMeta}
+          dataSheetName={dataSheetName}
+          onSelectDataSheet={selectDataSheet}
+          dataGroupRow={dataGroupRow}
+          setDataGroupRow={setDataGroupRow}
+          dataHeaderRow={dataHeaderRow}
+          setDataHeaderRow={setDataHeaderRow}
+          dropdownSheetName={dropdownSheetName}
+          onSelectDropdownSheet={selectDropdownSheet}
+          dropdownHeaderRow={dropdownHeaderRow}
+          setDropdownHeaderRow={setDropdownHeaderRow}
+          dropdownValuesRow={dropdownValuesRow}
+          setDropdownValuesRow={setDropdownValuesRow}
+        />
       )}
 
       {/* product details bar */}
@@ -723,6 +570,8 @@ export default function NewTemplateDesign({ api }) {
           onClose={() => setModalId(null)}
         />
       )}
+
+      <ExtractionProgressModal progress={extraction} />
     </div>
   )
 }

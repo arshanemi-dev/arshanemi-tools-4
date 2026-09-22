@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Search,
   Plus,
@@ -16,6 +17,7 @@ import {
   Trash2,
   ClipboardPaste,
   CopyCheck,
+  Layers,
 } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import TemplateBadge from '@/components/listing/TemplateBadge'
@@ -454,6 +456,7 @@ function TemplateSettingsRow({ template, isSelected, onToggleSelect, onUpdated, 
 // Main List Page
 export default function TemplateSettingsListPage() {
   const { addToast } = useToast()
+  const router = useRouter()
   const [templates, setTemplates] = useState(null)
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -692,6 +695,20 @@ export default function TemplateSettingsListPage() {
             Create Template
           </PillButton>
         </Link>
+        <Link href="/listing-tools/template-settings/new-bulk">
+          <PillButton variant="upload" icon={Layers}>
+            Create Bulk Listing
+          </PillButton>
+        </Link>
+        <PillButton
+          variant="ghost"
+          icon={Layers}
+          disabled={selectedIds.size < 2}
+          title={selectedIds.size < 2 ? 'Select 2 or more templates below to bulk-edit them' : undefined}
+          onClick={() => router.push(`/listing-tools/template-settings/new-bulk?templates=${[...selectedIds].join(',')}`)}
+        >
+          Edit Bulk Listing
+        </PillButton>
       </div>
 
       {/* Table Component */}

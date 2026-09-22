@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import { dummySubscription, dummyPlans } from '@/data/dummySubscription'
+import { env } from '@/lib/env'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function razorpay() {
-  const keyId     = process.env.RAZORPAY_KEY_ID
-  const keySecret = process.env.RAZORPAY_KEY_SECRET
+  const keyId     = env.RAZORPAY_KEY_ID
+  const keySecret = env.RAZORPAY_KEY_SECRET
   if (!keyId || !keySecret) return null
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
   return {

@@ -2,13 +2,11 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { UploadCloud, FileSpreadsheet, Loader2, Check, Lock, PlusCircle, ArrowLeft, AlertTriangle } from 'lucide-react'
+import { Loader2, ArrowLeft } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
-import PillButton from './PillButton'
-import GroupTabsStep, { UNMAPPED_TAB_ID } from './GroupTabsStep'
-import PresetExportSection from './PresetExportSection'
+import { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import AiRulesSection from './AiRulesSection'
-import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX } from '@/lib/listingSheetLayout'
+import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX, DEFAULT_SHEET_ROWS } from '@/lib/listingSheetLayout'
 import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
 import NewTemplateDesign from './NewTemplateDesign'
 
@@ -32,20 +30,6 @@ const GROUPS = [
   { id: 'prefill', label: 'Brand Details' },
 ]
 
-// Kanban columns shown in Section 3 — "Unselected" holds every header until
-// it's moved into one of the 3 real groups. Only those 3 (plus Unselected)
-// are ever persisted: the backend (lib/listingTemplates.js GROUPS, the
-// sheets/[group] API route) only reads/writes those group ids, and so does
-// every other Listing Tools page (Product Details, Brand Details, Choose
-// Your Template, exports). GroupTabsStep's "+ Add Column" is on for
-// organizing headers while building a template — see `customTabs` below —
-// but a header left in a custom group at save time is caught by
-// handleSave's stuckFields guard rather than silently dropped. Column
-// *labels* on the 3 real groups can be renamed freely (source/11.html's
-// click-to-rename) — see tabLabels below, which only overrides the display
-// name, never the underlying group id.
-const TABS = [{ id: UNMAPPED_TAB_ID, label: 'Unselected' }, ...GROUPS]
-
 const DEFAULT_PRESET = { marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' }
 const DEFAULT_CATEGORIES = { category1: '', category2: '', category3: '', category4: '', category5: '', category6: '' }
 const DEFAULT_AI_RULES = { marketplace: '', category: '', title: '', description: '', keyword: '', otherRules: '' }
@@ -67,6 +51,12 @@ function parseRowInput(raw, fallbackIdx) {
 }
 function detectDataType(label) {
   return /image|photo|img/i.test(label || '') ? 'image' : 'text'
+}
+// Hands control back to the browser for a paint — used to break up the
+// header-extraction loop below into chunks so the progress bar actually
+// updates on screen instead of the whole thing running in one blocking tick.
+function yieldToPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
 }
 // Header cells in the real master sheet often carry a short field title
 // plus a longer instructional note for whoever fills the sheet in — either
@@ -300,7 +290,12 @@ function buildDropdownColumns(XLSX, workbook, dropdownSheetName, headerRowIdx, v
 // GROUP_LABEL_ROW_INDEX (the fixed layout confirmed against the real master
 // sheet, see listingSheetLayout.js), but user-editable, since not every
 // uploaded file follows that exact layout.
-function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowIdx, groupRowIdx) {
+// `onProgress(current, total)` — real counts as headers are actually
+// extracted, not simulated. Async and chunked (yieldToPaint every 12
+// columns) purely so the progress bar can repaint between chunks; a plain
+// synchronous loop would finish before the browser ever got to draw it for
+// all but the largest sheets.
+async function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowIdx, groupRowIdx, onProgress) {
   const fields = []
   if (!dataSheetName) return fields
   const ws = workbook.Sheets[dataSheetName]
@@ -322,15 +317,19 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowId
 
   const seen = new Set()
   let counter = 0
-  rawHeaderRow.forEach((rawLabel, colIdx) => {
+  const total = rawHeaderRow.length
+  for (let colIdx = 0; colIdx < total; colIdx++) {
+    const rawLabel = rawHeaderRow[colIdx]
+    onProgress?.(colIdx + 1, total)
+    if (colIdx > 0 && colIdx % 12 === 0) await yieldToPaint()
     // See splitHeaderCell above \u2014 pulls the short column title apart from
     // any instructional note the cell also carries, instead of collapsing
     // both onto one line and calling the whole run-on sentence the label.
     const { label, description } = splitHeaderCell(rawLabel)
-    if (!label) return
-    if (isPlaceholderHeader(label)) return
+    if (!label) continue
+    if (isPlaceholderHeader(label)) continue
     const key = label.toLowerCase()
-    if (seen.has(key)) return
+    if (seen.has(key)) continue
     seen.add(key)
     counter += 1
     const dropdownMatch = autoMatchDropdown(label, dropdownNames)
@@ -374,7 +373,7 @@ function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowId
       // built-in default (source: 'default') or hand-added (source: 'manual').
       source: 'upload',
     })
-  })
+  }
   return fields
 }
 
@@ -515,75 +514,16 @@ function tabLabelsFromContent(content) {
   return labels
 }
 
-// Small "step not ready yet" note shown above a dimmed section — every
-// section on this page always renders (per product direction: show the
-// whole flow up front), so the signal that a step isn't usable yet is this
-// note + reduced opacity/pointer-events, not the section disappearing.
-function LockedNote({ children }) {
-  return (
-    <p className="mb-3 flex items-center gap-1.5 text-[11.5px] text-subtle">
-      <Lock className="w-3 h-3" /> {children}
-    </p>
-  )
-}
-
-// Section 2's 4 row-position inputs — a plain 1-based number field per
-// row (Group Row / Header Row for the Product Data Sheet, Header Row /
-// Dropdown Values Row for the Dropdown Reference Sheet). Pre-filled with
-// whatever the app auto-detected, but a controlled input the user can
-// overwrite freely — see the row-default wiring in handleFile/the sheet
-// selects/the rebuild useEffect above.
-function RowNumberInput({ label, value, onChange }) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-subtle mb-1">{label}</label>
-      <input
-        type="number"
-        min={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2.5 py-1.5 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
-      />
-    </div>
-  )
-}
-
-// The two designs for this whole flow, switched by the segmented control in
-// the page header. "Old Design" is every section rendered below this
-// component's own `return`; "New Design" is components/listing/NewTemplateDesign.jsx
-// (a 1:1 port of source/arshanemi-tools-4.html). Both are pure presentation
-// over the exact same state/handlers/save flow assembled in `api` — the
-// choice is remembered per browser, defaulting to New.
-const DESIGN_MODE_KEY = 'barmeto-tpl-design-mode'
-function DesignModeTabs({ mode, onChange }) {
-  return (
-    <div className="inline-flex flex-shrink-0 rounded-lg border border-divider bg-card p-0.5 text-[12.5px] font-semibold">
-      {[['new', 'New Design'], ['old', 'Old Design']].map(([m, label]) => (
-        <button
-          key={m}
-          type="button"
-          onClick={() => onChange(m)}
-          className={`rounded-md px-3 py-1.5 transition-colors ${
-            mode === m ? 'bg-accent text-white shadow-sm' : 'text-subtle hover:text-foreground'
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // Single-page template creation/edit flow. Create mode: upload → pick the
 // Product Data Sheet (+ optional Dropdown Reference Sheet) → group the
 // resulting fields on a Kanban board → configure export preset + AI rules →
 // save (POST, creates a new template). Edit mode (templateId passed in from
 // app/listing-tools/template-settings/[templateId]/page.js): loads the
-// existing template's headers/groups/preset/AI rules straight onto the same
-// Kanban board — Sections 1-2 (upload/pick sheet) don't apply since there's
-// no file to re-parse — and Save PATCHes the existing template in place,
-// never touching the row data those headers describe (see the PATCH
-// route's own comment on that).
+// existing template's headers/groups/preset/AI rules straight into the same
+// editor — upload/pick-sheet doesn't apply since there's no file to
+// re-parse — and Save PATCHes the existing template in place, never
+// touching the row data those headers describe (see the PATCH route's own
+// comment on that).
 export default function TemplateSettingsWizard({ templateId }) {
   const { addToast } = useToast()
   const router = useRouter()
@@ -603,6 +543,13 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [dropdownHeaderRow, setDropdownHeaderRow] = useState('')
   const [dropdownValuesRow, setDropdownValuesRow] = useState('')
   const [parsing, setParsing] = useState(false)
+  // Live progress through handleFile → the fields-rebuild effect below:
+  // { stage: string, current: number, total: number } | null. `total: 0`
+  // means the stage has no per-item count to show (e.g. "Reading file…");
+  // `current`/`total` are real counts once the header-extraction stage
+  // starts, not a simulated percentage. Cleared automatically a moment
+  // after the last stage completes — see ExtractionProgressModal.jsx.
+  const [extraction, setExtraction] = useState(null)
   // The raw file itself, uploaded to Blob storage alongside the client-side
   // parse so the Excel Formats tab and format-preserving exports can later
   // re-open it with full styling (see lib/exports/excelTemplateEngine.js).
@@ -615,7 +562,6 @@ export default function TemplateSettingsWizard({ templateId }) {
   const [showGroups, setShowGroups] = useState(false)
   const [fields, setFields] = useState([])
   const [dropdownColumns, setDropdownColumns] = useState({})
-  const [bulkTargetId, setBulkTargetId] = useState(UNMAPPED_TAB_ID)
   const [tabLabels, setTabLabels] = useState({}) // { [groupId]: customLabel } — display-only, see TABS comment
   const [customTabs, setCustomTabs] = useState([]) // [{id,label}] — user-added Kanban columns; organizing-only, see handleSave's stuckFields guard
   const [removedGroupIds, setRemovedGroupIds] = useState(() => new Set()) // built-in groups (design_system/compulsory/prefill/optional) hidden for this template — Unselected can't be removed
@@ -636,21 +582,6 @@ export default function TemplateSettingsWizard({ templateId }) {
 
   const [loadingExisting, setLoadingExisting] = useState(isEditMode)
   const [loadError, setLoadError] = useState(false)
-
-  // Old vs New design (see DesignModeTabs above) — presentation only; both
-  // designs share this component's state and the exact same parse/group/save
-  // flow, so the choice never affects how an uploaded sheet is grouped.
-  const [designMode, setDesignMode] = useState('new')
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(DESIGN_MODE_KEY)
-      if (saved === 'old' || saved === 'new') setDesignMode(saved)
-    } catch {}
-  }, [])
-  function chooseDesignMode(mode) {
-    setDesignMode(mode)
-    try { localStorage.setItem(DESIGN_MODE_KEY, mode) } catch {}
-  }
 
   // Edit mode only — loads the template once and drops it straight onto the
   // Kanban board (skips Sections 1-2 entirely).
@@ -701,17 +632,24 @@ export default function TemplateSettingsWizard({ templateId }) {
   async function handleFile(file) {
     if (!file) return
     setParsing(true)
+    setExtraction({ stage: 'Reading file…', current: 0, total: 0 })
     try {
       const XLSX = await import('xlsx')
       const buf = await file.arrayBuffer()
+      setExtraction({ stage: 'Parsing workbook…', current: 0, total: 0 })
+      await yieldToPaint()
       const wb = XLSX.read(buf, { type: 'array' })
-      const meta = wb.SheetNames.map((name) => {
+      const meta = []
+      for (let i = 0; i < wb.SheetNames.length; i++) {
+        const name = wb.SheetNames[i]
         const ws = wb.Sheets[name]
         const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
         const headerRowIdx = findHeaderRowIndex(aoa)
         const colCount = (aoa[headerRowIdx] || []).filter((v) => String(v ?? '').trim() !== '').length
-        return { name, colCount, rowCount: Math.max(aoa.length - headerRowIdx - 1, 0) }
-      })
+        meta.push({ name, colCount, rowCount: Math.max(aoa.length - headerRowIdx - 1, 0) })
+        setExtraction({ stage: 'Scanning sheets…', current: i + 1, total: wb.SheetNames.length })
+        if (i > 0 && i % 5 === 0) await yieldToPaint()
+      }
       // Defaults mirror source/11.html: sheet 1 is the data sheet, sheet 2
       // the dropdown reference — but prefer sheets whose names actually look
       // the part (e.g. "Blouses-Fill this" for data, "Validation Sheet" for
@@ -731,18 +669,23 @@ export default function TemplateSettingsWizard({ templateId }) {
       setSheetMeta(meta)
       setDataSheetName(nextDataSheetName)
       setDropdownSheetName(nextDropdownSheetName)
-      setDataGroupRow(nextDataSheetName ? GROUP_LABEL_ROW_INDEX + 1 : '')
-      setDataHeaderRow(nextDataSheetName ? HEADER_ROW_INDEX + 1 : '')
-      setDropdownHeaderRow(nextDropdownSheetName ? dropdownDefaults.header + 1 : '')
-      setDropdownValuesRow(nextDropdownSheetName ? dropdownDefaults.values + 1 : '')
+      setDataGroupRow(nextDataSheetName ? DEFAULT_SHEET_ROWS.GROUP_ROW : '')
+      setDataHeaderRow(nextDataSheetName ? DEFAULT_SHEET_ROWS.HEADER_ROW : '')
+      setDropdownHeaderRow(nextDropdownSheetName ? (dropdownDefaults.header + 1 || DEFAULT_SHEET_ROWS.DROPDOWN_HEADER_ROW) : '')
+      setDropdownValuesRow(nextDropdownSheetName ? (dropdownDefaults.values + 1 || DEFAULT_SHEET_ROWS.DROPDOWN_VALUES_ROW) : '')
       setShowGroups(false)
       setFields([])
       setDropdownColumns({})
       setSavedTemplate(null)
       setSourceFileUrl('')
+      // No data sheet detected at all — the rebuild effect below never
+      // fires (it needs both workbook and dataSheetName), so nothing else
+      // will ever clear the progress modal.
+      if (!nextDataSheetName) setExtraction(null)
       if (/\.xlsx$/i.test(file.name)) uploadSourceFile(file)
     } catch (err) {
       addToast('Could not read that file — is it a valid .xlsx?', 'error')
+      setExtraction(null)
     } finally {
       setParsing(false)
     }
@@ -783,17 +726,24 @@ export default function TemplateSettingsWizard({ templateId }) {
   useEffect(() => {
     if (!workbook || !dataSheetName) return
     let cancelled = false
-    import('xlsx').then((XLSX) => {
+    ;(async () => {
+      const XLSX = await import('xlsx')
       if (cancelled) return
       const headerRowIdx = parseRowInput(dataHeaderRow, HEADER_ROW_INDEX)
       const groupRowIdx = parseRowInput(dataGroupRow, GROUP_LABEL_ROW_INDEX)
       const dropHeaderRowIdx = parseRowInput(dropdownHeaderRow, 0)
       const dropValuesRowIdx = parseRowInput(dropdownValuesRow, dropHeaderRowIdx + 1)
+      setExtraction({ stage: 'Reading dropdown reference…', current: 0, total: 0 })
       const cols = buildDropdownColumns(XLSX, workbook, dropdownSheetName, dropHeaderRowIdx, dropValuesRowIdx)
+      if (cancelled) return
       // buildFields already auto-separates every header by the sheet's own
       // group-label row (matchGroupLabel), and anything it can't recognise
       // falls to Unselected / "Other" — same behaviour in both designs now.
-      const built = buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx)
+      // Reports live current/total counts as it goes — see its own comment.
+      const built = await buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx, (current, total) => {
+        if (!cancelled) setExtraction({ stage: 'Extracting headers…', current, total })
+      })
+      if (cancelled) return
       setDropdownColumns(cols)
       // ONLY image headers auto-detected from the uploaded SHEET (source
       // 'upload') get tagged into the New Design's "Image Link" bucket —
@@ -805,8 +755,12 @@ export default function TemplateSettingsWizard({ templateId }) {
         ),
       )
       setShowGroups(true)
-      setBulkTargetId(UNMAPPED_TAB_ID)
-    })
+      setExtraction({ stage: 'Done', current: built.length, total: built.length })
+      // Leaves the completed bar on screen briefly so "Done" is actually
+      // visible, then auto-closes — same pattern the bulk-apply flow (Phase
+      // 4) will reuse for its own progress modal.
+      setTimeout(() => { if (!cancelled) setExtraction(null) }, 500)
+    })()
     return () => { cancelled = true }
   }, [workbook, dataSheetName, dropdownSheetName, dataHeaderRow, dataGroupRow, dropdownHeaderRow, dropdownValuesRow])
 
@@ -936,46 +890,6 @@ export default function TemplateSettingsWizard({ templateId }) {
       })
     })
   }
-  function renameTab(id, label) {
-    setTabLabels((prev) => ({ ...prev, [id]: label }))
-  }
-
-  // Custom Kanban columns are an organizing tool only — the backend (and
-  // every other Listing Tools page: Product Details, Prefill Details,
-  // Choose Your Template, exports) only ever knows about the 4 real groups.
-  // A header left in a custom group at save time gets caught by the
-  // stuckFields check in handleSave, never silently dropped.
-  function addCustomTab(label) {
-    const trimmed = label.trim()
-    if (!trimmed) return
-    const id = `custom_${slugify(trimmed)}_${Date.now()}`
-    setCustomTabs((prev) => [...prev, { id, label: trimmed }])
-  }
-
-  // Any group can be removed for this template — a built-in one
-  // (design_system/compulsory/prefill/optional) or a custom one — except
-  // Unselected, which GroupTabsStep never shows a remove button for.
-  // Headers sitting in the removed group move back to Unselected first, so
-  // nothing is ever lost; a removed built-in group's column just stays
-  // hidden for the rest of this session (resetWizard/reloading brings it
-  // back), same as a removed custom column.
-  function removeTab(id) {
-    if (id === UNMAPPED_TAB_ID) return
-    setFields((prev) => prev.map((f) => (f.groupId === id ? { ...f, groupId: UNMAPPED_TAB_ID } : f)))
-    if (GROUPS.some((g) => g.id === id)) {
-      setRemovedGroupIds((prev) => new Set(prev).add(id))
-    } else {
-      setCustomTabs((prev) => prev.filter((t) => t.id !== id))
-    }
-    setTabLabels((prev) => {
-      if (!(id in prev)) return prev
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-    setBulkTargetId((cur) => (cur === id ? UNMAPPED_TAB_ID : cur))
-  }
-
   // Section 4's "Save Preset" doesn't persist anything by itself — it sets
   // this marketplace/category/version combo as the one current preset
   // (replacing whatever was there before, never accumulating a list) so it
@@ -1005,7 +919,6 @@ export default function TemplateSettingsWizard({ templateId }) {
     setShowGroups(false)
     setFields([])
     setDropdownColumns({})
-    setBulkTargetId(UNMAPPED_TAB_ID)
     setTabLabels({})
     setCustomTabs([])
     setRemovedGroupIds(new Set())
@@ -1171,25 +1084,17 @@ export default function TemplateSettingsWizard({ templateId }) {
     }
   }
 
-  const sheetsLocked = !workbook
-  const groupsLocked = !showGroups
   const customTabIds = new Set(customTabs.map((t) => t.id))
-  const displayTabs = [...TABS, ...customTabs]
-    .filter((t) => !removedGroupIds.has(t.id))
-    .map((t) => ({ ...t, label: tabLabels[t.id] || t.label }))
-  // Only the 4 real groups + Unselected ever persist (see this file's TABS
-  // comment) — anything left in a custom group would silently vanish on
-  // save if we let it through, so Save stays disabled until these are empty.
+  // Only the 3 real groups + Unselected ever persist — anything left in a
+  // custom group would silently vanish on save if we let it through, so
+  // Save stays disabled until these are empty.
   const stuckFields = fields.filter((f) => customTabIds.has(f.groupId))
-  const stuckGroupNames = [...new Set(stuckFields.map((f) => tabLabels[f.groupId] || customTabs.find((t) => t.id === f.groupId)?.label || f.groupId))]
 
-  // Everything the New Design (components/listing/NewTemplateDesign.jsx)
-  // needs — the same state + handlers the Old Design sections below read
-  // straight from scope, bundled so both drive one identical
-  // parse / group / preset / save flow.
+  // Everything components/listing/NewTemplateDesign.jsx needs to drive the
+  // parse / group / preset / save flow, bundled into one prop.
   const api = {
     isEditMode, showGroups,
-    fileName, parsing, sheetMeta, uploadingSource, sourceFileUrl, handleFile,
+    fileName, parsing, extraction, sheetMeta, uploadingSource, sourceFileUrl, handleFile,
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
     dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
@@ -1220,245 +1125,7 @@ export default function TemplateSettingsWizard({ templateId }) {
 
   return (
     <div className="w-full mx-auto px-6 py-8 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Template' : 'Create Template'}</h1>
-          <p className="text-[13px] text-subtle mt-0.5">
-            {isEditMode
-              ? 'Regroup headers, tweak field types and dropdown values, and update the export preset or AI rules for this template.'
-              : 'Upload a master sheet, group its headers, drag them where they belong, set the export preset, and save.'}
-          </p>
-        </div>
-        <DesignModeTabs mode={designMode} onChange={chooseDesignMode} />
-      </div>
-
-      {designMode === 'new' && <NewTemplateDesign api={api} />}
-
-      {designMode === 'old' && !isEditMode && (
-        <>
-          {/* Section 1 — Upload */}
-          <div className="border border-divider rounded-lg overflow-hidden bg-card">
-            <div className="px-4 py-2.5 bg-surface border-b border-divider">
-              <h2 className="text-[13px] font-semibold text-foreground">1. Upload Master Excel File</h2>
-            </div>
-            <div className="p-4">
-              {!fileName ? (
-                <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-divider-light rounded-xl py-12 cursor-pointer hover:border-accent hover:bg-accent/8 transition-colors">
-                  {parsing ? <Loader2 className="w-7 h-7 text-accent animate-spin" /> : <UploadCloud className="w-7 h-7 text-subtle" />}
-                  <div className="text-center">
-                    <p className="text-[13.5px] font-semibold text-foreground">Click to upload .xlsx / .xls</p>
-                    <p className="text-[12px] text-subtle mt-0.5">Any number of sheets — you&apos;ll pick their role next</p>
-                  </div>
-                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-                </label>
-              ) : (
-                <div className="flex items-center gap-3 px-3 py-2.5 bg-surface border border-divider rounded-lg">
-                  <FileSpreadsheet className="w-5 h-5 text-accent flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium text-foreground truncate">{fileName}</p>
-                    <p className="text-[12px] text-subtle">
-                      {sheetMeta.length} sheet{sheetMeta.length === 1 ? '' : 's'} found
-                      {uploadingSource && ' · saving original file…'}
-                      {!uploadingSource && sourceFileUrl && ' · original file saved'}
-                    </p>
-                  </div>
-                  <label className="text-[12px] font-medium text-accent hover:text-accent-hover cursor-pointer flex-shrink-0">
-                    Replace file
-                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Section 2 — Choose sheets (single-select, matching source/11.html) */}
-          <div className="border border-divider rounded-lg overflow-hidden bg-card">
-            <div className="px-4 py-2.5 bg-surface border-b border-divider">
-              <h2 className="text-[13px] font-semibold text-foreground">2. Select Sheets</h2>
-            </div>
-            <div className={sheetsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
-              {sheetsLocked && <LockedNote>Upload a file in Section 1 to unlock.</LockedNote>}
-              <div className="grid md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Product Data Sheet (Compulsory Brand Details Data)</label>
-                  <select
-                    value={dataSheetName}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setDataSheetName(val)
-                      // Re-defaults to the app's fixed layout every time a
-                      // (possibly different) sheet is picked — same "fresh
-                      // read" behavior as the fields themselves, still
-                      // user-editable afterward via the inputs below.
-                      setDataGroupRow(val ? GROUP_LABEL_ROW_INDEX + 1 : '')
-                      setDataHeaderRow(val ? HEADER_ROW_INDEX + 1 : '')
-                      if (!val) {
-                        setShowGroups(false)
-                        setFields([])
-                        setDropdownColumns({})
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
-                  >
-                    <option value="">-- Select sheet --</option>
-                    {sheetMeta.map((s) => (
-                      <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
-                    ))}
-                  </select>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                    <RowNumberInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
-                    <RowNumberInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[12.5px] font-semibold text-muted mb-1.5">Dropdowns Reference Sheet</label>
-                  <select
-                    value={dropdownSheetName}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setDropdownSheetName(val)
-                      if (!val || !workbook) {
-                        setDropdownHeaderRow('')
-                        setDropdownValuesRow('')
-                        return
-                      }
-                      // Scans the newly-picked sheet fresh, same reasoning
-                      // as the Product Data Sheet's reset above — a
-                      // different reference sheet can have its header on a
-                      // different row entirely.
-                      import('xlsx').then((XLSX) => {
-                        const { header, values } = computeDropdownRowDefaults(XLSX, workbook, val)
-                        setDropdownHeaderRow(header + 1)
-                        setDropdownValuesRow(values + 1)
-                      })
-                    }}
-                    className="w-full px-3 py-2 text-[13px] border border-divider rounded-md bg-card focus:outline-none focus:ring-1 focus:ring-accent-light"
-                  >
-                    <option value="">-- None --</option>
-                    {sheetMeta.map((s) => (
-                      <option key={s.name} value={s.name}>{s.name} ({s.colCount} columns · {s.rowCount} rows)</option>
-                    ))}
-                  </select>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                    <RowNumberInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
-                    <RowNumberInput label="Dropdown Values Row" value={dropdownValuesRow} onChange={setDropdownValuesRow} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {designMode === 'old' && (
-      <>
-      {/* Section 3 — Kanban groups + mapping */}
-      <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        <div className="px-4 py-2.5 bg-surface border-b border-divider flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold text-foreground">3. Group Headers &amp; Map Fields</h2>
-          <span className="text-[11.5px] text-subtle">
-            {fields.length} field{fields.length === 1 ? '' : 's'}{!isEditMode && ` from "${dataSheetName || '—'}"`}
-          </span>
-        </div>
-        <div className={groupsLocked ? 'p-4 opacity-50 pointer-events-none select-none' : 'p-4'}>
-          {groupsLocked && <LockedNote>Select a Product Data Sheet in Section 2 to unlock.</LockedNote>}
-          <GroupTabsStep
-            tabs={displayTabs}
-            fields={fields}
-            bulkTargetId={bulkTargetId}
-            onBulkTargetChange={setBulkTargetId}
-            onUpdateField={updateField}
-            onBulkAssign={bulkAssignFields}
-            onRenameTab={renameTab}
-            onAddTab={addCustomTab}
-            onRemoveTab={removeTab}
-            onAddHeader={addHeaderToGroup}
-            onDeleteHeader={deleteHeader}
-            allowAddTab
-          />
-        </div>
-      </div>
-
-      {/* Section 4 — Preset & Export Configuration (source/11.html §4) */}
-      <div className={groupsLocked ? 'opacity-50 pointer-events-none select-none' : ''}>
-        {groupsLocked && <LockedNote>Complete Section 3 to unlock.</LockedNote>}
-        <PresetExportSection
-          value={presetData}
-          onChange={setPresetData}
-          categories={categoriesData}
-          onCategoriesChange={setCategoriesData}
-          templateName={templateNameInput}
-          onTemplateNameChange={setTemplateNameInput}
-          templateNumber={templateNumber}
-          onSave={savePreset}
-          currentPreset={currentPreset}
-        />
-      </div>
-
-      {/* Section 5 — AI Rules & Template Generation (source/11.html §5) */}
-     
-
-      {/* Save — persists the real template (sheets + Section 4/5 data) via /api/listing-tools */}
-      <div className="border border-divider rounded-lg bg-card p-4 space-y-4">
-        {savedTemplate ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[13.5px] font-semibold text-foreground">
-                &quot;{savedTemplate.templateName}&quot; {isEditMode ? 'updated.' : 'created.'}
-              </p>
-              <p className="text-[12px] text-subtle mt-0.5">Section 5 above now shows this template&apos;s saved rules.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link href={`/listing-tools/auto-details?template=${savedTemplate.id}`}>
-                <PillButton variant="ghost">View Template</PillButton>
-              </Link>
-              {isEditMode ? (
-                <Link href="/listing-tools/template-settings">
-                  <PillButton variant="upload" icon={ArrowLeft}>Back to Templates</PillButton>
-                </Link>
-              ) : (
-                <PillButton variant="upload" icon={PlusCircle} onClick={resetWizard}>Create Another Template</PillButton>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className={groupsLocked ? 'opacity-50 pointer-events-none select-none space-y-4' : 'space-y-4'}>
-            {groupsLocked && <LockedNote>Complete Section 3 to unlock.</LockedNote>}
-            {stuckFields.length > 0 && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>
-                  {stuckFields.length} header{stuckFields.length === 1 ? '' : 's'} {stuckFields.length === 1 ? 'is' : 'are'} in custom group{stuckGroupNames.length === 1 ? '' : 's'} ({stuckGroupNames.join(', ')}) — drag {stuckFields.length === 1 ? 'it' : 'them'} into Product Details / Compulsory / Brand Details in Section 3 before saving.
-                </span>
-              </div>
-            )}
-            {/* uploadSourceFile (Section 1) is fire-and-forget so the rest of
-                the wizard never blocks on it — but Save itself must wait: if
-                it fires while the upload is still in flight, `sourceFileUrl`
-                state is still '' and gets saved as null permanently (nothing
-                retries it afterward), silently losing format-preserving
-                export for this template's whole lifetime. Blocking Save
-                here, not the rest of the wizard, is the fix. */}
-            {!isEditMode && uploadingSource && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>Still saving your original file — wait a moment before saving, or exports won&apos;t match its exact sheet names/columns.</span>
-              </div>
-            )}
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[12px] text-subtle">
-                Will be saved as <span className="font-semibold text-muted">&quot;{templateNameInput || 'Untitled Template'}&quot;</span> — set in Section 4&apos;s Template Name.
-              </p>
-              <PillButton variant="upload" icon={Check} loading={saving} disabled={stuckFields.length > 0 || uploadingSource} onClick={handleSave}>
-                {isEditMode ? 'Save Changes' : 'Save Template'}
-              </PillButton>
-            </div>
-          </div>
-        )}
-      </div>
-      </>
-      )}
+      <NewTemplateDesign api={api} />
     </div>
   )
 }

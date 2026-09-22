@@ -3,6 +3,7 @@ import { put } from '@vercel/blob'
 import { createItem, getSingleton } from '@/lib/db'
 import { buildApplicationEmail, sendEmail } from '@/lib/mailer'
 import { COMPANY_HR_EMAIL } from '@/data/company'
+import { env } from '@/lib/env'
 
 export async function POST(req) {
   try {
@@ -72,7 +73,7 @@ export async function POST(req) {
     })
 
     await sendEmail({
-      from: `"Barmeto Careers" <${process.env.SMTP_USER}>`,
+      from: `"Barmeto Careers" <${env.SMTP_USER}>`,
       replyTo: `"${name}" <${email}>`,
       to: hrEmail,
       subject,

@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Category Hierarchy Manager & File Renamer</title>
+
+  <!-- External Libraries for JSZip and SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --success: #10b981;
+      --success-hover: #059669;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --warning: #f59e0b;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --selected-bg: #eff6ff;
+      --selected-border: #3b82f6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Header Bar */
+    header {
+      background: var(--card-bg);
+      padding: 0.75rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      z-index: 200;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    header h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      white-space: nowrap;
+      letter-spacing: -0.02em;
+    }
+
+    /* Global Search Bar */
+    .search-container {
+      position: relative;
+      flex: 1;
+      max-width: 500px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 0.5rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.875rem;
+      outline: none;
+      background: #f1f5f9;
+      transition: all 0.2s ease;
+    }
+
+    .search-input:focus {
+      background: #ffffff;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+
+    .suggestions-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+      max-height: 280px;
+      overflow-y: auto;
+      z-index: 1000;
+      margin-top: 6px;
+      display: none;
+    }
+
+    .suggestions-dropdown.show {
+      display: block;
+    }
+
+    .suggestion-item {
+      padding: 0.65rem 0.9rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      transition: background 0.15s;
+    }
+
+    .suggestion-item:last-child {
+      border-bottom: none;
+    }
+
+    .suggestion-item:hover {
+      background-color: var(--selected-bg);
+      color: var(--primary);
+      font-weight: 500;
+    }
+
+    /* File Sync Controls & Status Indicator */
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .file-name {
+      max-width: 260px;
+      font-family: monospace;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-bar {
+      padding: 0.5rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+    }
+
+    .renamer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-left: auto;
+      min-width: 0;
+    }
+
+    .save-status {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 0.35rem 0.75rem;
+      background: #f1f5f9;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success);
+      display: inline-block;
+    }
+
+    .status-dot.saving {
+      background-color: var(--warning);
+      animation: pulse 0.8s infinite alternate;
+    }
+
+    .status-dot.error {
+      background-color: var(--danger);
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
+    /* Buttons */
+    button, label.btn-label {
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-weight: 500;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
+    }
+
+    .btn-primary { background-color: var(--primary); color: white; }
+    .btn-primary:hover { background-color: var(--primary-hover); }
+
+    .btn-success { background-color: var(--success); color: white; justify-content: center; }
+    .btn-success:hover { background-color: var(--success-hover); }
+
+    .btn-secondary { background-color: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background-color: #cbd5e1; }
+
+    .btn-outline { background: transparent; border-color: var(--border); color: var(--text); }
+    .btn-outline:hover { background: #f1f5f9; }
+
+    .btn-danger { background-color: var(--danger); color: white; }
+    .btn-danger:hover { background-color: var(--danger-hover); }
+
+    /* Input / Confirm Dialog (replaces native prompt, confirm & alert) */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+
+    .modal-overlay.show { display: flex; }
+
+    .modal [hidden] { display: none; }
+
+    .modal {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 1.25rem;
+      width: 100%;
+      max-width: 420px;
+      margin: 1rem;
+      box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.25);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .modal h3 {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .modal-message {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    .modal-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+
+    .modal-input.invalid { border-color: var(--danger); }
+
+    .modal-error {
+      font-size: 0.8125rem;
+      color: var(--danger);
+      min-height: 1em;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+
+    /* Platform Tabs Bar */
+    .tabs-bar {
+      background: #e2e8f0;
+      padding: 0.5rem 1.5rem 0 1.5rem;
+      display: flex;
+      gap: 0.35rem;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-item {
+      padding: 0.55rem 1.1rem;
+      background: #cbd5e1;
+      border-radius: 8px 8px 0 0;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #475569;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      transition: all 0.2s;
+    }
+
+    .tab-item.active {
+      background: var(--card-bg);
+      color: var(--primary);
+      border-top: 3px solid var(--primary);
+    }
+
+    .tab-actions {
+      display: flex;
+      gap: 0.3rem;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+
+    .tab-item:hover .tab-actions, .tab-item.active .tab-actions {
+      opacity: 1;
+    }
+
+    .btn-add-tab {
+      padding: 0.45rem 0.85rem;
+      background: #94a3b8;
+      color: white;
+      border-radius: 8px 8px 0 0;
+      font-size: 0.875rem;
+      cursor: pointer;
+      font-weight: 600;
+      border: none;
+    }
+
+    .btn-add-tab:hover { background: #64748b; }
+
+    /* Main Container (Cascading Columns & Renamer Panel) */
+    .column-container {
+      display: flex;
+      flex: 1;
+      overflow-x: auto;
+      padding: 1.25rem;
+      gap: 1.25rem;
+      align-items: flex-start;
+    }
+
+    .column {
+      width: 270px;
+      min-width: 270px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      max-height: 100%;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    }
+
+    .column-header {
+      padding: 0.75rem 0.9rem;
+      background: #f1f5f9;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 10px 10px 0 0;
+    }
+
+    .column-header h2 {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .btn-add-item {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      border-radius: 5px;
+    }
+
+    .column-list {
+      list-style: none;
+      overflow-y: auto;
+      padding: 0.5rem;
+      flex: 1;
+    }
+
+    .column-item {
+      padding: 0.55rem 0.7rem;
+      border-radius: 6px;
+      margin-bottom: 0.35rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      border: 1px solid transparent;
+      font-size: 0.875rem;
+      transition: all 0.15s;
+    }
+
+    .column-item:hover { background-color: #f8fafc; }
+
+    .column-item.active {
+      background-color: var(--selected-bg);
+      border-color: var(--selected-border);
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .item-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-actions {
+      display: flex;
+      gap: 0.25rem;
+      opacity: 0.2;
+      transition: opacity 0.2s;
+    }
+
+    .column-item:hover .item-actions, .column-item.active .item-actions { opacity: 1; }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      padding: 0.15rem 0.3rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      border-radius: 3px;
+    }
+
+    .btn-icon:hover { color: var(--text); background: #e2e8f0; }
+    .btn-icon.delete:hover { color: var(--danger); background: #fee2e2; }
+
+    /* Top-right renamer toolbar: full generated name, then the file buttons */
+    .slug-box {
+      background: #f1f5f9;
+      border: 1px dashed #cbd5e1;
+      padding: 0.4rem 0.75rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.8125rem;
+      word-break: break-all;
+      color: var(--primary);
+      font-weight: 600;
+      line-height: 1.4;
+      min-width: 0;
+    }
+
+    .slug-box.empty {
+      color: var(--text-muted);
+      font-weight: 400;
+      font-family: inherit;
+    }
+
+    #chooseFilesText {
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hidden-input { display: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Bar -->
+  <header>
+    <div class="brand">
+      <h1>Category Manager</h1>
+    </div>
+
+    <!-- Live Global Category Search -->
+    <div class="search-container">
+      <input type="text" id="globalSearchInput" class="search-input" placeholder="🔍 Search category... (e.g. Kurti, Jumpsuits)" autocomplete="off">
+      <div id="suggestionsDropdown" class="suggestions-dropdown"></div>
+    </div>
+
+    <!-- File System Sync & Save Controls -->
+    <div class="header-actions">
+      <span class="file-name" id="fileName" hidden></span>
+      <button class="btn-outline" id="btnLinkFile" title="Link to local JSON file for live direct saving">
+        📂 Bind JSON File
+      </button>
+      <input type="file" id="importFileInput" accept=".json" class="hidden-input">
+      
+    </div>
+  </header>
+
+  <!-- Save Status (just above the tabs) -->
+  <div class="status-bar">
+    <div class="save-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Initial Loading...</span>
+    </div>
+
+    <!-- Top-right end: full generated name, then the file buttons -->
+    <div class="renamer-bar" id="renamerBar">
+      <div class="slug-box empty" id="slugBox"></div>
+      <input type="file" id="mainFileInput" multiple class="hidden-input">
+      <label class="btn-label btn-secondary" for="mainFileInput" id="chooseFilesLabel">
+        <span id="chooseFilesText">📁 Choose Main File(s)</span>
+      </label>
+      <button class="btn-success" id="btnDownload">⬇️ Rename & Download File(s)</button>
+    </div>
+  </div>
+
+  <!-- Top Level Platform Tabs -->
+  <div class="tabs-bar" id="tabsBar"></div>
+
+  <!-- Cascading Hierarchy & Renamer Container -->
+  <div class="column-container" id="columnContainer"></div>
+
+  <!-- Reusable Dialog: name input, delete confirmation, or plain message -->
+  <div class="modal-overlay" id="dialogOverlay">
+    <form class="modal" id="dialogForm" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" novalidate>
+      <h3 id="dialogTitle"></h3>
+      <p class="modal-message" id="dialogMessage"></p>
+      <input type="text" class="modal-input" id="dialogInput" autocomplete="off" maxlength="120">
+      <p class="modal-error" id="dialogError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-outline" id="dialogCancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="dialogOk">OK</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // Configuration & Endpoint Paths
+    const JSON_ENDPOINTS = ['/marketplace_rules.json', '/market_place.json'];
+    const LOCAL_STORAGE_KEY = 'marketplace_rules_data';
+    const DEBOUNCE_DELAY_MS = 800; // 800ms debounced saving
+
+    // Desktop (Electron) app: the main process reads/writes the JSON file for us.
+    // Plain browsers have no `require`, so they keep using the fetch/localStorage path.
+    const ipcRenderer = typeof require === 'function' ? require('electron').ipcRenderer : null;
+
+    // Default Fallback Hierarchy Data
+    const defaultData = [
+      {
+        id: '1',
+        name: 'Meesho',
+        children: [
+          {
+            id: '1-1',
+            name: 'Ethnic Wear',
+            children: [
+              {
+                id: '1-1-1',
+                name: 'Kurtis, Sets & Fabrics',
+                children: [
+                  { id: '1-1-1-1', name: 'Kurti With Bottomwear', children: [] },
+                  { id: '1-1-1-2', name: 'Western Gowns', children: [] }
+                ]
+              },
+              {
+                id: '1-1-2',
+                name: 'Western Wear',
+                children: [
+                  {
+                    id: '1-1-2-1',
+                    name: 'Dresses, Gowns & Jumpsuits',
+                    children: [
+                      { id: '1-1-2-1-1', name: 'Jumpsuits', children: [] }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      { id: '2', name: 'Flipkart', children: [] },
+      { id: '3', name: 'Amazon', children: [] },
+      { id: '4', name: 'Myntra', children: [] },
+      { id: '5', name: 'Jio Mart', children: [] }
+    ];
+
+    let treeData = [];
+    let activeTabId = null; 
+    let selectedPath = []; 
+    let uploadedFiles = [];
+    let saveDebounceTimer = null;
+    let fileHandle = null; // Native File System Access API handle
+    let isFileBound = false;
+    let startupNotice = null; // shown once after the first render
+
+    // Initialize Application
+    async function init() {
+      await loadMarketplaceRules();
+      renderTabs();
+      renderColumns();
+      setupEventListeners();
+
+      if (startupNotice) {
+        await showMessage(startupNotice.title, startupNotice.message);
+      }
+    }
+
+    /* -------------------------------------------------------------
+       READ & SAVE FILE DATA WITH BACKEND & LOCALSTORAGE FALLBACK
+    ------------------------------------------------------------- */
+    async function loadMarketplaceRules() {
+      let loaded = false;
+      let loadedFromFile = false;
+
+      // 0. Desktop app: read the JSON file next to the app (created automatically if missing)
+      if (ipcRenderer) {
+        const { data, file, backup } = await ipcRenderer.invoke('read-json');
+        setFileName(fileBaseName(file), file);
+
+        const tree = Array.isArray(data) ? data : (data && data.treeData);
+        if (Array.isArray(tree)) {
+          treeData = tree;
+          loaded = true;
+          loadedFromFile = true;
+          updateSaveStatus('Loaded', false);
+        } else if (backup) {
+          startupNotice = {
+            title: 'Data file could not be read',
+            message: `${fileBaseName(file)} contains invalid JSON. A copy was kept as ${fileBaseName(backup)} and a fresh file was created.`
+          };
+        }
+      }
+
+      // 1. Attempt reading from backend JSON endpoints (never reachable from file:// in the desktop app)
+      for (const endpoint of ipcRenderer ? [] : JSON_ENDPOINTS) {
+        try {
+          const response = await fetch(endpoint, { cache: 'no-cache' });
+          if (response.ok) {
+            const data = await response.json();
+            treeData = Array.isArray(data) ? data : (data.treeData || defaultData);
+            loaded = true;
+            updateSaveStatus(`Loaded from ${endpoint}`, false);
+            break;
+          }
+        } catch (err) {
+          // Endpoint not accessible in static mode
+        }
+      }
+
+      // 2. Fallback to LocalStorage
+      if (!loaded) {
+        const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (localData) {
+          try {
+            treeData = JSON.parse(localData);
+            loaded = true;
+            updateSaveStatus('Loaded from Local Storage', false);
+          } catch (e) {
+            treeData = defaultData;
+          }
+        }
+      }
+
+      // 3. Fallback to default schema
+      if (!loaded) {
+        treeData = defaultData;
+        updateSaveStatus('Using default rules template', false);
+      }
+
+      if (treeData.length > 0) {
+        activeTabId = treeData[0].id;
+      }
+
+      // Desktop app: no usable file yet, so write one now instead of waiting for the first edit
+      if (ipcRenderer && !loadedFromFile) {
+        await saveMarketplaceRules();
+      }
+    }
+
+    function fileBaseName(filePath) {
+      return filePath.split(/[\\/]/).pop();
+    }
+
+    // File name shown in the header, just before the Bind JSON button (full path on hover)
+    function setFileName(name, fullPath = name) {
+      const el = document.getElementById('fileName');
+      el.textContent = `📄 ${name}`;
+      el.title = fullPath;
+      el.hidden = false;
+    }
+
+    // Triggered automatically on any hierarchy modification
+    function notifyDataChanged() {
+      updateSaveStatus('Saving changes...', true);
+
+      // Debounce auto-save to avoid thrashing file writes
+      if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+
+      saveDebounceTimer = setTimeout(async () => {
+        saveDebounceTimer = null;
+        await saveMarketplaceRules();
+      }, DEBOUNCE_DELAY_MS);
+    }
+
+    // Window is closing with an edit still waiting on the debounce: write it now, synchronously
+    function flushPendingSave() {
+      if (!saveDebounceTimer) return;
+      clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = null;
+
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(treeData, null, 2));
+      if (ipcRenderer) ipcRenderer.sendSync('write-json-sync', treeData);
+    }
+
+    async function saveMarketplaceRules() {
+      const payload = JSON.stringify(treeData, null, 2);
+
+      // Always update LocalStorage backup
+      localStorage.setItem(LOCAL_STORAGE_KEY, payload);
+
+      // 1. If user linked a desktop JSON file directly using File System Access API
+      if (fileHandle) {
+        try {
+          const writable = await fileHandle.createWritable();
+          await writable.write(payload);
+          await writable.close();
+          updateSaveStatus('Saved', false);
+          return;
+        } catch (err) {
+          console.warn('Direct file write failed:', err);
+        }
+      }
+
+      // 2. Desktop app: the main process writes the JSON file (creating it if needed)
+      if (ipcRenderer) {
+        const result = await ipcRenderer.invoke('write-json', treeData);
+        if (result.success) {
+          updateSaveStatus('Saved', false);
+        } else {
+          updateSaveStatus(`Save failed: ${result.error}`, false, true);
+        }
+        return;
+      }
+
+      // 3. Try POST sync to backend JSON endpoints
+      let serverSaved = false;
+      for (const endpoint of JSON_ENDPOINTS) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload
+          });
+
+          if (response.ok) {
+            updateSaveStatus(`Saved to ${endpoint}`, false);
+            serverSaved = true;
+            break;
+          }
+        } catch (err) {
+          // Endpoint unhandled or static server
+        }
+      }
+
+      if (!serverSaved && !fileHandle) {
+        updateSaveStatus('Auto-saved to Local Storage', false);
+      }
+    }
+
+    function updateSaveStatus(text, isSaving, isError = false) {
+      const statusText = document.getElementById('statusText');
+      const statusDot = document.getElementById('statusDot');
+      statusText.textContent = text;
+      
+      statusDot.className = 'status-dot';
+      if (isSaving) {
+        statusDot.classList.add('saving');
+      } else if (isError) {
+        statusDot.classList.add('error');
+      }
+    }
+
+    // Native Desktop File Binding (File System Access API)
+    async function bindLocalJsonFile() {
+      if ('showOpenFilePicker' in window) {
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }],
+            multiple: false
+          });
+          fileHandle = handle;
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          treeData = JSON.parse(text);
+          if (treeData.length > 0) activeTabId = treeData[0].id;
+          selectedPath = [];
+          
+          document.getElementById('btnLinkFile').innerHTML = '✅ Bound';
+          setFileName(fileHandle.name);
+          updateSaveStatus('Bound & synced', false);
+          renderTabs();
+          renderColumns();
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            showMessage('Could not bind file', err.message);
+          }
+        }
+      } else {
+        // Fallback to manual File Upload element trigger
+        document.getElementById('importFileInput').click();
+      }
+    }
+
+    function generateSlug(nodes) {
+      return nodes
+        .map(n => n.name.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+        .filter(Boolean)
+        .join('_');
+    }
+
+    /* -------------------------------------------------------------
+       GLOBAL CATEGORY SEARCH WITH SUGGESTIONS
+    ------------------------------------------------------------- */
+    function getAllCategoryPaths() {
+      const paths = [];
+
+      function traverse(nodes, currentNodes) {
+        nodes.forEach(node => {
+          const newPath = [...currentNodes, node];
+          paths.push(newPath);
+          if (node.children && node.children.length > 0) {
+            traverse(node.children, newPath);
+          }
+        });
+      }
+
+      traverse(treeData, []);
+      return paths;
+    }
+
+    function handleGlobalSearch(query) {
+      const dropdown = document.getElementById('suggestionsDropdown');
+      dropdown.innerHTML = '';
+
+      if (!query || !query.trim()) {
+        dropdown.classList.remove('show');
+        return;
+      }
+
+      const q = query.trim().toLowerCase();
+      const allPaths = getAllCategoryPaths();
+
+      const matches = allPaths.filter(path => {
+        return path.some(node => node.name.toLowerCase().includes(q));
+      });
+
+      if (matches.length === 0) {
+        dropdown.classList.remove('show');
+        return;
+      }
+
+      matches.forEach(path => {
+        const item = document.createElement('div');
+        item.className = 'suggestion-item';
+        
+        // Format path using > separator
+        const formattedPath = path.map(n => n.name).join(' > ');
+        item.textContent = formattedPath;
+
+        item.onclick = () => selectSuggestion(path);
+        dropdown.appendChild(item);
+      });
+
+      dropdown.classList.add('show');
+    }
+
+    function selectSuggestion(pathNodes) {
+      document.getElementById('suggestionsDropdown').classList.remove('show');
+      document.getElementById('globalSearchInput').value = '';
+
+      if (pathNodes.length === 0) return;
+
+      // 1. Switch active top tab
+      const rootTab = pathNodes[0];
+      activeTabId = rootTab.id;
+
+      // 2. Select subcategory nested path
+      selectedPath = pathNodes.slice(1).map(node => node.id);
+
+      renderTabs();
+      renderColumns();
+    }
+
+    /* -------------------------------------------------------------
+       PLATFORM TABS
+    ------------------------------------------------------------- */
+    function renderTabs() {
+      const tabsBar = document.getElementById('tabsBar');
+      tabsBar.innerHTML = '';
+
+      treeData.forEach(tab => {
+        const tabEl = document.createElement('div');
+        tabEl.className = `tab-item ${tab.id === activeTabId ? 'active' : ''}`;
+        
+        const label = document.createElement('span');
+        label.textContent = tab.name;
+        label.onclick = () => switchTab(tab.id);
+
+        const actions = document.createElement('div');
+        actions.className = 'tab-actions';
+
+        const editBtn = document.createElement('span');
+        editBtn.innerHTML = '✏️';
+        editBtn.title = 'Rename Tab';
+        editBtn.onclick = (e) => { e.stopPropagation(); renameTab(tab); };
+
+        const delBtn = document.createElement('span');
+        delBtn.innerHTML = '✕';
+        delBtn.title = 'Delete Tab';
+        delBtn.onclick = (e) => { e.stopPropagation(); deleteTab(tab.id); };
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+
+        tabEl.appendChild(label);
+        tabEl.appendChild(actions);
+        tabsBar.appendChild(tabEl);
+      });
+
+      // Add Tab Button
+      const addTabBtn = document.createElement('button');
+      addTabBtn.className = 'btn-add-tab';
+      addTabBtn.textContent = '+ Add Tab';
+      addTabBtn.onclick = addNewTab;
+      tabsBar.appendChild(addTabBtn);
+    }
+
+    function switchTab(tabId) {
+      activeTabId = tabId;
+      selectedPath = [];
+      renderTabs();
+      renderColumns();
+    }
+
+    async function addNewTab() {
+      const name = await askName('Add new tab', '', 'e.g. Flipkart');
+      if (name) {
+        const newTab = { id: Date.now().toString(), name, children: [] };
+        treeData.push(newTab);
+        activeTabId = newTab.id;
+        selectedPath = [];
+        notifyDataChanged();
+        renderTabs();
+        renderColumns();
+      }
+    }
+
+    async function renameTab(tab) {
+      const name = await askName('Rename tab', tab.name);
+      if (name) {
+        tab.name = name;
+        notifyDataChanged();
+        renderTabs();
+        renderColumns();
+      }
+    }
+
+    async function deleteTab(tabId) {
+      if (await askDelete('Delete tab', 'Delete this top-level category tab and all nested items?')) {
+        treeData = treeData.filter(t => t.id !== tabId);
+        if (activeTabId === tabId) {
+          activeTabId = treeData.length > 0 ? treeData[0].id : null;
+          selectedPath = [];
+        }
+        notifyDataChanged();
+        renderTabs();
+        renderColumns();
+      }
+    }
+
+    /* -------------------------------------------------------------
+       CASCADING COLUMNS
+    ------------------------------------------------------------- */
+    function renderColumns() {
+      const container = document.getElementById('columnContainer');
+      container.innerHTML = '';
+
+      const activeTab = treeData.find(t => t.id === activeTabId);
+      if (!activeTab) {
+        updateRenamerBar([]);
+        return;
+      }
+
+      let currentNodes = activeTab.children || [];
+      let activeNodesPath = [activeTab];
+      let level = 0;
+
+      while (currentNodes) {
+        const selectedId = selectedPath[level];
+        const selectedNode = currentNodes.find(n => n.id === selectedId);
+
+        const col = createColumnElement(level, currentNodes, selectedId);
+        container.appendChild(col);
+
+        if (selectedNode) {
+          activeNodesPath.push(selectedNode);
+          currentNodes = selectedNode.children || [];
+          level++;
+        } else {
+          break;
+        }
+      }
+
+      updateRenamerBar(activeNodesPath);
+    }
+
+    function createColumnElement(level, nodes, selectedId) {
+      const col = document.createElement('div');
+      col.className = 'column';
+
+      const header = document.createElement('div');
+      header.className = 'column-header';
+
+      const title = document.createElement('h2');
+      title.textContent = `Level ${level + 2}`;
+
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn-add-item';
+      addBtn.textContent = '+ Subcategory';
+      addBtn.onclick = () => addSubcategory(level);
+
+      header.appendChild(title);
+      header.appendChild(addBtn);
+      col.appendChild(header);
+
+      const ul = document.createElement('ul');
+      ul.className = 'column-list';
+
+      nodes.forEach(node => {
+        const li = document.createElement('li');
+        li.className = `column-item ${node.id === selectedId ? 'active' : ''}`;
+
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = node.name;
+        label.onclick = () => {
+          selectedPath = selectedPath.slice(0, level);
+          selectedPath[level] = node.id;
+          renderColumns();
+        };
+
+        const actions = document.createElement('div');
+        actions.className = 'item-actions';
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-icon';
+        editBtn.textContent = '✎';
+        editBtn.title = 'Edit';
+        editBtn.onclick = (e) => { e.stopPropagation(); editSubcategory(node); };
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-icon delete';
+        delBtn.textContent = '✕';
+        delBtn.title = 'Delete';
+        delBtn.onclick = (e) => { e.stopPropagation(); deleteSubcategory(level, node.id); };
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+
+        li.appendChild(label);
+        li.appendChild(actions);
+        ul.appendChild(li);
+      });
+
+      col.appendChild(ul);
+      return col;
+    }
+
+    function getNodesAtSubLevel(level) {
+      const activeTab = treeData.find(t => t.id === activeTabId);
+      if (!activeTab) return null;
+
+      let current = activeTab.children;
+      for (let i = 0; i < level; i++) {
+        const parentId = selectedPath[i];
+        const parentNode = current.find(n => n.id === parentId);
+        if (parentNode) {
+          if (!parentNode.children) parentNode.children = [];
+          current = parentNode.children;
+        } else {
+          return null;
+        }
+      }
+      return current;
+    }
+
+    async function addSubcategory(level) {
+      const targetNodes = getNodesAtSubLevel(level);
+      if (!targetNodes) {
+        await showMessage('Select a category', 'Please select a category in the previous column first.');
+        return;
+      }
+
+      const name = await askName('Add subcategory', '', 'e.g. Kurti With Bottomwear');
+      if (name) {
+        const newItem = { id: Date.now().toString(), name, children: [] };
+        targetNodes.push(newItem);
+        selectedPath = selectedPath.slice(0, level);
+        selectedPath[level] = newItem.id;
+        notifyDataChanged();
+        renderColumns();
+      }
+    }
+
+    async function editSubcategory(node) {
+      const name = await askName('Rename subcategory', node.name);
+      if (name) {
+        node.name = name;
+        notifyDataChanged();
+        renderColumns();
+      }
+    }
+
+    async function deleteSubcategory(level, id) {
+      if (await askDelete('Delete subcategory', 'Delete subcategory and all nested items?')) {
+        const targetNodes = getNodesAtSubLevel(level);
+        if (targetNodes) {
+          const idx = targetNodes.findIndex(n => n.id === id);
+          if (idx !== -1) {
+            targetNodes.splice(idx, 1);
+            selectedPath = selectedPath.slice(0, level);
+            notifyDataChanged();
+            renderColumns();
+          }
+        }
+      }
+    }
+
+    /* -------------------------------------------------------------
+       FILE RENAMER & JSZIP DOWNLOAD PANEL
+    ------------------------------------------------------------- */
+    // Full generated name + file picker live in the top-right toolbar (static markup, see #renamerBar)
+    let currentSlug = '';
+
+    function updateRenamerBar(selectedNodes) {
+      currentSlug = generateSlug(selectedNodes);
+
+      const slugBox = document.getElementById('slugBox');
+      slugBox.textContent = currentSlug || 'Select categories to generate name';
+      slugBox.classList.toggle('empty', !currentSlug);
+
+      updateFileLabel();
+    }
+
+    function updateFileLabel() {
+      const label = document.getElementById('chooseFilesLabel');
+      const text = document.getElementById('chooseFilesText');
+
+      if (uploadedFiles.length === 0) {
+        text.textContent = '📁 Choose Main File(s)';
+        label.title = '';
+      } else {
+        text.textContent = uploadedFiles.length === 1
+          ? `📄 ${uploadedFiles[0].name}`
+          : `📄 ${uploadedFiles.length} files chosen`;
+        label.title = uploadedFiles.map(f => f.name).join('\n');
+      }
+    }
+
+    function handleFileUpload(e) {
+      uploadedFiles = Array.from(e.target.files);
+      updateFileLabel();
+    }
+
+    function downloadRenamedFiles(slug) {
+      if (!slug) {
+        showMessage('No name yet', 'Please select categories to generate the final attached name first.');
+        return;
+      }
+      if (uploadedFiles.length === 0) {
+        showMessage('No files chosen', 'Please upload at least one file to rename.');
+        return;
+      }
+
+      if (uploadedFiles.length === 1) {
+        // Single File Direct Download
+        const file = uploadedFiles[0];
+        const ext = file.name.substring(file.name.lastIndexOf('.'));
+        const newFileName = `${slug}${ext}`;
+
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = newFileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // Multiple Files compressed into a single ZIP archive via JSZip
+        const zip = new JSZip();
+        uploadedFiles.forEach((file, index) => {
+          const ext = file.name.substring(file.name.lastIndexOf('.'));
+          const newFileName = `${slug}_${index + 1}${ext}`;
+          zip.file(newFileName, file);
+        });
+
+        zip.generateAsync({ type: 'blob' }).then(content => {
+          const url = URL.createObjectURL(content);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${slug}_files.zip`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      }
+    }
+
+    /* -------------------------------------------------------------
+       DIALOG (in-page replacement for prompt / confirm / alert)
+    ------------------------------------------------------------- */
+    let dialogState = null; // { resolve, hasInput } while a dialog is open
+
+    // Resolves to the entered text (input dialogs), true (confirm / message) or null when cancelled
+    function openDialog({ title, message = '', input = null, confirmText = 'OK', danger = false, showCancel = true }) {
+      if (dialogState) closeDialog(null);
+
+      return new Promise(resolve => {
+        dialogState = { resolve, hasInput: !!input };
+
+        const inputEl = document.getElementById('dialogInput');
+        const okBtn = document.getElementById('dialogOk');
+
+        document.getElementById('dialogTitle').textContent = title;
+        document.getElementById('dialogMessage').textContent = message;
+        document.getElementById('dialogMessage').hidden = !message;
+        document.getElementById('dialogError').textContent = '';
+
+        inputEl.hidden = !input;
+        inputEl.classList.remove('invalid');
+        inputEl.value = input ? input.value : '';
+        inputEl.placeholder = input ? input.placeholder : '';
+
+        okBtn.textContent = confirmText;
+        okBtn.className = danger ? 'btn-danger' : 'btn-primary';
+        document.getElementById('dialogCancel').hidden = !showCancel;
+
+        document.getElementById('dialogOverlay').classList.add('show');
+
+        if (input) {
+          inputEl.focus();
+          inputEl.select();
+        } else {
+          okBtn.focus();
+        }
+      });
+    }
+
+    function closeDialog(result) {
+      if (!dialogState) return;
+      const { resolve } = dialogState;
+      dialogState = null;
+      document.getElementById('dialogOverlay').classList.remove('show');
+      resolve(result);
+    }
+
+    function submitDialog() {
+      if (!dialogState) return;
+
+      if (dialogState.hasInput) {
+        const inputEl = document.getElementById('dialogInput');
+        const value = inputEl.value.trim();
+        if (!value) {
+          inputEl.classList.add('invalid');
+          document.getElementById('dialogError').textContent = 'Please enter a name.';
+          inputEl.focus();
+          return;
+        }
+        closeDialog(value);
+      } else {
+        closeDialog(true);
+      }
+    }
+
+    const askName = (title, value = '', placeholder = 'Category name') =>
+      openDialog({ title, input: { value, placeholder }, confirmText: 'Save' });
+
+    const askDelete = (title, message) =>
+      openDialog({ title, message, confirmText: 'Delete', danger: true });
+
+    const showMessage = (title, message) =>
+      openDialog({ title, message, showCancel: false });
+
+    /* -------------------------------------------------------------
+       EVENT LISTENERS
+    ------------------------------------------------------------- */
+    function setupEventListeners() {
+      // Dialog: Enter submits (native form submit), Cancel / Esc / backdrop click dismiss
+      document.getElementById('dialogForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitDialog();
+      });
+      document.getElementById('dialogCancel').addEventListener('click', () => closeDialog(null));
+      document.getElementById('dialogInput').addEventListener('input', (e) => {
+        e.target.classList.remove('invalid');
+        document.getElementById('dialogError').textContent = '';
+      });
+      document.getElementById('dialogOverlay').addEventListener('mousedown', (e) => {
+        if (e.target.id === 'dialogOverlay') closeDialog(null);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && dialogState) closeDialog(null);
+      });
+
+      // Don't lose an edit made just before the window closes
+      window.addEventListener('beforeunload', flushPendingSave);
+
+      // Global Search Input Handler
+      const searchInput = document.getElementById('globalSearchInput');
+      searchInput.addEventListener('input', (e) => handleGlobalSearch(e.target.value));
+
+      // Link File System Access
+      document.getElementById('btnLinkFile').addEventListener('click', bindLocalJsonFile);
+
+      // Renamer toolbar
+      document.getElementById('mainFileInput').addEventListener('change', handleFileUpload);
+      document.getElementById('btnDownload').addEventListener('click', () => downloadRenamedFiles(currentSlug));
+
+      // Manual Import File Fallback
+      document.getElementById('importFileInput').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const text = await file.text();
+          try {
+            treeData = JSON.parse(text);
+            if (treeData.length > 0) activeTabId = treeData[0].id;
+            selectedPath = [];
+            notifyDataChanged();
+            renderTabs();
+            renderColumns();
+          } catch (err) {
+            showMessage('Import failed', 'Invalid JSON file format.');
+          }
+        }
+      });
+
+      // Close Search Dropdown on Outside Click
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-container')) {
+          document.getElementById('suggestionsDropdown').classList.remove('show');
+        }
+      });
+    }
+
+    // App Initialization on Window Load
+    window.onload = function() {
+      init();
+    };
+  </script>
+</body>
+</html>

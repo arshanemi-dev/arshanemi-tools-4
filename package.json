@@ -20,6 +20,7 @@
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.40.0",
+    "joi": "^18.2.8",
     "jose": "^6.2.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",

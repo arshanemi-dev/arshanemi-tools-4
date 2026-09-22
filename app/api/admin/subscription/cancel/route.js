@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
+import { env } from '@/lib/env'
 
 async function getSubscriptionFromDB(userId) {
   try {
@@ -26,8 +27,8 @@ export async function POST(req) {
     return NextResponse.json({ error: 'No active subscription found' }, { status: 404 })
   }
 
-  const keyId     = process.env.RAZORPAY_KEY_ID
-  const keySecret = process.env.RAZORPAY_KEY_SECRET
+  const keyId     = env.RAZORPAY_KEY_ID
+  const keySecret = env.RAZORPAY_KEY_SECRET
   if (!keyId || !keySecret) {
     return NextResponse.json({ error: 'Payment gateway not configured' }, { status: 503 })
   }

@@ -4,10 +4,11 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Loader2, ArrowLeft, Pencil, Key, ListFilter, Image as ImageIcon, Type,
-  Store, Tag, GitBranch, Rows3, Sparkles, FileText, Table2, Hash,
+  Store, Tag, GitBranch, Rows3, Sparkles, FileText, Table2, Hash, History,
 } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import ExcelFormatsView from '@/components/listing/ExcelFormatsView'
+import TemplateVersionsView from '@/components/listing/TemplateVersionsView'
 
 // The 3 real groups, in a fixed display order — same set the wizard and
 // backend (lib/listingTemplates.js GROUPS) always use ("Optional" was
@@ -33,6 +34,7 @@ const MAX_VALUE_CHIPS = 5
 const TABS = [
   { id: 'details', label: 'Template Details', icon: FileText },
   { id: 'excel', label: 'Excel Formats', icon: Table2 },
+  { id: 'versions', label: 'Versions', icon: History },
 ]
 
 function StatCard({ icon: Icon, label, value }) {
@@ -150,6 +152,8 @@ export default function TemplateDetailsPage() {
 
       {activeTab === 'excel' ? (
         <ExcelFormatsView sourceFileUrl={template.sourceFileUrl} />
+      ) : activeTab === 'versions' ? (
+        <TemplateVersionsView templateId={templateId} />
       ) : (
         <>
           {/* Overview */}

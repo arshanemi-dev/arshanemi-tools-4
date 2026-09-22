@@ -41,7 +41,7 @@ export default function ListingHistoryPage() {
             type="button"
             onClick={() => setActive(t.key)}
             className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-colors ${
-              active === t.key ? 'bg-foreground text-foreground' : 'bg-card text-muted border border-divider hover:bg-surface'
+              active === t.key ? 'bg-foreground text-white' : 'bg-card text-muted border border-divider hover:bg-surface'
             }`}
           >
             {t.label}

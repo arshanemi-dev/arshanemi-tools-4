@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
+import { env } from '@/lib/env'
 
 async function saveSubscriptionToDB(userId, data) {
   try {
@@ -14,7 +15,7 @@ function mapRazorpayStatus(s) {
 }
 
 export async function POST(req) {
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET
+  const webhookSecret = env.RAZORPAY_WEBHOOK_SECRET
   if (!webhookSecret) {
     return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 })
   }

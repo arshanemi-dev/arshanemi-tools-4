@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta,
-  ensureTrailingEmptyRow, upsertRowsByOwner, assignSkusToRows, canAccessTemplate, GROUPS,
-} from '@/lib/listingTemplates'
+  assignSkusToRows, canAccessTemplate,
+} from '@/lib/listingStore'
+import { ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS } from '@/lib/listingTemplates'
 import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory, toLabelKeyedRow } from '@/lib/listingHistory'
 import { runServerBillingGate } from '@/lib/serverBilling'
 
@@ -207,6 +208,7 @@ export async function POST(req, { params }) {
       // (shouldn't happen for design_system in practice) since the key would collapse to the
       // same value for every row.
       const keyHeaders = (sheet.headers || []).filter((h) => h.isUniqueKeyPart)
+      console.log('Export route: design_system sheet has', keyHeaders.length, 'unique-key headers')
       if (sessionOnlyByGroup.design_system && keyHeaders.length > 0) {
         const keyOf = (row) => (row.userId ?? 'unowned') + '::' + keyHeaders.map((h) => String(row[h.id] ?? '').trim().toLowerCase()).join('::')
         const skuByKey = new Map(sheet.rows.map((r) => [keyOf(r), r.sku]))
