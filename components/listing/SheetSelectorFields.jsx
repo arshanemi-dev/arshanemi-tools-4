@@ -25,7 +25,7 @@ export function MiniInput({ label, value, onChange, defaultValue, readOnly }) {
 export default function SheetSelectorFields({
   sheetMeta,
   dataSheetName, onSelectDataSheet,
-  dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
+  dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow, dataIsectionRow, setDataIsectionRow,
   dropdownSheetName, onSelectDropdownSheet,
   dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
 }) {
@@ -45,7 +45,7 @@ export default function SheetSelectorFields({
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
             <MiniInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
             <MiniInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
-            <MiniInput label="I section" defaultValue="2" readOnly />
+            <MiniInput label="I section" value={dataIsectionRow ?? '2'} onChange={setDataIsectionRow} />
           </div>
         </div>
         <div className="min-w-0 flex-[1_1_330px] sm:pl-5">

@@ -74,10 +74,38 @@ const CATEGORY_STOPWORDS = new Set([
   'xlsx', 'xls', 'csv', 'fill', 'this', 'data', 'master', 'new', 'old', 'updated',
   'list', 'listing', 'upload', 'uploaded', 'export', 'import', 'v1', 'v2', 'v3',
 ])
-function deriveCategoriesFromName(name) {
-  const base = String(name || '').replace(/\.[a-z0-9]+$/i, '')
+const KNOWN_MARKETPLACES = [
+  'Meesho', 'Amazon', 'Flipkart', 'Myntra', 'Ajio', 'Nykaa', 'Tata CLiQ', 'Jiomart', 'eBay', 'Shopify'
+]
+
+function extractBrandAndCategories(filename) {
+  const base = String(filename || '').replace(/\.[a-z0-9]+$/i, '')
   const tokens = base.split(/[_\-\s]+/).map((t) => t.trim()).filter(Boolean)
-  return tokens.filter((t) => !CATEGORY_STOPWORDS.has(t.toLowerCase()) && !/^\d+$/.test(t)).slice(0, 6)
+  if (tokens.length === 0) return { brand: '', categories: [] }
+
+  let brand = ''
+  let catTokens = tokens
+
+  const firstLower = tokens[0].toLowerCase()
+  const matched = KNOWN_MARKETPLACES.find((m) => m.toLowerCase() === firstLower)
+
+  if (matched) {
+    brand = matched
+    catTokens = tokens.slice(1)
+  } else if (/^[a-z0-9]+$/i.test(tokens[0])) {
+    brand = tokens[0].charAt(0).toUpperCase() + tokens[0].slice(1)
+    catTokens = tokens.slice(1)
+  }
+
+  const categories = catTokens
+    .filter((t) => !CATEGORY_STOPWORDS.has(t.toLowerCase()) && !/^\d+$/.test(t))
+    .slice(0, 6)
+
+  return { brand, categories }
+}
+
+function deriveCategoriesFromName(name) {
+  return extractBrandAndCategories(name).categories
 }
 
 // Same idea as deriveCategoriesFromName but sourced from the sheet's own
@@ -108,13 +136,6 @@ function deriveCategoriesFromHeaders(headers) {
   return out
 }
 
-// Flattens an existing template's headers into this page's own
-// { ourHeaderId, ourHeaderLabel, sheetHeaders, group, position } shape — an
-// existing header stands in as its own "canonical" entry (sheetHeaders:
-// [its own label]), so the same mapping/placement/preview UI represents
-// both a fresh upload's raw headers and a template already being edited.
-// `existingId` is kept so Save reuses the original header id instead of
-// minting a new one for a header that wasn't touched.
 function seedFromExistingContent(content) {
   const out = []
   for (const sheet of content.sheets || []) {
@@ -140,11 +161,8 @@ function buildGroupedSheets(mappedHeaders) {
     if (!m.group || m.sheetHeaders.length === 0) continue
     byGroup[m.group]?.push(m)
   }
-  return REAL_GROUPS.map((g, i) => ({
-    sheetName: SHEET_LABELS[g],
-    sheetIndex: i,
-    group: g,
-    headers: byGroup[g]
+  return REAL_GROUPS.map((g, i) => {
+    const headers = byGroup[g]
       .slice()
       .sort((a, b) => a.position - b.position)
       .map((m, idx) => ({
@@ -164,9 +182,21 @@ function buildGroupedSheets(mappedHeaders) {
         disabled: false,
         source: 'upload',
         dropdownSource: null,
-      })),
-    rows: [],
-  }))
+      }))
+
+    const sampleRow = {}
+    headers.forEach((h) => {
+      sampleRow[h.label] = `${h.label} Sample`
+    })
+
+    return {
+      sheetName: SHEET_LABELS[g],
+      sheetIndex: i,
+      group: g,
+      headers,
+      rows: headers.length > 0 ? [sampleRow] : [],
+    }
+  })
 }
 
 // The bulk mapping flow — a multi-template workspace: `templateIds` (from
@@ -193,10 +223,18 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [loadingExisting, setLoadingExisting] = useState(templateIds.length > 0)
   const [loadError, setLoadError] = useState(false)
 
+  const [selectedMarketplace, setSelectedMarketplace] = useState('All')
   const [presetData, setPresetData] = useState({ marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' })
   const [categoriesData, setCategoriesData] = useState(DEFAULT_CATEGORIES)
   const [templateNameInput, setTemplateNameInput] = useState('')
   const [templateNumber, setTemplateNumber] = useState('')
+
+  function handleSelectMarketplace(mp) {
+    setSelectedMarketplace(mp)
+    if (mp && mp !== 'meesho' && mp !== 'meesho') {
+      setPresetData((prev) => ({ ...prev, marketplaceName: mp }))
+    }
+  }
 
   const [fileName, setFileName] = useState('')
   const [uploadedFiles, setUploadedFiles] = useState([]) // [{name, sheets: []}]
@@ -315,20 +353,16 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     return () => { cancelled = true }
   }, [activeTemplateId, templatesData])
 
-  // The global header dictionary, scoped to whatever marketplace/category1
-  // is currently set — re-fetches as those change so switching marketplace
-  // (or switching the active template) shows the right common+category headers.
+  // The global header dictionary — fetched globally across all marketplaces so
+  // Our Headers is shared and accessible everywhere.
   useEffect(() => {
     let cancelled = false
-    const params = new URLSearchParams()
-    if (presetData.marketplaceName) params.set('marketplaceName', presetData.marketplaceName)
-    if (categoriesData.category1) params.set('category1', categoriesData.category1)
-    fetch(`/api/listing-tools/mapping/headers?${params.toString()}`, { credentials: 'include' })
+    fetch('/api/listing-tools/mapping/headers', { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { headers: [] }))
       .then((data) => { if (!cancelled) setOurHeaders(data.headers || []) })
       .catch(() => { if (!cancelled) setOurHeaders([]) })
     return () => { cancelled = true }
-  }, [presetData.marketplaceName, categoriesData.category1])
+  }, [refreshToken])
 
   // A brand-new template only — an already-selected template already has
   // its own real categories, which this must never overwrite.
@@ -349,7 +383,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     })
   }
   function applyDerivedCategories(name) {
-    fillEmptyCategories(deriveCategoriesFromName(name))
+    const { brand, categories } = extractBrandAndCategories(name)
+    if (brand && !isEditMode) {
+      setPresetData((prev) => ({ ...prev, marketplaceName: brand }))
+      setSelectedMarketplace(brand)
+    }
+    fillEmptyCategories(categories)
   }
   function applyDerivedCategoriesFromHeaders(headers) {
     fillEmptyCategories(deriveCategoriesFromHeaders(headers))
@@ -908,6 +947,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           onSelectTemplate={setActiveTemplateId}
           uploadedFiles={uploadedFiles}
           onClearUpload={handleClearUpload}
+          selectedMarketplace={selectedMarketplace}
+          onSelectMarketplace={handleSelectMarketplace}
           onApplyMappingPreset={applyMappingItem}
           onApplyMappingRule={applyMappingItem}
           onApplyPlacePreset={applyPlaceItem}

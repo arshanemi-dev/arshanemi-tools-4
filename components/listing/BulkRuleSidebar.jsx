@@ -11,7 +11,7 @@ const eyeBtnCls = `${titleBtnCls} text-subtle hover:bg-card-hover`
 // One collapsible section — used 4 times below for Header Mapping / Mapping
 // Rule (both backed by /api/listing-tools/mapping/rules, split by `kind`)
 // and Header Place / Place Rule (/api/listing-tools/mapping/place-rules).
-function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll }) {
+function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll, selectedMarketplace }) {
   const { addToast } = useToast()
   const [items, setItems] = useState(null)
   const [search, setSearch] = useState('')
@@ -31,7 +31,16 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
     return () => { cancelled = true }
   }, [apiBase, kind, refreshToken])
 
-  const filtered = (items || []).filter((r) => !search.trim() || r.name.toLowerCase().includes(search.toLowerCase()))
+  const filtered = (items || []).filter((r) => {
+    const matchesSearch = !search.trim() || r.name.toLowerCase().includes(search.toLowerCase())
+    const mp = r.marketplaceName || ''
+    const matchesMarketplace =
+      !selectedMarketplace ||
+      selectedMarketplace === 'meesho' ||
+      !mp ||
+      mp.toLowerCase() === selectedMarketplace.toLowerCase()
+    return matchesSearch && matchesMarketplace
+  })
 
   async function handleDelete(id) {
     if (!window.confirm('Delete this saved item?')) return
@@ -409,17 +418,25 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
 // Task 2: display finalName when available (marketplace_cat1…cat6_version).
 // Task 3: the marketplace name is the first underscore-separated token of
 // finalName (composeFinalName always writes marketplaceName first).
-function TemplatesSection({ templates, activeTemplateId, onSelectTemplate }) {
+function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selectedMarketplace }) {
   const [search, setSearch] = useState('')
   const [hidden, setHidden] = useState(false)
 
   // Search against both finalName and templateName so nothing gets lost.
   const filtered = templates.filter((t) => {
     const q = search.toLowerCase()
-    return (
+    const matchesSearch =
       (t.finalName || t.templateName || '').toLowerCase().includes(q) ||
       (t.templateName || '').toLowerCase().includes(q)
-    )
+    const displayName = t.finalName || t.templateName || ''
+    const mp = t.marketplaceName || (displayName ? displayName.split('_')[0] : '') || ''
+    const matchesMarketplace =
+      !selectedMarketplace ||
+      selectedMarketplace === 'All' ||
+      selectedMarketplace === 'meesho' ||
+      !mp ||
+      mp.toLowerCase() === selectedMarketplace.toLowerCase()
+    return matchesSearch && matchesMarketplace
   })
 
   return (
@@ -566,26 +583,122 @@ function UploadedSheetsSection({ uploadedFiles, onClearUpload }) {
   )
 }
 
+const DEFAULT_MARKETPLACES = [
+  'Meesho',
+  'Amazon',
+  'Flipkart',
+  'Myntra',
+  'Ajio',
+  'Nykaa',
+  'Tata CLiQ',
+]
+
+function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
+  const [marketplaces, setMarketplaces] = useState(DEFAULT_MARKETPLACES)
+  const [hidden, setHidden] = useState(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('custom_marketplaces')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length) {
+          setMarketplaces((prev) => [...new Set([...prev, ...parsed])])
+        }
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  function handleAddMarketplace() {
+    const name = window.prompt('Enter new Marketplace / Ecommerce Brand name:')
+    if (!name?.trim()) return
+    const trimmed = name.trim()
+    setMarketplaces((prev) => {
+      if (prev.includes(trimmed)) return prev
+      const next = [...prev, trimmed]
+      try {
+        localStorage.setItem('custom_marketplaces', JSON.stringify(next.filter((m) => !DEFAULT_MARKETPLACES.includes(m))))
+      } catch { /* ignore */ }
+      return next
+    })
+    onSelectMarketplace(trimmed)
+  }
+
+  return (
+    <div className="border-b border-divider pb-3 mb-3">
+      <div className="flex items-center justify-between gap-1.5 px-2 pt-2 mb-2">
+        <h3 className="text-[12.5px] font-semibold text-foreground truncate">Ecommerce Brands</h3>
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setHidden(!hidden)}
+            title={hidden ? "Show Brands" : "Hide Brands"}
+            className={eyeBtnCls}
+          >
+            {hidden ? <EyeOff className="h-3.5 w-3.5 text-subtle" /> : <Eye className="h-3.5 w-3.5 text-[#16a34a]" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleAddMarketplace}
+            title="Add a custom Ecommerce Brand / Marketplace"
+            className={addBtnCls}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {!hidden && (
+        <div className="flex flex-wrap gap-1 px-2 max-h-36 overflow-y-auto">
+          {marketplaces.map((m) => {
+            const isAll = m === 'meesho' || m === 'All'
+            const activeKey = isAll ? 'All' : m
+            const currentKey = !selectedMarketplace || selectedMarketplace === 'meesho' ? 'All' : selectedMarketplace
+            const isSelected = currentKey.toLowerCase() === activeKey.toLowerCase()
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onSelectMarketplace(isAll ? 'All' : m)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  isSelected
+                    ? 'bg-[#16a34a] text-white font-semibold'
+                    : 'bg-card-hover text-foreground hover:bg-divider/50'
+                }`}
+              >
+                {m}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Templates + Our Headers (above), then the four rule/preset sections:
 // Header Mapping/Mapping Rule (kind=preset/rule on listing_mapping_rules)
-// and Header Place/Place Rule (kind=preset/rule on listing_place_rules) —
-// matching the sidebar in the original mockup. Mapping Rule/Place Rule get
-// an extra title-row "Apply Rules" button that runs every saved rule in
-// that section at once; every section's title gets a blue + and a delete.
+// and Header Place/Place Rule (kind=preset/rule on listing_place_rules).
 export default function BulkRuleSidebar({
   ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creatingHeader,
   templates, activeTemplateId, onSelectTemplate,
   uploadedFiles, onClearUpload,
+  selectedMarketplace, onSelectMarketplace,
   onApplyMappingPreset, onApplyMappingRule, onApplyPlacePreset, onApplyPlaceRule,
   onSaveMappingPreset, onSaveMappingRule, onSavePlacePreset, onSavePlaceRule,
   refreshToken,
 }) {
   return (
     <aside className="w-full flex-shrink-0 rounded-[7px] border border-divider bg-card sm:w-60">
+      <MarketplaceTabsSection
+        selectedMarketplace={selectedMarketplace}
+        onSelectMarketplace={onSelectMarketplace}
+      />
       <TemplatesSection
         templates={templates}
         activeTemplateId={activeTemplateId}
         onSelectTemplate={onSelectTemplate}
+        selectedMarketplace={selectedMarketplace}
       />
       <UploadedSheetsSection
         uploadedFiles={uploadedFiles}
@@ -599,10 +712,10 @@ export default function BulkRuleSidebar({
         onDeleteAllHeaders={onDeleteAllHeaders}
         creating={creatingHeader}
       />
-      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} />
-      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll />
-      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} />
-      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll />
+      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} />
+      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} />
+      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} />
+      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} />
     </aside>
   )
 }
