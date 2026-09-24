@@ -23,6 +23,10 @@ const BASE_NAV_ITEMS = [
 ]
 
 const TEMPLATE_SETTINGS_ITEM = { href: '/listing-tools/template-settings', label: 'Template Settings' }
+// master_admin only, directly below Template Settings — the audit log of
+// every template/version change (app/listing-tools/template-logs/page.js
+// enforces the same gate server-side).
+const TEMPLATE_LOGS_ITEM = { href: '/listing-tools/template-logs', label: 'Template Logs' }
 const TEMPLATE_ACCESS_ITEM = { href: '/listing-tools/template-access', label: 'Template Access' }
 
 export default function ListingToolsSidebar({ role, templateSettingsAllowed, mobileOpen = false, onClose = () => {} }) {
@@ -32,8 +36,9 @@ export default function ListingToolsSidebar({ role, templateSettingsAllowed, mob
   const navItems = [
     ...BASE_NAV_ITEMS,
     ...(role === 'master_admin' || templateSettingsAllowed ? [TEMPLATE_SETTINGS_ITEM] : []),
-    ...(role === 'master_admin' ? 
+    ...(role === 'master_admin' ?
       [
+        TEMPLATE_LOGS_ITEM,
         // TEMPLATE_ACCESS_ITEM
       ]
       

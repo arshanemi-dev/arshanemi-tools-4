@@ -7,11 +7,46 @@ const titleBtnCls = 'flex h-6 w-6 flex-shrink-0 items-center justify-center roun
 const addBtnCls = `${titleBtnCls} bg-[#16a34a] text-white hover:bg-[#128a3e]`
 const deleteBtnCls = `${titleBtnCls} border border-[#e59a9a] text-[#d14343] hover:bg-[#fdeeee]`
 const eyeBtnCls = `${titleBtnCls} text-subtle hover:bg-card-hover`
+const checkboxCls = 'h-3.5 w-3.5 flex-shrink-0 accent-[#16a34a]'
+
+// Single shared confirmation modal — every delete in this sidebar (rules,
+// presets, headers, uploaded sheets) routes through the one `requestConfirm`
+// passed down from BulkRuleSidebar instead of the browser's own
+// window.confirm(), so there's only ever one dialog instance on screen.
+function ConfirmDialog({ state, onConfirm, onCancel }) {
+  if (!state) return null
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(17,24,39,0.45)] p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}
+    >
+      <div className="w-[320px] max-w-full rounded-xl border border-divider bg-card p-4 shadow-2xl">
+        <p className="mb-4 text-[13px] leading-relaxed text-foreground">{state.message}</p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-full border border-divider px-3 py-1.5 text-[12px] font-medium text-muted hover:bg-card-hover"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-full bg-[#d14343] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#b93737]"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // One collapsible section — used 4 times below for Header Mapping / Mapping
 // Rule (both backed by /api/listing-tools/mapping/rules, split by `kind`)
 // and Header Place / Place Rule (/api/listing-tools/mapping/place-rules).
-function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll, selectedMarketplace }) {
+function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll, selectedMarketplace, ruleNamePrefix, requestConfirm, onPreview, previewedId }) {
   const { addToast } = useToast()
   const [items, setItems] = useState(null)
   const [search, setSearch] = useState('')
@@ -21,6 +56,24 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
   const [busyId, setBusyId] = useState(null)
   const [applyingAll, setApplyingAll] = useState(false)
   const [deletingAll, setDeletingAll] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [addDraft, setAddDraft] = useState('')
+  const [selected, setSelected] = useState(() => new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
+
+  const prefix = ruleNamePrefix || 'Marketplace_'
+
+  // Shared by the mount/refreshToken effect AND every CRUD mutation below —
+  // every create/rename/delete re-pulls this section's list straight from
+  // the backend instead of patching `items` locally, so what's on screen is
+  // always what the server actually has (no drift if another tab/session
+  // changed the same rules).
+  function refetch() {
+    return fetch(`${apiBase}?kind=${kind}`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : { rules: [] }))
+      .then((data) => setItems(data.rules || []))
+      .catch(() => setItems([]))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -42,32 +95,58 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
     return matchesSearch && matchesMarketplace
   })
 
-  async function handleDelete(id) {
-    if (!window.confirm('Delete this saved item?')) return
-    setBusyId(id)
-    try {
-      const res = await fetch(`${apiBase}/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Delete failed')
-      setItems((prev) => prev.filter((r) => r.id !== id))
-    } catch (err) {
-      addToast(err.message, 'error')
-    } finally {
-      setBusyId(null)
-    }
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
-  async function handleDeleteAll() {
+  function deleteOne(id) {
+    setBusyId(id)
+    return fetch(`${apiBase}/${id}`, { method: 'DELETE' })
+      .then((res) => { if (!res.ok) throw new Error('Delete failed') })
+      .then(() => refetch())
+      .catch((err) => addToast(err.message, 'error'))
+      .finally(() => setBusyId(null))
+  }
+
+  function handleDelete(id) {
+    requestConfirm('Delete this saved item?', () => deleteOne(id))
+  }
+
+  function handleDeleteAll() {
     if (!items || items.length === 0) return
-    if (!window.confirm(`Delete all ${items.length} saved item(s) under "${title}"? This can't be undone.`)) return
-    setDeletingAll(true)
-    try {
-      for (const item of items) {
-        try { await fetch(`${apiBase}/${item.id}`, { method: 'DELETE' }) } catch { /* best-effort */ }
+    requestConfirm(`Delete all ${items.length} saved item(s) under "${title}"? This can't be undone.`, async () => {
+      setDeletingAll(true)
+      try {
+        for (const item of items) {
+          try { await fetch(`${apiBase}/${item.id}`, { method: 'DELETE' }) } catch { /* best-effort */ }
+        }
+        await refetch()
+        setSelected(new Set())
+      } finally {
+        setDeletingAll(false)
       }
-      setItems([])
-    } finally {
-      setDeletingAll(false)
-    }
+    })
+  }
+
+  function handleDeleteSelected() {
+    if (selected.size === 0) return
+    requestConfirm(`Delete ${selected.size} selected item(s)? This can't be undone.`, async () => {
+      setDeletingSelected(true)
+      try {
+        for (const id of selected) {
+          try { await fetch(`${apiBase}/${id}`, { method: 'DELETE' }) } catch { /* best-effort */ }
+        }
+        await refetch()
+        setSelected(new Set())
+      } finally {
+        setDeletingSelected(false)
+      }
+    })
   }
 
   async function handleApplyAll() {
@@ -100,13 +179,32 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Rename failed')
-      setItems((prev) => prev.map((r) => (r.id === id ? data.rule : r)))
+      await refetch()
       setRenamingId(null)
     } catch (err) {
       addToast(err.message, 'error')
     } finally {
       setBusyId(null)
     }
+  }
+
+  // Inline "add new" row — replaces the old window.prompt() flow. Always
+  // starts pre-filled with the fixed "Marketplace_" prefix (only the rest
+  // is actually typed), matching how every saved template's own name works.
+  function startAdd() {
+    setAddDraft(prefix)
+    setAdding(true)
+  }
+  function cancelAdd() {
+    setAdding(false)
+    setAddDraft('')
+  }
+  function commitAdd() {
+    const typed = addDraft
+    const rest = (typed.startsWith(prefix) ? typed.slice(prefix.length) : typed).trim()
+    if (!rest) { addToast(`Enter a name after "${prefix}".`, 'error'); return }
+    onSaveNew(`${prefix}${rest}`)
+    cancelAdd()
   }
 
   return (
@@ -134,7 +232,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
               Apply Rules
             </button>
           )}
-          <button type="button" onClick={onSaveNew} title={`Save the current arrangement as a new ${title}`} className={addBtnCls}>
+          <button type="button" onClick={startAdd} title={`Save the current arrangement as a new ${title}`} className={addBtnCls}>
             <Plus className="h-3.5 w-3.5" />
           </button>
           <button type="button" onClick={handleDeleteAll} disabled={deletingAll} title={`Delete every saved ${title}`} className={deleteBtnCls}>
@@ -144,6 +242,23 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
       </div>
       {!hidden && (
         <>
+          {adding && (
+            <div className="mx-2 mt-1.5 mb-1.5 flex items-center gap-1">
+              <input
+                value={addDraft}
+                onChange={(e) => setAddDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitAdd(); if (e.key === 'Escape') cancelAdd() }}
+                autoFocus
+                className="min-w-0 flex-1 rounded border border-divider bg-background px-1.5 py-1 text-[12px] outline-none focus:border-accent-light"
+              />
+              <button type="button" onClick={commitAdd} title="Save" className="text-emerald-600">
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={cancelAdd} title="Cancel" className="text-subtle">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <div className="relative mx-2 mt-1.5 mb-1.5">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-subtle" />
             <input
@@ -153,6 +268,20 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
               className="w-full rounded-md border border-divider bg-background pl-6 pr-2 py-1 text-[12px] outline-none focus:border-accent-light"
             />
           </div>
+          {selected.size > 0 && (
+            <div className="mx-2 mb-1.5 flex items-center justify-between gap-2 rounded-md bg-[#fdeeee] px-2 py-1">
+              <span className="text-[11px] font-medium text-[#d14343]">{selected.size} selected</span>
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                disabled={deletingSelected}
+                className="flex items-center gap-1 rounded-full bg-[#d14343] px-2 py-0.5 text-[10.5px] font-semibold text-white hover:bg-[#b93737] disabled:opacity-60"
+              >
+                {deletingSelected ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                Delete Selected
+              </button>
+            </div>
+          )}
           {items === null ? (
             <p className="px-2 text-[11.5px] text-subtle">Loading…</p>
           ) : filtered.length === 0 ? (
@@ -179,9 +308,20 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
                 </>
               ) : (
                 <>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground" title={item.name}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(item.id)}
+                    onChange={() => toggleSelected(item.id)}
+                    className={checkboxCls}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onPreview?.(item)}
+                    title={`Preview ${item.name} — see its mapped headers before applying`}
+                    className={`min-w-0 flex-1 truncate text-left text-[12.5px] ${previewedId === item.id ? 'font-semibold text-accent' : 'text-foreground'}`}
+                  >
                     {item.name}
-                  </span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => onApply(item)}
@@ -225,7 +365,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
 // same rename/delete affordances the rule sections already have. The
 // search box still supports the quicker "type a name that doesn't exist,
 // press Enter" shortcut too.
-function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings }) {
+function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings, requestConfirm }) {
   const [search, setSearch] = useState('')
   const [hidden, setHidden] = useState(false)
   const [drafts, setDrafts] = useState([]) // [{tempId, text}]
@@ -233,6 +373,8 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
   const [editDraft, setEditDraft] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [deletingAll, setDeletingAll] = useState(false)
+  const [selected, setSelected] = useState(() => new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
 
   const q = search.trim().toLowerCase()
   const filtered = ourHeaders.filter((h) => h.label.toLowerCase().includes(q))
@@ -275,22 +417,51 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
       setBusyId(null)
     }
   }
-  async function handleDelete(id) {
-    if (!window.confirm('Delete this header?')) return
-    setBusyId(id)
-    try {
-      await onDeleteHeader(id)
-    } finally {
-      setBusyId(null)
-    }
+
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
-  async function handleDeleteAll() {
-    setDeletingAll(true)
-    try {
-      await onDeleteAllHeaders()
-    } finally {
-      setDeletingAll(false)
-    }
+
+  function handleDelete(id) {
+    requestConfirm('Delete this header?', async () => {
+      setBusyId(id)
+      try {
+        await onDeleteHeader(id)
+      } finally {
+        setBusyId(null)
+      }
+    })
+  }
+  function handleDeleteAll() {
+    if (ourHeaders.length === 0) return
+    requestConfirm(`Delete all ${ourHeaders.length} header(s) in Our Headers? This can't be undone.`, async () => {
+      setDeletingAll(true)
+      try {
+        await onDeleteAllHeaders()
+        setSelected(new Set())
+      } finally {
+        setDeletingAll(false)
+      }
+    })
+  }
+  function handleDeleteSelected() {
+    if (selected.size === 0) return
+    requestConfirm(`Delete ${selected.size} selected header(s)? This can't be undone.`, async () => {
+      setDeletingSelected(true)
+      try {
+        for (const id of selected) {
+          try { await onDeleteHeader(id) } catch { /* best-effort */ }
+        }
+        setSelected(new Set())
+      } finally {
+        setDeletingSelected(false)
+      }
+    })
   }
 
   return (
@@ -337,6 +508,20 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
           Create &ldquo;{search.trim()}&rdquo;
         </button>
       )}
+      {selected.size > 0 && (
+        <div className="mx-2 mb-1.5 flex items-center justify-between gap-2 rounded-md bg-[#fdeeee] px-2 py-1">
+          <span className="text-[11px] font-medium text-[#d14343]">{selected.size} selected</span>
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={deletingSelected}
+            className="flex items-center gap-1 rounded-full bg-[#d14343] px-2 py-0.5 text-[10.5px] font-semibold text-white hover:bg-[#b93737] disabled:opacity-60"
+          >
+            {deletingSelected ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+            Delete Selected
+          </button>
+        </div>
+      )}
       <ul className="max-h-52 space-y-0.5 overflow-y-auto">
         {drafts.map((d) => (
           <li key={d.tempId} className="flex items-center gap-1 rounded-md px-2 py-1">
@@ -379,6 +564,12 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
                 </>
               ) : (
                 <>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(h.id)}
+                    onChange={() => toggleSelected(h.id)}
+                    className={checkboxCls}
+                  />
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground" title={h.label}>
                     {h.label}
                   </span>
@@ -424,7 +615,9 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
 // "Templates" — every template currently in the working set (selected on
 // the list page before arriving here, added via the + picker below, or
 // just created in this session). Single-select: clicking one loads it into
-// the naming/sheet-selector/mapping panels on the right.
+// the naming/sheet-selector/mapping panels on the right. Deliberately left
+// out of the checkbox/bulk-delete overhaul the other sections got — it's a
+// picker, not a list you curate from here.
 // Task 2: display finalName when available (marketplace_cat1…cat6_version).
 // Task 3: the marketplace name is the first underscore-separated token of
 // finalName (composeFinalName always writes marketplaceName first).
@@ -519,13 +712,17 @@ function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selec
   )
 }
 
-function UploadedSheetsSection({ uploadedFiles, onClearUpload }) {
+function UploadedSheetsSection({ uploadedFiles, onClearUpload, requestConfirm }) {
   const [hidden, setHidden] = useState(false)
   const [search, setSearch] = useState('')
 
   if (!uploadedFiles || uploadedFiles.length === 0) return null
 
   const filtered = uploadedFiles.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
+
+  function handleClear() {
+    requestConfirm('Remove the uploaded sheet(s)? Already-mapped headers stay as they are.', onClearUpload)
+  }
 
   return (
     <div className="border-b border-divider pb-3 mb-3 hidden">
@@ -546,7 +743,7 @@ function UploadedSheetsSection({ uploadedFiles, onClearUpload }) {
           {onClearUpload && (
             <button
               type="button"
-              onClick={onClearUpload}
+              onClick={handleClear}
               title="Remove uploaded sheets"
               className={deleteBtnCls}
             >
@@ -606,6 +803,8 @@ const DEFAULT_MARKETPLACES = [
 function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
   const [marketplaces, setMarketplaces] = useState(DEFAULT_MARKETPLACES)
   const [hidden, setHidden] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [addDraft, setAddDraft] = useState('')
 
   useEffect(() => {
     try {
@@ -619,10 +818,9 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
     } catch { /* ignore */ }
   }, [])
 
-  function handleAddMarketplace() {
-    const name = window.prompt('Enter new Marketplace / Ecommerce Brand name:')
-    if (!name?.trim()) return
+  function addMarketplace(name) {
     const trimmed = name.trim()
+    if (!trimmed) return
     setMarketplaces((prev) => {
       if (prev.includes(trimmed)) return prev
       const next = [...prev, trimmed]
@@ -632,6 +830,20 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
       return next
     })
     onSelectMarketplace(trimmed)
+  }
+
+  function startAdd() {
+    setAddDraft('')
+    setAdding(true)
+  }
+  function cancelAdd() {
+    setAdding(false)
+    setAddDraft('')
+  }
+  function commitAdd() {
+    if (!addDraft.trim()) return
+    addMarketplace(addDraft)
+    cancelAdd()
   }
 
   return (
@@ -649,7 +861,7 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
           </button>
           <button
             type="button"
-            onClick={handleAddMarketplace}
+            onClick={startAdd}
             title="Add a custom Ecommerce Brand / Marketplace"
             className={addBtnCls}
           >
@@ -659,28 +871,48 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
       </div>
 
       {!hidden && (
-        <div className="flex flex-wrap gap-1 px-2 max-h-36 overflow-y-auto">
-          {marketplaces.map((m) => {
-            const isAll = m === 'meesho' || m === 'All'
-            const activeKey = isAll ? 'All' : m
-            const currentKey = !selectedMarketplace || selectedMarketplace === 'meesho' ? 'All' : selectedMarketplace
-            const isSelected = currentKey.toLowerCase() === activeKey.toLowerCase()
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => onSelectMarketplace(isAll ? 'All' : m)}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  isSelected
-                    ? 'bg-[#16a34a] text-white font-semibold'
-                    : 'bg-card-hover text-foreground hover:bg-divider/50'
-                }`}
-              >
-                {m}
+        <>
+          {adding && (
+            <div className="mx-2 mb-2 flex items-center gap-1">
+              <input
+                value={addDraft}
+                onChange={(e) => setAddDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitAdd(); if (e.key === 'Escape') cancelAdd() }}
+                autoFocus
+                placeholder="New brand name…"
+                className="min-w-0 flex-1 rounded border border-divider bg-background px-1.5 py-1 text-[12px] outline-none focus:border-accent-light"
+              />
+              <button type="button" onClick={commitAdd} title="Save" className="text-emerald-600">
+                <Check className="h-3.5 w-3.5" />
               </button>
-            )
-          })}
-        </div>
+              <button type="button" onClick={cancelAdd} title="Cancel" className="text-subtle">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1 px-2 max-h-36 overflow-y-auto">
+            {marketplaces.map((m) => {
+              const isAll = m === 'meesho' || m === 'All'
+              const activeKey = isAll ? 'All' : m
+              const currentKey = !selectedMarketplace || selectedMarketplace === 'meesho' ? 'All' : selectedMarketplace
+              const isSelected = currentKey.toLowerCase() === activeKey.toLowerCase()
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => onSelectMarketplace(isAll ? 'All' : m)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    isSelected
+                      ? 'bg-[#16a34a] text-white font-semibold'
+                      : 'bg-card-hover text-foreground hover:bg-divider/50'
+                  }`}
+                >
+                  {m}
+                </button>
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )
@@ -689,6 +921,10 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
 // Templates + Our Headers (above), then the four rule/preset sections:
 // Header Mapping/Mapping Rule (kind=preset/rule on listing_mapping_rules)
 // and Header Place/Place Rule (kind=preset/rule on listing_place_rules).
+// Every "add" flow across these sections uses an inline input row (Check/X
+// buttons) instead of window.prompt(), and every delete routes through the
+// one shared ConfirmDialog instead of window.confirm() — Templates is the
+// one section left as a plain picker (no add/delete/checkboxes at all).
 export default function BulkRuleSidebar({
   ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creatingHeader, onOpenHeaderSettings,
   templates, activeTemplateId, onSelectTemplate,
@@ -696,8 +932,24 @@ export default function BulkRuleSidebar({
   selectedMarketplace, onSelectMarketplace,
   onApplyMappingPreset, onApplyMappingRule, onApplyPlacePreset, onApplyPlaceRule,
   onSaveMappingPreset, onSaveMappingRule, onSavePlacePreset, onSavePlaceRule,
+  ruleNamePrefix,
   refreshToken,
+  previewRule, onPreviewMapping, onPreviewPlace,
 }) {
+  const [confirmState, setConfirmState] = useState(null) // { message, onConfirm } | null
+
+  function requestConfirm(message, onConfirm) {
+    setConfirmState({ message, onConfirm })
+  }
+  function handleConfirm() {
+    const action = confirmState?.onConfirm
+    setConfirmState(null)
+    action?.()
+  }
+  function handleCancelConfirm() {
+    setConfirmState(null)
+  }
+
   return (
     <aside className="w-full flex-shrink-0 rounded-[7px] border border-divider bg-card sm:w-60">
       <MarketplaceTabsSection
@@ -713,6 +965,7 @@ export default function BulkRuleSidebar({
       <UploadedSheetsSection
         uploadedFiles={uploadedFiles}
         onClearUpload={onClearUpload}
+        requestConfirm={requestConfirm}
       />
       <OurHeadersSection
         ourHeaders={ourHeaders}
@@ -722,11 +975,13 @@ export default function BulkRuleSidebar({
         onDeleteAllHeaders={onDeleteAllHeaders}
         creating={creatingHeader}
         onOpenSettings={onOpenHeaderSettings}
+        requestConfirm={requestConfirm}
       />
-      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} />
-      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} />
-      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} />
-      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} />
+      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} />
+      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} />
+      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} />
+      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} />
+      <ConfirmDialog state={confirmState} onConfirm={handleConfirm} onCancel={handleCancelConfirm} />
     </aside>
   )
 }

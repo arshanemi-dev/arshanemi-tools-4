@@ -6,6 +6,13 @@ const colCls = 'min-w-0 flex-1 rounded-[7px] border border-divider p-2.5'
 const searchCls = 'w-full rounded-md border border-divider bg-background pl-6 pr-2 py-1 text-[12px] outline-none focus:border-accent-light'
 const groupHeadingCls = 'mb-1 px-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-subtle'
 
+// Same colours as BulkPlaceGrid.jsx / the single-template /new page's own
+// New Design tab (red = Product Details, green = Compulsory, blue = Brand
+// Details) — a Map Header card takes its colour from wherever it's
+// currently placed, gray/subtle while still unplaced. Duplicated here for
+// the same reason as BulkPlaceGrid's own copy (see its note).
+const PLACE_GROUP_TEXT = { design_system: 'text-[#e02424]', compulsory: 'text-[#16a34a]', prefill: 'text-[#2563eb]' }
+
 function SearchBox({ value, onChange }) {
   return (
     <div className="relative mb-2">
@@ -107,16 +114,19 @@ function OurHeaderRow({ oh, selectedCount, mapped, onMapSelected, onOpenSettings
 }
 
 function MappedHeaderCard({ m, onUnmap, onOpenSettings }) {
+  const groupColor = PLACE_GROUP_TEXT[m.group] || 'text-muted'
   return (
     <div>
       <div className="mb-1 flex items-center gap-1">
-        <p className="min-w-0 flex-1 truncate text-[12px] font-semibold text-muted">{m.ourHeaderLabel}</p>
+        <p className={`min-w-0 flex-1 truncate text-[12px] font-semibold ${groupColor}`}>{m.ourHeaderLabel}</p>
         {onOpenSettings && (
           <button
             type="button"
             onClick={() => onOpenSettings(m.ourHeaderId)}
             title="Header settings — type, dropdown values, formula, unique key…"
-            className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-subtle hover:bg-card-hover hover:text-foreground"
+            className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded hover:bg-card-hover ${
+              m.group ? `${groupColor} opacity-80 hover:opacity-100` : 'text-subtle hover:text-foreground'
+            }`}
           >
             <Settings className="h-3 w-3" />
           </button>

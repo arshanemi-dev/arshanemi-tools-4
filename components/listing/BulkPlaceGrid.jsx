@@ -1,119 +1,122 @@
 'use client'
 import { useState } from 'react'
-import { Plus, Minus, Search } from 'lucide-react'
+import { Search, Settings } from 'lucide-react'
 
-const GROUPS = [
-  { id: 'design_system', label: 'Product Details' },
-  { id: 'compulsory', label: 'Compulsory' },
-  { id: 'prefill', label: 'Brand Details' },
+// A full copy of the single-template /new page's own New Design grid
+// (NewTemplateDesign.jsx's SECTIONS/sectionKeyOf/onCardDrop/onSectionDrop —
+// same colours, same drag-and-drop model), adapted to the bulk page's own
+// data shape (mappedOnly's {ourHeaderId, group, position, uiBucket} instead
+// of /new's `fields`). Drops /new's niche "Big" bucket — this page's own
+// section list is exactly the 5 the user asked for: Product Details,
+// Compulsory, Brand Details, Images, Others. "Others" IS the staging
+// section (real group null), same job /new's own "Other" tab does — drag a
+// card there to unplace it, drag it back into a real section to place it.
+const SECTIONS = [
+  { id: 'design_system', title: 'Product Details', color: '#e02424', group: 'design_system', bucket: null },
+  { id: 'compulsory', title: 'Compulsory', color: '#16a34a', group: 'compulsory', bucket: null },
+  { id: 'prefill', title: 'Brand Details', color: '#2563eb', group: 'prefill', bucket: null },
+  { id: 'image_link', title: 'Images', color: '#a16207', group: 'design_system', bucket: 'image_link' },
+  { id: 'unassigned', title: 'Others', color: '#9aa2ad', group: null, bucket: null },
 ]
+const sectionKeyOf = (h) => (h.uiBucket === 'image_link' ? 'image_link' : (h.group || 'unassigned'))
 
-const colCls = 'min-w-0 flex-1 rounded-[7px] border border-divider p-2.5'
-const searchCls = 'w-full rounded-md border border-divider bg-background pl-6 pr-2 py-1 text-[12px] outline-none focus:border-accent-light'
+// `headers` = [{ourHeaderId, ourHeaderLabel, group, position, uiBucket}].
+// `onMove(ourHeaderId, group, uiBucket, beforeOurHeaderId, after)` — called
+// on every drop, whether it lands on a section (beforeOurHeaderId null,
+// appends at the end) or on another card (inserts before/after it, per
+// `after` — same left-half/right-half convention as /new's own onCardDrop).
+export default function BulkPlaceGrid({ headers, onMove, onOpenSettings }) {
+  const [search, setSearch] = useState('')
+  const [dragId, setDragId] = useState(null)
+  const [dragOverSec, setDragOverSec] = useState(null)
 
-function SearchBox({ value, onChange }) {
+  const filtered = headers.filter((h) => h.ourHeaderLabel.toLowerCase().includes(search.toLowerCase()))
+
+  function onCardDrop(e, target) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverSec(null)
+    const dragged = dragId
+    setDragId(null)
+    if (!dragged || dragged === target.ourHeaderId) return
+    const targetSec = SECTIONS.find((s) => s.id === sectionKeyOf(target))
+    if (!targetSec) return
+    // Drop on the target card's right half → land AFTER it; left half →
+    // BEFORE it (same convention as /new's own onCardDrop).
+    const rect = e.currentTarget.getBoundingClientRect()
+    const after = e.clientX > rect.left + rect.width / 2
+    onMove(dragged, targetSec.group, targetSec.bucket, target.ourHeaderId, after)
+  }
+  function onSectionDrop(e, sec) {
+    e.preventDefault()
+    setDragOverSec(null)
+    const dragged = dragId
+    setDragId(null)
+    if (!dragged) return
+    onMove(dragged, sec.group, sec.bucket, null, false)
+  }
+
   return (
-    <div className="relative mb-2">
-      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-subtle" />
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="Search…" className={searchCls} />
-    </div>
-  )
-}
-
-// Same 3-panel shape as BulkMappingGrid, one step later in the flow: every
-// mapped canonical header (from the mapping grid) needs a Group + Position
-// before it shows up in the live preview below. `headers` = [{ourHeaderId,
-// ourHeaderLabel, group, position}] — group is null until placed.
-export default function BulkPlaceGrid({ headers, onPlace, onUnplace }) {
-  const [pick, setPick] = useState({}) // { [ourHeaderId]: groupId }
-  const [searchUnplaced, setSearchUnplaced] = useState('')
-  const [searchPlaced, setSearchPlaced] = useState('')
-
-  const unplaced = headers.filter((h) => !h.group)
-  const placed = headers.filter((h) => h.group)
-
-  const unplacedFiltered = unplaced.filter((h) => h.ourHeaderLabel.toLowerCase().includes(searchUnplaced.toLowerCase()))
-  const placedFiltered = placed.filter((h) => h.ourHeaderLabel.toLowerCase().includes(searchPlaced.toLowerCase()))
-
-  return (
-    <div className="flex flex-col gap-2.5 sm:flex-row">
-      <div className={colCls}>
-        <h4 className="mb-2 text-[13px] font-semibold text-foreground">Unplaced ({unplacedFiltered.length})</h4>
-        <SearchBox value={searchUnplaced} onChange={setSearchUnplaced} />
-        <div className="max-h-64 space-y-1 overflow-y-auto">
-          {unplacedFiltered.length === 0 ? (
-            <p className="text-[12px] italic text-subtle">Nothing to place.</p>
-          ) : (
-            unplacedFiltered.map((h) => (
-              <div key={h.ourHeaderId} className="flex items-center gap-1.5 rounded-md border border-divider bg-background px-2 py-1">
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground" title={h.ourHeaderLabel}>{h.ourHeaderLabel}</span>
-                <select
-                  value={pick[h.ourHeaderId] || ''}
-                  onChange={(e) => setPick((p) => ({ ...p, [h.ourHeaderId]: e.target.value }))}
-                  className="max-w-[110px] rounded border border-divider bg-card px-1 py-0.5 text-[11.5px] outline-none"
-                >
-                  <option value="">place in…</option>
-                  {GROUPS.map((g) => (
-                    <option key={g.id} value={g.id}>{g.label}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => pick[h.ourHeaderId] && onPlace(h.ourHeaderId, pick[h.ourHeaderId])}
-                  disabled={!pick[h.ourHeaderId]}
-                  title="Place"
-                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-[#9dbfe8] text-accent disabled:opacity-40"
-                >
-                  <Plus className="h-3 w-3" />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
+    <div>
+      <div className="relative mb-3 max-w-xs">
+        <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-subtle" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search…"
+          className="w-full rounded-md border border-divider bg-background pl-6 pr-2 py-1 text-[12px] outline-none focus:border-accent-light"
+        />
       </div>
 
-      <div className={colCls}>
-        <h4 className="mb-2 text-[13px] font-semibold text-foreground">Groups</h4>
-        <div className="space-y-1.5">
-          {GROUPS.map((g) => (
-            <div key={g.id} className="flex items-center justify-between rounded-md border border-divider bg-background px-2 py-1.5">
-              <span className="text-[12.5px] text-foreground">{g.label}</span>
-              <span className="rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-subtle">
-                {placed.filter((h) => h.group === g.id).length}
-              </span>
+      {SECTIONS.map((sec) => {
+        const cards = filtered.filter((h) => sectionKeyOf(h) === sec.id).slice().sort((a, b) => a.position - b.position)
+        return (
+          <div
+            key={sec.id}
+            onDragOver={(e) => { e.preventDefault(); if (dragOverSec !== sec.id) setDragOverSec(sec.id) }}
+            onDragLeave={() => setDragOverSec((c) => (c === sec.id ? null : c))}
+            onDrop={(e) => onSectionDrop(e, sec)}
+            className="mb-3"
+          >
+            <div className="mb-1.5 flex items-center gap-2 text-[14px] font-bold" style={{ color: sec.color }}>
+              <span className="h-3.5 w-1.5 flex-shrink-0 rounded-full border" style={{ borderColor: sec.color, backgroundColor: `${sec.color}1a` }} aria-hidden />
+              {sec.title} <span className="text-[12px] font-normal text-subtle">({cards.length})</span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={colCls}>
-        <h4 className="mb-2 text-[13px] font-semibold text-foreground">Placed ({placedFiltered.length})</h4>
-        <SearchBox value={searchPlaced} onChange={setSearchPlaced} />
-        <div className="max-h-64 space-y-2 overflow-y-auto">
-          {GROUPS.map((g) => {
-            // Sorted by the stored position index — same order Save already
-            // uses (buildGroupedSheets), so what you see here is what
-            // actually lands in the template instead of just insertion order.
-            const cards = placedFiltered.filter((h) => h.group === g.id).slice().sort((a, b) => a.position - b.position)
-            if (cards.length === 0) return null
-            return (
-              <div key={g.id}>
-                <p className="mb-1 text-[12px] font-semibold text-muted">{g.label}</p>
-                <div className="flex flex-wrap gap-1">
-                  {cards.map((h) => (
-                    <span key={h.ourHeaderId} className="flex items-center gap-1 rounded-full border border-divider bg-background px-2 py-0.5 text-[11.5px] text-foreground">
-                      {h.ourHeaderLabel}
-                      <button type="button" onClick={() => onUnplace(h.ourHeaderId)} title="Unplace" className="text-[#d14343] hover:text-[#a83232]">
-                        <Minus className="h-2.5 w-2.5" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+            <div className={`-mx-1 flex flex-wrap rounded-md py-0.5 ${dragOverSec === sec.id ? 'bg-card-hover' : ''}`}>
+              {cards.length === 0 ? (
+                <p className="px-1 py-1 text-[12.5px] italic text-subtle">Drop headers here.</p>
+              ) : (
+                cards.map((h) => (
+                  <div
+                    key={h.ourHeaderId}
+                    draggable
+                    onDragStart={(e) => { setDragId(h.ourHeaderId); e.dataTransfer.setData('text/plain', h.ourHeaderId); e.dataTransfer.effectAllowed = 'move' }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => onCardDrop(e, h)}
+                    onDragEnd={() => { setDragId(null); setDragOverSec(null) }}
+                    className="mb-1 shrink-0 grow-0 basis-full cursor-grab px-1 active:cursor-grabbing sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5"
+                  >
+                    <div className="flex items-center gap-1 rounded-md border bg-background px-2 py-1" style={{ borderColor: sec.color }}>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground" title={h.ourHeaderLabel}>{h.ourHeaderLabel}</span>
+                      {onOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenSettings(h.ourHeaderId)}
+                          title="Header settings — type, dropdown values, formula, unique key…"
+                          className="flex h-4 w-4 flex-shrink-0 items-center justify-center opacity-80 hover:opacity-100"
+                          style={{ color: sec.color }}
+                        >
+                          <Settings className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

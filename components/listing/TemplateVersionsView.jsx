@@ -2,15 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Search, Pencil, Trash2 } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
-
-function fmtDate(iso) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString()
-}
-function fmtTime(iso) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
+import { actionMeta, fmtDate, fmtDateTime, fmtTime } from '@/lib/templateLogActions'
 
 // The Version Page + Log tab — a version row per save (the hub's
 // createListingTemplateVersion, called from the bulk mapping page's Save
@@ -22,7 +14,7 @@ function fmtTime(iso) {
 // field is its label, so there's no separate richer "Edit" behavior to
 // build yet. Fields here are camelCase (the hub's lib/db.js converts every
 // row before returning it — see templateVersionRowToItem/templateLogRowToItem).
-export default function TemplateVersionsView({ templateId }) {
+export default function TemplateVersionsView({ templateId, templateName, marketplaceName }) {
   const { addToast } = useToast()
   const [versions, setVersions] = useState(null)
   const [logs, setLogs] = useState(null)
@@ -54,7 +46,9 @@ export default function TemplateVersionsView({ templateId }) {
   const filteredLogs = (logs || []).filter((l) => {
     if (!logSearch.trim()) return true
     const q = logSearch.toLowerCase()
-    return l.action.toLowerCase().includes(q) || (versionLabelById.get(l.versionId) || '').toLowerCase().includes(q)
+    const versionLabel = versionLabelById.get(l.versionId) || l.detail?.versionLabel || ''
+    return [actionMeta(l.action).label, l.detail?.summary, versionLabel, l.actorName]
+      .some((s) => String(s || '').toLowerCase().includes(q))
   })
 
   function toggleSelect(id) {
@@ -71,7 +65,7 @@ export default function TemplateVersionsView({ templateId }) {
     try {
       const res = await fetch(`/api/listing-tools/versions/${version.id}/publish`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId, live: !version.isLive }),
+        body: JSON.stringify({ templateId, templateName, marketplaceName, live: !version.isLive }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Failed to update')
       reload()
@@ -92,7 +86,7 @@ export default function TemplateVersionsView({ templateId }) {
     try {
       const res = await fetch(`/api/listing-tools/versions/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label.trim(), templateId }),
+        body: JSON.stringify({ label: label.trim(), templateId, templateName, marketplaceName }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Rename failed')
       addToast('Version renamed.', 'success')
@@ -110,7 +104,8 @@ export default function TemplateVersionsView({ templateId }) {
     setBusy(true)
     try {
       for (const id of selectedIds) {
-        const res = await fetch(`/api/listing-tools/versions/${id}?templateId=${encodeURIComponent(templateId)}`, { method: 'DELETE' })
+        const qs = new URLSearchParams({ templateId, ...(templateName ? { templateName } : {}), ...(marketplaceName ? { marketplaceName } : {}) })
+        const res = await fetch(`/api/listing-tools/versions/${id}?${qs}`, { method: 'DELETE' })
         if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Delete failed')
       }
       addToast('Version(s) deleted.', 'success')
@@ -178,13 +173,14 @@ export default function TemplateVersionsView({ templateId }) {
                 <th className="px-3 py-2 w-10" />
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Version Number</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Create date</th>
+                <th className="px-3 py-2 text-left font-semibold text-foreground">Updated date</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Live date</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Live</th>
               </tr>
             </thead>
             <tbody>
               {filteredVersions.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-subtle">No versions yet — save this template to create one.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-subtle">No versions yet — save this template to create one.</td></tr>
               ) : (
                 filteredVersions.map((v) => (
                   <tr key={v.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
@@ -192,8 +188,9 @@ export default function TemplateVersionsView({ templateId }) {
                       <input type="checkbox" checked={selectedIds.has(v.id)} onChange={() => toggleSelect(v.id)} className="h-4 w-4 rounded border-divider-light text-accent" />
                     </td>
                     <td className="px-3 py-2.5 font-medium text-foreground">{v.label || `V${v.versionNumber}`}</td>
-                    <td className="px-3 py-2.5 text-subtle">{fmtDate(v.createdAt)}</td>
-                    <td className="px-3 py-2.5 text-subtle">{fmtDate(v.liveAt)}</td>
+                    <td className="px-3 py-2.5 text-subtle" title={fmtDateTime(v.createdAt)}>{fmtDate(v.createdAt)}</td>
+                    <td className="px-3 py-2.5 text-subtle" title={fmtDateTime(v.updatedAt)}>{fmtDate(v.updatedAt)}</td>
+                    <td className="px-3 py-2.5 text-subtle" title={v.liveAt ? `Last went live ${fmtDateTime(v.liveAt)}` : 'Never been live'}>{fmtDate(v.liveAt)}</td>
                     <td className="px-3 py-2.5">
                       <button
                         type="button"
@@ -203,7 +200,7 @@ export default function TemplateVersionsView({ templateId }) {
                         disabled={busy}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-70 ${v.isLive ? 'bg-emerald-500' : 'bg-divider-light'}`}
                       >
-                        <span className="inline-block h-3.5 w-3.5 rounded-full bg-card shadow-sm transition-transform" style={{ transform: v.isLive ? 'translateX(18px)' : 'translateX(4px)' }} />
+                        <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card shadow-sm transition-transform ${v.isLive ? 'translate-x-[18px]' : 'translate-x-1'}`} />
                       </button>
                     </td>
                   </tr>
@@ -234,6 +231,7 @@ export default function TemplateVersionsView({ templateId }) {
               <tr className="bg-surface border-b border-divider">
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Version Number</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Action</th>
+                <th className="px-3 py-2 text-left font-semibold text-foreground">Details</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Log Date</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Time</th>
                 <th className="px-3 py-2 text-left font-semibold text-foreground">Batch ID</th>
@@ -241,19 +239,28 @@ export default function TemplateVersionsView({ templateId }) {
             </thead>
             <tbody>
               {filteredLogs.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-subtle">No activity logged yet.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-subtle">No activity logged yet.</td></tr>
               ) : (
-                filteredLogs.map((l) => (
+                filteredLogs.map((l) => {
+                  const meta = actionMeta(l.action)
+                  const Icon = meta.icon
+                  return (
                   <tr key={l.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
-                    <td className="px-3 py-2.5 text-foreground">{versionLabelById.get(l.versionId) || '—'}</td>
-                    <td className="px-3 py-2.5">
-                      <span className="rounded-full bg-card-hover px-2 py-0.5 text-[11.5px] font-semibold uppercase text-muted">{l.action}</span>
+                    <td className="px-3 py-2.5 text-foreground">{versionLabelById.get(l.versionId) || l.detail?.versionLabel || '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold ring-1 ring-inset ${meta.chip}`}>
+                        <Icon className="h-3 w-3" /> {meta.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted max-w-[320px]">
+                      <span className="block truncate" title={l.detail?.summary || ''}>{l.detail?.summary || '—'}</span>
                     </td>
                     <td className="px-3 py-2.5 text-subtle">{fmtDate(l.createdAt)}</td>
                     <td className="px-3 py-2.5 text-subtle">{fmtTime(l.createdAt)}</td>
                     <td className="px-3 py-2.5 font-mono text-subtle">{l.batchId}</td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

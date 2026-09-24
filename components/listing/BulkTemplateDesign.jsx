@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Loader2, Bookmark, Check } from 'lucide-react'
+import { ArrowLeft, Loader2, Bookmark } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/admin/Toast'
 import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults } from '@/lib/listingSheetLayout'
 import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
@@ -15,6 +16,7 @@ import ExtractionProgressModal from './ExtractionProgressModal'
 import NewDesignColumnModal from './NewDesignColumnModal'
 import OurHeaderSettingsModal from './OurHeaderSettingsModal'
 import SheetHeaderTree from './SheetHeaderTree'
+import RulePreviewPanel from './RulePreviewPanel'
 
 const REAL_GROUPS = ['design_system', 'compulsory', 'prefill']
 const SHEET_LABELS = { design_system: 'Product details', compulsory: 'Compulsory', prefill: 'Brand Details' }
@@ -110,9 +112,6 @@ function detectColumnDropdownValues(dataRows, colIdx, headerLabel) {
   if (distinct.length < 2 || distinct.length > 20 || distinct.length >= raw.length) return null
   return distinct
 }
-function normalize(s) {
-  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-}
 // A merged Group Row cell only populates its first column in the raw data —
 // carry the last seen label forward across the blanks so every column
 // under that merged span resolves to its group's label. Same idea as
@@ -126,17 +125,6 @@ function forwardFillRow(row, width) {
     filled.push(last)
   }
   return filled
-}
-// Auto-place's default logic (see autoPlaceHeaders) only ever routes a
-// header to Compulsory by an explicit Group Row match — substring-both-ways,
-// same matching style as everything else here — anything that isn't that
-// (or an image) falls back to Product Details; it never auto-detects Brand
-// Details from the Group Row.
-function isCompulsoryLabel(label) {
-  const s = normalize(label)
-  if (!s) return false
-  const c = normalize('Compulsory')
-  return s === c || s.includes(c) || c.includes(s)
 }
 // Same keyword heuristic as TemplateSettingsWizard.jsx's own detectDataType
 // — used by autoPlaceHeaders to catch an image column whose Our Header
@@ -413,6 +401,7 @@ function buildGroupedSheets(mappedHeaders, dropdownColumns = {}, rawHeaderNotes 
 // exists to show in it.
 export default function BulkTemplateDesign({ templateIds = [] }) {
   const { addToast } = useToast()
+  const router = useRouter()
 
   const [templatesData, setTemplatesData] = useState({}) // { [id]: {template, content} }
   const [templatesList, setTemplatesList] = useState([]) // [{id, templateName}]
@@ -440,7 +429,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [loadingExisting, setLoadingExisting] = useState(templateIds.length > 0)
   const [loadError, setLoadError] = useState(false)
 
-  const [selectedMarketplace, setSelectedMarketplace] = useState('All')
+  const [selectedMarketplace, setSelectedMarketplace] = useState('Meesho')
   const [presetData, setPresetData] = useState({ marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' })
   const [categoriesData, setCategoriesData] = useState(DEFAULT_CATEGORIES)
   const [templateNameInput, setTemplateNameInput] = useState('')
@@ -489,9 +478,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [refreshToken, setRefreshToken] = useState(0)
 
   const [saving, setSaving] = useState(false)
-  const [savedTemplate, setSavedTemplate] = useState(null)
   const [modalId, setModalId] = useState(null) // ourHeaderId of the Header Settings modal currently open, or null
   const [headerSettingsId, setHeaderSettingsId] = useState(null) // Our Header dictionary id whose OurHeaderSettingsModal is open, or null
+  const [previewRule, setPreviewRule] = useState(null) // { type: 'mapping'|'place', item } — the sidebar rule currently previewed, or null
+  const [previewApplying, setPreviewApplying] = useState(false)
   const [ourHeaderDropdownDefaults, setOurHeaderDropdownDefaults] = useState({}) // { [ourHeaderId]: string[] } — session-local, see handleUpdateOurHeaderSettings
 
   // The flat state above (workbook…dropdownColumns/presetData/categoriesData)
@@ -879,8 +869,11 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     }
   }
 
+  // Raw action, no confirm inside — the sidebar's Uploaded Sheets section
+  // confirms via its own shared ConfirmDialog before ever calling this, so
+  // a confirm here would just double up. The toolbar's own upload control
+  // still confirms itself, via confirmClearUpload below.
   function handleClearUpload() {
-    if (!window.confirm('Remove the uploaded sheet(s)? Already-mapped headers stay as they are.')) return
     setWorkbook(null)
     setFileName('')
     setUploadedFiles([])
@@ -899,6 +892,11 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setRawHeaderNotes({})
     setRawHeaderGroupLabels({})
     setDropdownColumns({})
+  }
+
+  function confirmClearUpload() {
+    if (!window.confirm('Remove the uploaded sheet(s)? Already-mapped headers stay as they are.')) return
+    handleClearUpload()
   }
 
   // Section 2's Product fill sheet <select> — same reset-on-pick behavior
@@ -956,9 +954,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(dataIsectionRow, headerRowIdx + 1)
       const rawRow = aoa[headerRowIdx] || []
       const isectionRow = aoa[isectionRowIdx] || []
-      // Group Row, forward-filled across merged cells — feeds autoPlaceHeaders'
-      // Compulsory detection (see isCompulsoryLabel), not consulted for
-      // anything else.
+      // Group Row, forward-filled across merged cells — kept on each raw
+      // header for session fidelity; autoPlaceHeaders no longer reads it
+      // (see that function's own comment on why).
       const groupRowIdx = parseRowInput(dataGroupRow, headerRowIdx)
       const groupRowFilled = forwardFillRow(aoa[groupRowIdx] || [], rawRow.length)
       // Dropdown detection reads this SAME sheet's own data rows for each
@@ -1019,15 +1017,6 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const allRawHeaders = useMemo(
     () => (isEditMode ? rawHeaders : [...new Set([...rawHeaders, ...Object.values(uploadSessions).flatMap((s) => s.rawHeaders || [])])]),
     [isEditMode, rawHeaders, uploadSessions],
-  )
-  // Same pooling as allRawHeaders, for autoPlaceHeaders' Group Row lookup —
-  // sessions spread first so the current flat state (freshest) wins on
-  // overlap.
-  const allRawHeaderGroupLabels = useMemo(
-    () => (isEditMode
-      ? rawHeaderGroupLabels
-      : Object.assign({}, ...Object.values(uploadSessions).map((s) => s.rawHeaderGroupLabels || {}), rawHeaderGroupLabels)),
-    [isEditMode, rawHeaderGroupLabels, uploadSessions],
   )
   const unmappedRawHeaders = allRawHeaders.filter((h) => !activeMapped.some((m) => m.sheetHeaders.includes(h)))
   const mappedOnly = activeMapped.filter((m) => m.sheetHeaders.length > 0)
@@ -1175,26 +1164,54 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately excludes activeMapped/handleMap: this is a one-shot "fill in the obvious matches" pass on new data, not an invariant re-applied on every manual (un)map.
   }, [allRawHeaders, ourHeaders])
 
-  function handlePlace(ourHeaderId, group) {
+  // BulkPlaceGrid's own copy of /new's SECTIONS grid + drag-and-drop
+  // (NewTemplateDesign.jsx's onCardDrop/onSectionDrop) — one handler covers
+  // both moving a header to a different section (group/uiBucket change,
+  // dropped straight on a section or on one of its cards) and reordering it
+  // within its current one (dropped on another card there). `beforeOurHeaderId`
+  // is null when dropped directly on the section (append at the end);
+  // `after` says which side of that card it landed on.
+  function handleMoveHeader(ourHeaderId, group, uiBucket, beforeOurHeaderId, after) {
     setActiveMapped((prev) => {
-      const nextPos = prev.filter((m) => m.group === group).length
-      return prev.map((m) => (m.ourHeaderId === ourHeaderId ? { ...m, group, position: nextPos } : m))
+      const sectionKeyOf = (m) => (m.uiBucket === 'image_link' ? 'image_link' : (m.group || 'unassigned'))
+      const targetSectionId = uiBucket === 'image_link' ? 'image_link' : (group || 'unassigned')
+      const moved = prev.find((m) => m.ourHeaderId === ourHeaderId)
+      if (!moved) return prev
+      const targetCards = prev
+        .filter((m) => m.ourHeaderId !== ourHeaderId && sectionKeyOf(m) === targetSectionId)
+        .sort((a, b) => a.position - b.position)
+      let insertAt = targetCards.length
+      if (beforeOurHeaderId) {
+        const idx = targetCards.findIndex((m) => m.ourHeaderId === beforeOurHeaderId)
+        if (idx !== -1) insertAt = after ? idx + 1 : idx
+      }
+      targetCards.splice(insertAt, 0, { ...moved, group, uiBucket })
+      const posById = new Map(targetCards.map((m, idx) => [m.ourHeaderId, idx]))
+      return prev.map((m) => {
+        if (m.ourHeaderId === ourHeaderId) return { ...m, group, uiBucket, position: posById.get(ourHeaderId) }
+        return posById.has(m.ourHeaderId) ? { ...m, position: posById.get(m.ourHeaderId) } : m
+      })
     })
-  }
-  function handleUnplace(ourHeaderId) {
-    setActiveMapped((prev) => prev.map((m) => (m.ourHeaderId === ourHeaderId ? { ...m, group: null, uiBucket: null } : m)))
   }
 
   // Default placement, button-triggered (not automatic on map) — every
-  // currently mapped-but-unplaced header gets a group: an image-type header
-  // (its Our Header's own dataType, or a label that just looks like one) goes
-  // to Product Details with the uiBucket 'image_link' overlay (same as /new's
-  // own Image Link bucket, not a real 4th group); a header whose Group Row
-  // cell says "Compulsory" (forward-filled, fuzzy-matched — see
-  // isCompulsoryLabel) goes to Compulsory; everything else falls back to
-  // Product Details, the same default /new's own buildFields effectively
-  // uses. Position within each target group picks up after whatever's
-  // already there (manually placed or from an earlier auto-place run).
+  // currently mapped-but-unplaced header gets a group:
+  //  - an image-type header (its Our Header's own dataType, or a label that
+  //    just looks like one, per looksLikeImageLabel's keyword match) goes to
+  //    Images (uiBucket 'image_link' — same overlay as /new's own Image
+  //    Link bucket, its real group still design_system).
+  //  - a header mapped 1:1 under the exact same name as one of its own raw
+  //    sheet columns (case/whitespace-insensitive) is effectively still
+  //    "the sheet's own field" — just carried straight through — and goes
+  //    to Compulsory, whether that raw column came off the Common Headers
+  //    pool (shows up in every uploaded sheet) or the regular Unmap Header
+  //    one.
+  //  - everything else — a canonical name that doesn't match any of its raw
+  //    sheet columns, meaning it's a name YOU chose/curated in Our Headers
+  //    rather than a pass-through of what the sheet itself called it — goes
+  //    to Product Details.
+  // Position within each target group picks up after whatever's already
+  // there (manually placed or from an earlier auto-place run).
   function autoPlaceHeaders() {
     setActiveMapped((prev) => {
       const nextPos = { design_system: 0, compulsory: 0, prefill: 0 }
@@ -1205,8 +1222,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       const next = prev.map((m) => {
         if (m.group || m.sheetHeaders.length === 0) return m
         const isImage = m.dataType === 'image' || looksLikeImageLabel(m.ourHeaderLabel)
-        const groupLabel = m.sheetHeaders.map((sh) => allRawHeaderGroupLabels[sh]).find(Boolean) || ''
-        const group = isImage ? 'design_system' : (isCompulsoryLabel(groupLabel) ? 'compulsory' : 'design_system')
+        const canonical = m.ourHeaderLabel.trim().toLowerCase()
+        const isPassThrough = m.sheetHeaders.some((sh) => sh.trim().toLowerCase() === canonical)
+        const group = isImage ? 'design_system' : (isPassThrough ? 'compulsory' : 'design_system')
         const position = nextPos[group] || 0
         nextPos[group] = position + 1
         placedCount += 1
@@ -1326,9 +1344,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       addToast(err.message, 'error')
     }
   }
+  // Confirmation now happens in the sidebar (custom modal, requestConfirm)
+  // before this ever gets called — this just does the deleting.
   async function handleDeleteAllHeaders() {
     if (ourHeaders.length === 0) return
-    if (!window.confirm(`Delete all ${ourHeaders.length} header(s) in Our Headers? This can't be undone.`)) return
     for (const h of ourHeaders) {
       try {
         await fetch(`/api/listing-tools/mapping/headers/${h.id}`, { method: 'DELETE' })
@@ -1370,10 +1389,34 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     }
   }
 
-  async function saveMappingAs(kind) {
+  // Clicking a saved rule's own name in the sidebar (as opposed to its Play
+  // button) previews what it actually contains — sheetHeader -> our header
+  // for Header Mapping/Mapping Rule, our header -> group + index for Header
+  // Place/Place Rule — right above the section it belongs to, instead of
+  // applying it blind. Applying from inside that preview reuses the exact
+  // same apply functions the Play button already calls, then closes itself.
+  async function applyPreviewRule() {
+    if (!previewRule) return
+    setPreviewApplying(true)
+    try {
+      if (previewRule.type === 'mapping') await applyMappingItem(previewRule.item)
+      else await applyPlaceItem(previewRule.item)
+      setPreviewRule(null)
+    } finally {
+      setPreviewApplying(false)
+    }
+  }
+
+  // Every saved Mapping Rule / Place Rule name always starts with
+  // "Marketplace_" — fixed, not editable away, only the part after it is
+  // actually typed — so a rule's name always says at a glance which
+  // marketplace it applies to, matching how every saved template's own
+  // name already works (composeAutoTemplateName). The sidebar's own inline
+  // add-row builds and validates that prefixed name now (no more
+  // window.prompt) and passes it straight through here.
+  async function saveMappingAs(kind, name) {
     const label = kind === 'preset' ? 'Header Mapping' : 'Mapping Rule'
-    const name = window.prompt(`Name this ${label}:`)
-    if (!name?.trim()) return
+    if (!name) return
     const entries = mappedOnly.flatMap((m) => m.sheetHeaders.map((sh) => ({ sheetHeader: sh, ourHeaderId: m.ourHeaderId, matchType: 'exact' })))
     if (entries.length === 0) { addToast('Map at least one header first.', 'error'); return }
     try {
@@ -1388,10 +1431,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       addToast(err.message, 'error')
     }
   }
-  async function savePlaceAs(kind) {
+  async function savePlaceAs(kind, name) {
     const label = kind === 'preset' ? 'Header Place' : 'Place Rule'
-    const name = window.prompt(`Name this ${label}:`)
-    if (!name?.trim()) return
+    if (!name) return
     const entries = mappedOnly.filter((m) => m.group).map((m) => ({ ourHeaderId: m.ourHeaderId, group: m.group, position: m.position }))
     if (entries.length === 0) { addToast('Place at least one header first.', 'error'); return }
     try {
@@ -1407,114 +1449,196 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     }
   }
 
+  // A working-set entry's own naming/sheet/mapping fields — flat state for
+  // whichever one is currently active (live edits), its stored session for
+  // every other upload session sitting in the batch.
+  function resolveSessionFields(id) {
+    if (id === activeTemplateId) {
+      return { presetData, categoriesData, rawHeaders, dropdownColumns, rawHeaderNotes, fileName, sourceFileUrl, dataSheetName }
+    }
+    const s = uploadSessions[id] || {}
+    return {
+      presetData: s.presetData || { marketplaceName: '', exportVersion: '', description: '' },
+      categoriesData: s.categoriesData || DEFAULT_CATEGORIES,
+      rawHeaders: s.rawHeaders || [],
+      dropdownColumns: s.dropdownColumns || {},
+      rawHeaderNotes: s.rawHeaderNotes || {},
+      fileName: s.fileName || '',
+      sourceFileUrl: s.sourceFileUrl || '',
+      dataSheetName: s.dataSheetName || '',
+    }
+  }
+
+  // One save-ready payload per working-set entry (templatesList) — every
+  // uploaded file becomes its own create body (same shape the singular
+  // POST /api/listing-tools takes), every already-real template becomes
+  // its own update body (same shape the singular PATCH takes). Returns
+  // null for an entry with nothing to save yet (no headers mapped+placed,
+  // or no name) — handleSave filters those out and reports them as skipped
+  // rather than failing the whole batch over one empty template.
+  function buildSavePayloadForItem(t) {
+    if (isRealTemplateId(t.id)) {
+      if (t.id !== activeTemplateId) {
+        // Not currently open, so no live edits to pull from flat state —
+        // just re-send its already-loaded content unchanged (a harmless
+        // no-op re-save; see the "populate active template" effect's own
+        // comment on why a non-active real template's edits aren't
+        // tracked live — that's a separate, pre-existing limitation, not
+        // something bulk-save can fix on its own).
+        const data = templatesData[t.id]
+        if (!data?.content?.sheets?.length) return null
+        return {
+          isReal: true,
+          body: {
+            templateId: t.id,
+            templateName: data.template.templateName,
+            finalName: data.template.finalName,
+            description: data.template.description,
+            marketplaceName: data.template.marketplaceName,
+            category1: data.template.category1, category2: data.template.category2, category3: data.template.category3,
+            category4: data.template.category4, category5: data.template.category5, category6: data.template.category6,
+            exportVersion: data.template.exportVersion,
+            sheets: data.content.sheets,
+          },
+        }
+      }
+      const grouped = buildGroupedSheets(mappedHeaders)
+      if (grouped.reduce((sum, g) => sum + g.headers.length, 0) === 0) return null
+      return {
+        isReal: true,
+        body: {
+          templateId: t.id,
+          templateName: composeAutoTemplateName(presetData, categoriesData).trim() || t.templateName,
+          finalName: composeFinalName(presetData, categoriesData),
+          description: presetData.description,
+          marketplaceName: presetData.marketplaceName,
+          category1: categoriesData.category1, category2: categoriesData.category2, category3: categoriesData.category3,
+          category4: categoriesData.category4, category5: categoriesData.category5, category6: categoriesData.category6,
+          exportVersion: presetData.exportVersion,
+          sheets: grouped,
+        },
+      }
+    }
+
+    // Fresh upload session — scoped from the shared batch-wide pool
+    // (uploadMappedHeaders) down to just this file's own raw headers, same
+    // rule the single-file save path already used.
+    const session = resolveSessionFields(t.id)
+    const scopedMapped = uploadMappedHeaders.filter((m) => m.sheetHeaders.some((sh) => session.rawHeaders.includes(sh)))
+    const grouped = buildGroupedSheets(scopedMapped, session.dropdownColumns, session.rawHeaderNotes)
+    if (grouped.reduce((sum, g) => sum + g.headers.length, 0) === 0) return null
+    const templateName = composeAutoTemplateName(session.presetData, session.categoriesData).trim()
+    if (!templateName) return null
+    return {
+      isReal: false,
+      clientId: t.id,
+      body: {
+        clientId: t.id,
+        templateName,
+        finalName: composeFinalName(session.presetData, session.categoriesData),
+        description: session.presetData.description,
+        marketplaceName: session.presetData.marketplaceName,
+        category1: session.categoriesData.category1, category2: session.categoriesData.category2, category3: session.categoriesData.category3,
+        category4: session.categoriesData.category4, category5: session.categoriesData.category5, category6: session.categoriesData.category6,
+        exportVersion: session.presetData.exportVersion,
+        sourceFileName: session.fileName || null,
+        sourceFileUrl: session.sourceFileUrl || null,
+        sourceSheetName: session.sourceFileUrl ? session.dataSheetName : null,
+        sheets: grouped.filter((g) => g.headers.length > 0),
+        // No separate Validations/Dropdown Reference Sheet — dropdown
+        // values were auto-detected off the Product fill sheet's own
+        // columns (see the combined extraction effect above).
+        dropdownReference: Object.keys(session.dropdownColumns).length
+          ? { sheetName: session.dataSheetName || null, columns: Object.fromEntries(Object.entries(session.dropdownColumns).map(([k, v]) => [k, v.values])) }
+          : { sheetName: null, columns: {} },
+        aiRules: {},
+      },
+    }
+  }
+
+  // Save button — processes the WHOLE working set in one go, not just
+  // whichever template is currently open: every uploaded file that has
+  // something mapped+placed becomes its own template (bulk-create-template),
+  // every already-real template in the set gets re-saved with its current
+  // state (bulk-update-template) — both endpoints run their own items
+  // through Promise.all server-side, and the two calls themselves run in
+  // parallel here too. One item failing never blocks the rest — each
+  // comes back as its own ok/error entry. Finishes with a created/updated/
+  // failed/skipped summary toast, then redirects back to the template list
+  // (which loads fresh from the server on its own, no stale cache to work
+  // around) after a beat so the toast is actually readable first.
   async function handleSave() {
-    const finalNameToSave = composeFinalName(presetData, categoriesData)
-    // Template Name is always Marketplace_Category6 (empty parts just drop
-    // out, composeAutoTemplateName already does that) — never separately
-    // typed, so this is the one and only source of truth for it, in create
-    // mode and edit mode alike.
-    const templateNameToSave = composeAutoTemplateName(presetData, categoriesData).trim()
-    if (!templateNameToSave) {
-      addToast('Enter a Marketplace Name (and Category 6, if this product has one) before saving.', 'error')
+    const items = templatesList.map(buildSavePayloadForItem).filter(Boolean)
+    const skipped = templatesList.length - items.length
+    if (items.length === 0) {
+      addToast('Map and place at least one header (in at least one template) before saving.', 'error')
       return
     }
-    // Header Mapping/Place is the whole batch's shared pool (activeMapped) —
-    // saving one specific file only keeps the headers it actually has a raw
-    // column for (this file's own rawHeaders), so File B never picks up a
-    // header that only exists in File A's sheet. Editing a real template
-    // (isEditMode) has no such per-file scoping to apply — its own
-    // mappedHeaders already only ever contains its own headers.
-    const scopedMapped = isEditMode
-      ? activeMapped
-      : activeMapped.filter((m) => m.sheetHeaders.some((sh) => rawHeaders.includes(sh)))
-    const allGrouped = buildGroupedSheets(scopedMapped, dropdownColumns, rawHeaderNotes)
-    const totalHeaders = allGrouped.reduce((sum, g) => sum + g.headers.length, 0)
-    if (totalHeaders === 0) {
-      addToast('Map and place at least one header before saving.', 'error')
-      return
-    }
+    const toCreate = items.filter((it) => !it.isReal)
+    const toUpdate = items.filter((it) => it.isReal)
+
     setSaving(true)
-    setExtraction({ stage: isEditMode ? 'Saving changes…' : 'Creating template…', current: 0, total: 0 })
+    setExtraction({ stage: `Saving ${items.length} template${items.length === 1 ? '' : 's'}…`, current: 0, total: items.length })
     try {
-      const body = {
-        templateName: templateNameToSave,
-        finalName: finalNameToSave,
-        description: presetData.description,
-        marketplaceName: presetData.marketplaceName,
-        category1: categoriesData.category1, category2: categoriesData.category2, category3: categoriesData.category3,
-        category4: categoriesData.category4, category5: categoriesData.category5, category6: categoriesData.category6,
-        exportVersion: presetData.exportVersion,
-      }
-      let res
-      if (isEditMode) {
-        res = await fetch(`/api/listing-tools/${activeTemplateId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, sheets: allGrouped }),
-        })
-      } else {
-        res = await fetch('/api/listing-tools', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...body,
-            sourceFileName: fileName || null,
-            sourceFileUrl: sourceFileUrl || null,
-            sourceSheetName: sourceFileUrl ? dataSheetName : null,
-            sheets: allGrouped.filter((g) => g.headers.length > 0),
-            // No separate Validations/Dropdown Reference Sheet — dropdown
-            // values were auto-detected off the Product fill sheet's own
-            // columns (see the combined extraction effect above).
-            dropdownReference: Object.keys(dropdownColumns).length
-              ? { sheetName: dataSheetName || null, columns: Object.fromEntries(Object.entries(dropdownColumns).map(([k, v]) => [k, v.values])) }
-              : { sheetName: null, columns: {} },
-            aiRules: {},
-          }),
-        })
-      }
-      const data = await res.json().catch(() => null)
-      if (res.status === 401) return
-      if (!res.ok) throw new Error(data?.error || `Failed to save template (${res.status})`)
-      const savedId = isEditMode ? activeTemplateId : data.template.id
-      const savedName = data.template?.templateName || templateNameToSave
+      const [createRes, updateRes] = await Promise.all([
+        toCreate.length
+          ? fetch('/api/listing-tools/bulk-create-template', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ templates: toCreate.map((it) => it.body) }),
+            }).then((r) => r.json().catch(() => ({})))
+          : Promise.resolve({ results: [] }),
+        toUpdate.length
+          ? fetch('/api/listing-tools/bulk-update-template', {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ templates: toUpdate.map((it) => it.body) }),
+            }).then((r) => r.json().catch(() => ({})))
+          : Promise.resolve({ results: [] }),
+      ])
 
-      setExtraction({ stage: 'Recording version…', current: 0, total: 0 })
-      const versionRes = await fetch('/api/listing-tools/versions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: savedId, snapshot: { sheets: allGrouped } }),
-      })
-      const versionData = await versionRes.json().catch(() => null)
+      const createdResults = createRes.results || []
+      const updatedResults = updateRes.results || []
+      const createdCount = createdResults.filter((r) => r.ok).length
+      const updatedCount = updatedResults.filter((r) => r.ok).length
+      const failedCount = createdResults.length + updatedResults.length - createdCount - updatedCount
 
-      setExtraction({ stage: 'Done', current: 1, total: 1 })
+      // One version snapshot per successfully saved template — independent
+      // per template, cheap enough to fan out with Promise.all rather than
+      // needing its own bulk endpoint. Best-effort: a version-recording
+      // failure here doesn't undo the save that already succeeded.
+      setExtraction({ stage: 'Recording versions…', current: 0, total: createdCount + updatedCount })
+      await Promise.all([
+        ...createdResults.filter((r) => r.ok).map((r) => {
+          const sourceItem = toCreate.find((it) => it.clientId === r.clientId)
+          return fetch('/api/listing-tools/versions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templateId: r.template.id, snapshot: { sheets: sourceItem?.body.sheets || [] } }),
+          }).catch(() => null)
+        }),
+        ...updatedResults.filter((r) => r.ok).map((r) => {
+          const sourceItem = toUpdate.find((it) => it.body.templateId === r.templateId)
+          return fetch('/api/listing-tools/versions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templateId: r.templateId, snapshot: { sheets: sourceItem?.body.sheets || [] } }),
+          }).catch(() => null)
+        }),
+      ])
+
+      setExtraction({ stage: 'Done', current: items.length, total: items.length })
       setTimeout(() => setExtraction(null), 500)
-      addToast(isEditMode ? 'Template updated.' : 'Template created.', 'success')
-      setSavedTemplate({ id: savedId, templateName: savedName, version: versionData?.version })
 
-      // Newly created — replace this upload session's placeholder file_...
-      // entry with the real saved one IN PLACE (same sidebar position),
-      // rather than appending a second entry and leaving the old one
-      // dangling; re-selecting it later now goes through the normal
-      // templatesData path (below) instead of a stale, now-meaningless
-      // upload session.
-      const priorId = activeTemplateId
-      setTemplatesList((prev) => {
-        const savedFinalName = composeFinalName(presetData, categoriesData)
-        const entry = { id: savedId, templateName: savedName, finalName: savedFinalName }
-        const idx = prev.findIndex((t) => t.id === (isEditMode ? savedId : priorId))
-        if (idx === -1) return [...prev, entry]
-        const next = prev.slice()
-        next[idx] = entry
-        return next
-      })
-      setTemplatesData((prev) => ({
-        ...prev,
-        [savedId]: { template: { ...(prev[savedId]?.template || {}), ...data.template, id: savedId }, content: { sheets: allGrouped } },
-      }))
-      if (!isEditMode) {
-        setUploadSessions((prev) => {
-          if (!prev[priorId]) return prev
-          const next = { ...prev }
-          delete next[priorId]
-          return next
-        })
-        setActiveTemplateId(savedId)
+      if (failedCount > 0) {
+        console.error('Bulk save failures:', [...createdResults, ...updatedResults].filter((r) => !r.ok))
+      }
+      const parts = []
+      if (createdCount) parts.push(`${createdCount} created`)
+      if (updatedCount) parts.push(`${updatedCount} updated`)
+      if (failedCount) parts.push(`${failedCount} failed`)
+      if (skipped) parts.push(`${skipped} skipped (nothing mapped)`)
+      const summary = parts.length ? `${parts.join(', ')}.` : 'Nothing saved.'
+      addToast(summary, createdCount + updatedCount > 0 ? 'success' : 'error')
+
+      if (createdCount + updatedCount > 0) {
+        setTimeout(() => { router.push('/listing-tools/template-settings') }, 1000)
       }
     } catch (err) {
       addToast(err.message, 'error')
@@ -1561,28 +1685,20 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         </div>
       
         <div className="flex flex-wrap items-center gap-2">
-          <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={handleClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
+          <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
           <button
             type="button"
             onClick={handleSave}
             disabled={saving}
+            title="Saves every template in the working set at once — not just whichever one is open right now"
             className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60 hover:bg-[#c91753]"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
-            {isEditMode ? 'Save Changes' : 'Save to template'}
+            Save All{templatesList.length > 1 ? ` (${templatesList.length})` : ''}
           </button>
         </div>
       </div>
 
-      {savedTemplate && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-300 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700">
-          <span className="flex items-center gap-1.5">
-            <Check className="h-3.5 w-3.5" />
-            &ldquo;{savedTemplate.templateName}&rdquo; saved{savedTemplate.version ? ` — ${savedTemplate.version.label}` : ''}.
-          </span>
-          <Link href="/listing-tools/template-settings" className="font-semibold hover:underline">Back to Template Settings</Link>
-        </div>
-      )}
 
       <div className="flex flex-col gap-4 sm:flex-row">
         <BulkRuleSidebar
@@ -1604,11 +1720,15 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           onApplyMappingRule={applyMappingItem}
           onApplyPlacePreset={applyPlaceItem}
           onApplyPlaceRule={applyPlaceItem}
-          onSaveMappingPreset={() => saveMappingAs('preset')}
-          onSaveMappingRule={() => saveMappingAs('rule')}
-          onSavePlacePreset={() => savePlaceAs('preset')}
-          onSavePlaceRule={() => savePlaceAs('rule')}
+          onSaveMappingPreset={(name) => saveMappingAs('preset', name)}
+          onSaveMappingRule={(name) => saveMappingAs('rule', name)}
+          onSavePlacePreset={(name) => savePlaceAs('preset', name)}
+          onSavePlaceRule={(name) => savePlaceAs('rule', name)}
+          ruleNamePrefix={`${(presetData.marketplaceName || 'Marketplace').trim()}_`}
           refreshToken={refreshToken}
+          previewRule={previewRule}
+          onPreviewMapping={(item) => setPreviewRule((prev) => (prev?.item?.id === item.id ? null : { type: 'mapping', item }))}
+          onPreviewPlace={(item) => setPreviewRule((prev) => (prev?.item?.id === item.id ? null : { type: 'place', item }))}
         />
 
         <div className="min-w-0 flex-1 space-y-4">
@@ -1654,6 +1774,16 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
 
           <div>
             <h2 className="mb-2 text-[15px] font-semibold text-foreground">Header Mapping</h2>
+            {previewRule?.type === 'mapping' && (
+              <RulePreviewPanel
+                type="mapping"
+                rule={previewRule.item}
+                ourHeaders={ourHeaders}
+                onApply={applyPreviewRule}
+                applying={previewApplying}
+                onClose={() => setPreviewRule(null)}
+              />
+            )}
             <BulkMappingGrid
               unmappedRawHeaders={unmappedRawHeaders}
               commonHeaderKeys={commonHeaderInfo.keys}
@@ -1675,19 +1805,29 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
               <button
                 type="button"
                 onClick={autoPlaceHeaders}
-                title="Place every mapped-but-unplaced header by default: Image → Image Link, Group Row 'Compulsory' → Compulsory, everything else → Product Details"
+                title="Place every mapped-but-unplaced header by default: Image → Images; same name as its raw sheet column → Compulsory; a canonical name you curated yourself → Product Details"
                 className="rounded-full border border-divider bg-card px-3 py-1 text-[12px] font-medium text-foreground hover:bg-card-hover"
               >
                 Auto-place
               </button>
             </div>
-            <BulkPlaceGrid headers={mappedOnly} onPlace={handlePlace} onUnplace={handleUnplace} />
+            {previewRule?.type === 'place' && (
+              <RulePreviewPanel
+                type="place"
+                rule={previewRule.item}
+                ourHeaders={ourHeaders}
+                onApply={applyPreviewRule}
+                applying={previewApplying}
+                onClose={() => setPreviewRule(null)}
+              />
+            )}
+            <BulkPlaceGrid headers={mappedOnly} onMove={handleMoveHeader} onOpenSettings={setModalId} />
           </div>
 
-          <div>
+          {/* <div>
             <h2 className="mb-2 text-[15px] font-semibold text-foreground">Preview</h2>
             <HeaderBucketPreview headers={previewHeaders} />
-          </div>
+          </div> */}
 
           {/* Save belongs at the END of the flow — sheet selection, mapping
               and placement all happen first; this is the same handleSave
@@ -1698,10 +1838,11 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
               type="button"
               onClick={handleSave}
               disabled={saving}
+              title="Saves every template in the working set at once — not just whichever one is open right now"
               className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60 hover:bg-[#c91753]"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
-              {isEditMode ? 'Save Changes' : 'Save to template'}
+              Save All{templatesList.length > 1 ? ` (${templatesList.length})` : ''}
             </button>
           </div>
         </div>

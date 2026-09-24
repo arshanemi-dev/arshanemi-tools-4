@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Loader2, ArrowLeft, Pencil, Key, ListFilter, Image as ImageIcon, Type,
@@ -65,10 +65,16 @@ function ReadField({ label, value }) {
 // the only way out is Edit Template, which hands off to the real wizard.
 export default function TemplateDetailsPage() {
   const { templateId } = useParams()
+  const searchParams = useSearchParams()
   const [template, setTemplate] = useState(null)
   const [content, setContent] = useState(null)
   const [loadError, setLoadError] = useState(false)
-  const [activeTab, setActiveTab] = useState('details')
+  // ?tab=versions — the Template Settings list's older-version rows and the
+  // Template Logs page link straight into the Versions tab.
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = searchParams.get('tab')
+    return TABS.some((t) => t.id === requested) ? requested : 'details'
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -153,7 +159,7 @@ export default function TemplateDetailsPage() {
       {activeTab === 'excel' ? (
         <ExcelFormatsView sourceFileUrl={template.sourceFileUrl} />
       ) : activeTab === 'versions' ? (
-        <TemplateVersionsView templateId={templateId} />
+        <TemplateVersionsView templateId={templateId} templateName={template.templateName} marketplaceName={template.marketplaceName} />
       ) : (
         <>
           {/* Overview */}
