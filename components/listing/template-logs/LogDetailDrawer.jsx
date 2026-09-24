@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import { X, ExternalLink, Hash, ArrowRight } from 'lucide-react'
 import { actionMeta, fmtDateTime, fmtRelative } from '@/lib/templateLogActions'
-import { ActionChip, VersionPill, initialsOf } from './LogFeed'
+import { ActionChip, VersionPill, initialsOf } from './LogCells'
 
 function Field({ label, children }) {
   return (

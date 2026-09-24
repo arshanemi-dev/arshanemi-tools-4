@@ -17,6 +17,7 @@ import NewDesignColumnModal from './NewDesignColumnModal'
 import OurHeaderSettingsModal from './OurHeaderSettingsModal'
 import SheetHeaderTree from './SheetHeaderTree'
 import RulePreviewPanel from './RulePreviewPanel'
+import DropdownValuesForm from './DropdownValuesForm'
 
 const REAL_GROUPS = ['design_system', 'compulsory', 'prefill']
 const SHEET_LABELS = { design_system: 'Product details', compulsory: 'Compulsory', prefill: 'Brand Details' }
@@ -243,7 +244,13 @@ function extractBrandAndCategories(filename) {
   const known = KNOWN_MARKETPLACES.find((m) => m.toLowerCase() === brandLower)
   const brand = known || (rawBrand.charAt(0).toUpperCase() + rawBrand.slice(1))
 
-  const catTokens = tokens.slice(1).filter((t) => !CATEGORY_STOPWORDS.has(t.toLowerCase()) && !/^\d+$/.test(t))
+  // Lowercased — a filename token carries whatever case its seller typed
+  // (often ALL CAPS), and that used to bleed straight into the composed
+  // Template Name / Save Final Name; category text is lowercase everywhere
+  // now, same idea as a URL slug.
+  const catTokens = tokens.slice(1)
+    .filter((t) => !CATEGORY_STOPWORDS.has(t.toLowerCase()) && !/^\d+$/.test(t))
+    .map((t) => t.toLowerCase())
 
   const categories = new Array(6).fill('')
   if (catTokens.length > 0) {
@@ -252,34 +259,6 @@ function extractBrandAndCategories(filename) {
   }
 
   return { brand, categories }
-}
-
-// Same idea as deriveCategoriesFromName but sourced from the sheet's own
-// extracted header labels instead of the filename — a generic column name
-// like "Product Name"/"HSN Code" says nothing about the product, but a
-// distinctive one (e.g. "Blouse Style", "Fabric Type") is a decent category
-// hint. Extra stopwords cover common FIELD-name words that filenames don't
-// usually have.
-const HEADER_CATEGORY_STOPWORDS = new Set([
-  ...CATEGORY_STOPWORDS,
-  'name', 'id', 'code', 'no', 'number', 'details', 'detail', 'value', 'type',
-  'description', 'date', 'price', 'qty', 'quantity', 'image', 'images', 'link',
-  'url', 'sku', 'product', 'brand', 'category', 'status',
-])
-function deriveCategoriesFromHeaders(headers) {
-  const seen = new Set()
-  const out = []
-  for (const h of headers) {
-    for (const word of String(h || '').split(/[_\-\s]+/)) {
-      const trimmed = word.trim()
-      const key = trimmed.toLowerCase()
-      if (!trimmed || trimmed.length < 3 || /^\d+$/.test(trimmed)) continue
-      if (HEADER_CATEGORY_STOPWORDS.has(key) || seen.has(key)) continue
-      seen.add(key)
-      out.push(trimmed)
-    }
-  }
-  return out
 }
 
 function seedFromExistingContent(content) {
@@ -649,28 +628,6 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     return () => { cancelled = true }
   }, [refreshToken])
 
-  // A brand-new template only — an already-selected template already has
-  // its own real categories, which this must never overwrite.
-  // Fills only currently-empty Category slots with `words`, in order —
-  // used for the header-derived source, where there's no fixed position to
-  // honor, just a compact list of candidate words to top up whatever's
-  // still blank starting at Category 1.
-  function fillEmptyCategories(words) {
-    if (isEditMode || !words.length) return
-    setCategoriesData((prev) => {
-      const next = { ...prev }
-      let wi = 0
-      for (let n = 1; n <= 6 && wi < words.length; n++) {
-        const key = `category${n}`
-        if (!next[key]) { next[key] = words[wi]; wi++ }
-      }
-      return next
-    })
-  }
-  function applyDerivedCategoriesFromHeaders(headers) {
-    fillEmptyCategories(deriveCategoriesFromHeaders(headers))
-  }
-
   // Builds a fresh upload session's starting state off one parsed workbook
   // — marketplace/categories straight from the filename (fixed positional
   // convention, see extractBrandAndCategories) and sheet/row selections
@@ -1000,12 +957,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setRawHeaderNotes(notes)
       setRawHeaderGroupLabels(groupLabels)
       setDropdownColumns(cols)
-      applyDerivedCategoriesFromHeaders(out)
       setExtraction({ stage: 'Done', current: out.length, total: out.length })
       setTimeout(() => { if (!cancelled) setExtraction(null) }, 500)
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyDerivedCategoriesFromHeaders is a plain closure recreated every render; only the sheet/row inputs below should trigger a re-read.
   }, [workbook, dataSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownDataStartRow])
 
   // Every uploaded file's own raw headers pooled into one set — Header
@@ -1173,8 +1128,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // `after` says which side of that card it landed on.
   function handleMoveHeader(ourHeaderId, group, uiBucket, beforeOurHeaderId, after) {
     setActiveMapped((prev) => {
-      const sectionKeyOf = (m) => (m.uiBucket === 'image_link' ? 'image_link' : (m.group || 'unassigned'))
-      const targetSectionId = uiBucket === 'image_link' ? 'image_link' : (group || 'unassigned')
+      const sectionKeyOf = (m) => m.uiBucket || m.group || 'unassigned'
+      const targetSectionId = uiBucket || group || 'unassigned'
       const moved = prev.find((m) => m.ourHeaderId === ourHeaderId)
       if (!moved) return prev
       const targetCards = prev
@@ -1760,9 +1715,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             setDropdownDataStartRow={setDropdownDataStartRow}
           />
           {Object.keys(dropdownColumns).length > 0 && (
-            <p className="-mt-2 px-1 text-[12.5px] text-subtle">
-              {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} auto-detected as dropdowns from this sheet&apos;s own data: {Object.keys(dropdownColumns).join(', ')}
-            </p>
+            <div className="-mt-2 space-y-2 px-1">
+              <p className="text-[12.5px] text-subtle">
+                {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} auto-detected as dropdowns from this sheet&apos;s own data — spot-check the values below:
+              </p>
+              <DropdownValuesForm
+                fields={Object.fromEntries(Object.entries(dropdownColumns).map(([label, col]) => [label, col.values]))}
+              />
+            </div>
           )}
 
           {sheetsIndex.length >= 2 && (

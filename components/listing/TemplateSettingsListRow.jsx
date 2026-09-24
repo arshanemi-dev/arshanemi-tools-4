@@ -271,7 +271,7 @@ export default function TemplateSettingsListRow({
           {editingRules ? (
             <input type="text" value={descDraft} onChange={(e) => setDescDraft(e.target.value)} placeholder="Template description" className={inputCls} />
           ) : (
-            <span className="block truncate" title={source.description}>{source.description || '—'}</span>
+            <span className="block truncate" title={source.description}>{source.description}</span>
           )}
         </td>
 
@@ -287,8 +287,8 @@ export default function TemplateSettingsListRow({
                   className={inputCls}
                 />
               ) : (
-                <span className={`block max-w-[140px] truncate text-[12.5px] ${cellText}`} title={value || '—'}>
-                  {value || '—'}
+                <span className={`block max-w-[140px] truncate text-[12.5px] ${cellText}`} title={value || ''}>
+                  {value}
                 </span>
               )}
             </td>

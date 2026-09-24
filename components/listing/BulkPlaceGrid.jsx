@@ -4,21 +4,23 @@ import { Search, Settings } from 'lucide-react'
 
 // A full copy of the single-template /new page's own New Design grid
 // (NewTemplateDesign.jsx's SECTIONS/sectionKeyOf/onCardDrop/onSectionDrop —
-// same colours, same drag-and-drop model), adapted to the bulk page's own
-// data shape (mappedOnly's {ourHeaderId, group, position, uiBucket} instead
-// of /new's `fields`). Drops /new's niche "Big" bucket — this page's own
-// section list is exactly the 5 the user asked for: Product Details,
-// Compulsory, Brand Details, Images, Others. "Others" IS the staging
-// section (real group null), same job /new's own "Other" tab does — drag a
-// card there to unplace it, drag it back into a real section to place it.
+// same colours, same drag-and-drop model, same section order: Product
+// Details, Compulsory, Big, Brand Details, Images, Others), adapted to the
+// bulk page's own data shape (mappedOnly's {ourHeaderId, group, position,
+// uiBucket} instead of /new's `fields`). Like Images, "Big" is a uiBucket
+// overlay — its real group stays design_system, same as /new's own Big
+// section. "Others" IS the staging section (real group null), same job
+// /new's own "Other" tab does — drag a card there to unplace it, drag it
+// back into a real section to place it.
 const SECTIONS = [
   { id: 'design_system', title: 'Product Details', color: '#e02424', group: 'design_system', bucket: null },
   { id: 'compulsory', title: 'Compulsory', color: '#16a34a', group: 'compulsory', bucket: null },
+  { id: 'big', title: 'Big', color: '#4B0082', group: 'design_system', bucket: 'big' },
   { id: 'prefill', title: 'Brand Details', color: '#2563eb', group: 'prefill', bucket: null },
   { id: 'image_link', title: 'Images', color: '#a16207', group: 'design_system', bucket: 'image_link' },
   { id: 'unassigned', title: 'Others', color: '#9aa2ad', group: null, bucket: null },
 ]
-const sectionKeyOf = (h) => (h.uiBucket === 'image_link' ? 'image_link' : (h.group || 'unassigned'))
+const sectionKeyOf = (h) => h.uiBucket || h.group || 'unassigned'
 
 // `headers` = [{ourHeaderId, ourHeaderLabel, group, position, uiBucket}].
 // `onMove(ourHeaderId, group, uiBucket, beforeOurHeaderId, after)` — called

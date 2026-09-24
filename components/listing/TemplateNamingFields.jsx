@@ -59,7 +59,11 @@ export default function TemplateNamingFields({
   nameEditableInCreate = false,
   nameAlwaysComposed = false,
 }) {
-  const setCat = (n, v) => setCategoriesData({ ...categoriesData, [`category${n}`]: v })
+  // Lowercased on the way in — same reason extractBrandAndCategories
+  // lowercases a category pulled off a filename (BulkTemplateDesign.jsx): a
+  // capital typed here used to carry straight through into the composed
+  // Template Name / Save Final Name.
+  const setCat = (n, v) => setCategoriesData({ ...categoriesData, [`category${n}`]: v.toLowerCase() })
   const setPreset = (k, v) => setPresetData({ ...presetData, [k]: v })
   const finalName = composeFinalName(presetData, categoriesData)
   const autoTemplateName = composeAutoTemplateName(presetData, categoriesData)
