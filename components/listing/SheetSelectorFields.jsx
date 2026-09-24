@@ -21,18 +21,28 @@ export function MiniInput({ label, value, onChange, defaultValue, readOnly }) {
 // Row/Dropdown Values Row for the reference sheet) — the real thing from
 // NewTemplateDesign.jsx (single-template Create/Edit Template), shared here
 // so the bulk mapping page uses the identical component instead of a
-// re-styled, simplified copy.
+// re-styled, simplified copy. `hideDropdownReference` — the bulk mapping
+// page no longer reads a separate Validations/Dropdown Reference Sheet at
+// all (dropdown columns are auto-detected straight off the Product fill
+// sheet's own data instead, see BulkTemplateDesign.jsx's
+// detectColumnDropdownValues) — hides that whole right-hand column and
+// shows an editable "Dropdown Data Row" input next to Group/Header/I
+// section instead (defaults to row 5, same for every marketplace, but
+// still user-adjustable like every other row here); /new still uses the
+// separate reference sheet, so this defaults to the old behavior.
 export default function SheetSelectorFields({
   sheetMeta,
   dataSheetName, onSelectDataSheet,
   dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow, dataIsectionRow, setDataIsectionRow,
   dropdownSheetName, onSelectDropdownSheet,
   dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
+  hideDropdownReference = false,
+  dropdownDataStartRow, setDropdownDataStartRow,
 }) {
   return (
     <div className="rounded-[7px] border border-divider p-3">
       <div className="flex flex-wrap gap-y-3.5">
-        <div className="min-w-0 flex-[1_1_330px] sm:pr-5">
+        <div className={`min-w-0 flex-[1_1_330px] ${hideDropdownReference ? '' : 'sm:pr-5'}`}>
           <div className="mb-2 text-[14.5px] text-muted">Product fill sheet</div>
           <select value={dataSheetName} onChange={(e) => onSelectDataSheet(e.target.value)} className={inputCls}>
             <option value="">-- Select sheet --</option>
@@ -46,31 +56,36 @@ export default function SheetSelectorFields({
             <MiniInput label="Group Row" value={dataGroupRow} onChange={setDataGroupRow} />
             <MiniInput label="Header Row" value={dataHeaderRow} onChange={setDataHeaderRow} />
             <MiniInput label="I section" value={dataIsectionRow ?? '2'} onChange={setDataIsectionRow} />
+            {hideDropdownReference && (
+              <MiniInput label="Dropdown Data Row" value={dropdownDataStartRow ?? '5'} onChange={setDropdownDataStartRow} />
+            )}
           </div>
         </div>
-        <div className="min-w-0 flex-[1_1_330px] sm:pl-5">
-          <div className="mb-2 text-[14.5px] text-muted">Dropdowns Reference Sheet</div>
-          <select
-            value={dropdownSheetName}
-            onChange={(e) => onSelectDropdownSheet(e.target.value)}
-            className={inputCls}
-          >
-            <option value="">-- None --</option>
-            {sheetMeta.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name} ({s.colCount} columns - {s.rowCount} rows)
-              </option>
-            ))}
-          </select>
-          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-            <MiniInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
-            <MiniInput
-              label="Dropdown Values Row"
-              value={dropdownValuesRow}
-              onChange={setDropdownValuesRow}
-            />
+        {!hideDropdownReference && (
+          <div className="min-w-0 flex-[1_1_330px] sm:pl-5">
+            <div className="mb-2 text-[14.5px] text-muted">Dropdowns Reference Sheet</div>
+            <select
+              value={dropdownSheetName}
+              onChange={(e) => onSelectDropdownSheet(e.target.value)}
+              className={inputCls}
+            >
+              <option value="">-- None --</option>
+              {sheetMeta.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.colCount} columns - {s.rowCount} rows)
+                </option>
+              ))}
+            </select>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+              <MiniInput label="Header Row" value={dropdownHeaderRow} onChange={setDropdownHeaderRow} />
+              <MiniInput
+                label="Dropdown Values Row"
+                value={dropdownValuesRow}
+                onChange={setDropdownValuesRow}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

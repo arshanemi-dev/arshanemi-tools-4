@@ -136,6 +136,7 @@ export default function NewTemplateDesign({ api }) {
     isEditMode, fields, parsing, extraction, sheetMeta, uploadingSource,
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
+    dataIsectionRow, setDataIsectionRow,
     dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
     updateField, deleteHeader, addHeaderToGroup, moveFieldBefore, sortFieldsWithinGroups, handleFile,
     fileName, resetWizard,
@@ -340,6 +341,8 @@ export default function NewTemplateDesign({ api }) {
           setDataGroupRow={setDataGroupRow}
           dataHeaderRow={dataHeaderRow}
           setDataHeaderRow={setDataHeaderRow}
+          dataIsectionRow={dataIsectionRow}
+          setDataIsectionRow={setDataIsectionRow}
           dropdownSheetName={dropdownSheetName}
           onSelectDropdownSheet={selectDropdownSheet}
           dropdownHeaderRow={dropdownHeaderRow}

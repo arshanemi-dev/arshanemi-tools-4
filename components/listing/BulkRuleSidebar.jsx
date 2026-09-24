@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Search, Play, PlayCircle, Pencil, Trash2, Plus, Loader2, Check, X, Eye, EyeOff, FileSpreadsheet } from 'lucide-react'
+import { Search, Play, PlayCircle, Pencil, Trash2, Plus, Loader2, Check, X, Eye, EyeOff, FileSpreadsheet, Settings } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
 
 const titleBtnCls = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full'
@@ -225,7 +225,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
 // same rename/delete affordances the rule sections already have. The
 // search box still supports the quicker "type a name that doesn't exist,
 // press Enter" shortcut too.
-function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating }) {
+function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings }) {
   const [search, setSearch] = useState('')
   const [hidden, setHidden] = useState(false)
   const [drafts, setDrafts] = useState([]) // [{tempId, text}]
@@ -382,6 +382,16 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground" title={h.label}>
                     {h.label}
                   </span>
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSettings(h.id)}
+                      title="Header settings — type, dropdown default values, unique key…"
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-subtle opacity-0 group-hover:opacity-100 hover:bg-card-hover"
+                    >
+                      <Settings className="h-3 w-3" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => startEdit(h)}
@@ -518,7 +528,7 @@ function UploadedSheetsSection({ uploadedFiles, onClearUpload }) {
   const filtered = uploadedFiles.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()))
 
   return (
-    <div className="border-b border-divider pb-3 mb-3">
+    <div className="border-b border-divider pb-3 mb-3 hidden">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
         <h3 className="text-[12.5px] font-semibold text-foreground flex items-center gap-1.5 min-w-0 truncate">
           <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
@@ -680,7 +690,7 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
 // Header Mapping/Mapping Rule (kind=preset/rule on listing_mapping_rules)
 // and Header Place/Place Rule (kind=preset/rule on listing_place_rules).
 export default function BulkRuleSidebar({
-  ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creatingHeader,
+  ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creatingHeader, onOpenHeaderSettings,
   templates, activeTemplateId, onSelectTemplate,
   uploadedFiles, onClearUpload,
   selectedMarketplace, onSelectMarketplace,
@@ -711,6 +721,7 @@ export default function BulkRuleSidebar({
         onDeleteHeader={onDeleteHeader}
         onDeleteAllHeaders={onDeleteAllHeaders}
         creating={creatingHeader}
+        onOpenSettings={onOpenHeaderSettings}
       />
       <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} />
       <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} />

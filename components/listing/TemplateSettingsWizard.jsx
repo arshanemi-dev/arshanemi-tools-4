@@ -109,7 +109,11 @@ function isPlaceholderHeader(label) {
   const v = String(label).trim()
   if (/^\d+$/.test(v)) return true
   if (isDoNotChangeHeader(v)) return true
-  return /^(unnamed|__?empty|n\/?a|column|field|header|col|sample|example|test|dummy|placeholder|lorem|xxx|tbd)[\s._:-]*\d*$/i.test(v)
+  // A broken formula/reference in the sheet itself (e.g. a header cell that
+  // used to be a formula) reads back as a literal Excel error string, not a
+  // real column name — never accept one of these as a header.
+  if (/^#(REF|N\/A|VALUE|DIV\/0|NAME\??|NULL|NUM|SPILL|CALC)!?$/i.test(v)) return true
+  return /^(unnamed|__?empty|n\/?a|column|field|header|col|sample|example|test|dummy|placeholder|lorem|xxx|tbd|error)[\s._:-]*\d*$/i.test(v)
 }
 // Task 3: when a header has no Dropdown Reference Sheet match, check
 // whether the Product Data Sheet's own column data looks categorical
@@ -295,7 +299,7 @@ function buildDropdownColumns(XLSX, workbook, dropdownSheetName, headerRowIdx, v
 // columns) purely so the progress bar can repaint between chunks; a plain
 // synchronous loop would finish before the browser ever got to draw it for
 // all but the largest sheets.
-async function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowIdx, groupRowIdx, onProgress) {
+async function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, headerRowIdx, groupRowIdx, isectionRowIdx, onProgress) {
   const fields = []
   if (!dataSheetName) return fields
   const ws = workbook.Sheets[dataSheetName]
@@ -303,6 +307,10 @@ async function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, heade
   const dropdownNames = Object.keys(dropdownColumns)
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
   const rawHeaderRow = aoa[headerRowIdx] || []
+  // I section/Placeholder row, column-aligned to rawHeaderRow — only ever
+  // used as a FALLBACK when splitHeaderCell found no note embedded in the
+  // header cell itself (see the description assignment below).
+  const isectionRow = isectionRowIdx >= 0 ? aoa[isectionRowIdx] || [] : []
 
   // The row directly above the real header row is often a group-label row
   // (e.g. "Compulsory" spanning several columns) — forward-fill it and
@@ -325,8 +333,12 @@ async function buildFields(XLSX, workbook, dataSheetName, dropdownColumns, heade
     // See splitHeaderCell above \u2014 pulls the short column title apart from
     // any instructional note the cell also carries, instead of collapsing
     // both onto one line and calling the whole run-on sentence the label.
-    const { label, description } = splitHeaderCell(rawLabel)
+    // A separate I section/Placeholder row only ever fills in when the cell
+    // itself had no embedded note \u2014 an explicit in-cell note always wins.
+    const { label, description: cellDescription } = splitHeaderCell(rawLabel)
     if (!label) continue
+    const isectionNote = String(isectionRow[colIdx] ?? '').replace(/\s+/g, ' ').trim()
+    const description = cellDescription || (isectionNote && !isPlaceholderValue(isectionNote, label) ? isectionNote : '')
     if (isPlaceholderHeader(label)) continue
     const key = label.toLowerCase()
     if (seen.has(key)) continue
@@ -540,6 +552,13 @@ export default function TemplateSettingsWizard({ templateId }) {
   // sheet is picked so the inputs render empty rather than a stale number.
   const [dataGroupRow, setDataGroupRow] = useState('')
   const [dataHeaderRow, setDataHeaderRow] = useState('')
+  // "I section" / Placeholder row — the row right below (or, when
+  // configured to the same row number as Header Row, the line right after
+  // it — see the same-row rule in the rebuild effect below) that carries a
+  // per-column instructional note, used as a header's description when
+  // splitHeaderCell didn't already find one embedded in the header cell
+  // itself. Same concept/rule as the bulk mapping page's own dataIsectionRow.
+  const [dataIsectionRow, setDataIsectionRow] = useState('')
   const [dropdownHeaderRow, setDropdownHeaderRow] = useState('')
   const [dropdownValuesRow, setDropdownValuesRow] = useState('')
   const [parsing, setParsing] = useState(false)
@@ -671,6 +690,10 @@ export default function TemplateSettingsWizard({ templateId }) {
       setDropdownSheetName(nextDropdownSheetName)
       setDataGroupRow(nextDataSheetName ? DEFAULT_SHEET_ROWS.GROUP_ROW : '')
       setDataHeaderRow(nextDataSheetName ? DEFAULT_SHEET_ROWS.HEADER_ROW : '')
+      // Defaults to the SAME row number as Header Row — the same-row rule in
+      // the rebuild effect below then reads it as "1st line Headers, 2nd
+      // line Placeholder", not literally the header row twice.
+      setDataIsectionRow(nextDataSheetName ? DEFAULT_SHEET_ROWS.HEADER_ROW : '')
       setDropdownHeaderRow(nextDropdownSheetName ? (dropdownDefaults.header + 1 || DEFAULT_SHEET_ROWS.DROPDOWN_HEADER_ROW) : '')
       setDropdownValuesRow(nextDropdownSheetName ? (dropdownDefaults.values + 1 || DEFAULT_SHEET_ROWS.DROPDOWN_VALUES_ROW) : '')
       setShowGroups(false)
@@ -731,6 +754,16 @@ export default function TemplateSettingsWizard({ templateId }) {
       if (cancelled) return
       const headerRowIdx = parseRowInput(dataHeaderRow, HEADER_ROW_INDEX)
       const groupRowIdx = parseRowInput(dataGroupRow, GROUP_LABEL_ROW_INDEX)
+      // Header Row and I section/Placeholder are allowed to be configured as
+      // the SAME number (defaults to exactly that) — not "read this row
+      // twice", it means "1st line is Headers, 2nd line (right after) is
+      // the Placeholder". Configured as different rows, isection reads
+      // literally at its own row instead. Same rule the bulk mapping page
+      // uses (BulkTemplateDesign.jsx's own combined extraction effect).
+      const sameConfiguredRow = String(dataHeaderRow ?? '').trim() !== ''
+        && String(dataIsectionRow ?? '').trim() !== ''
+        && Number(dataHeaderRow) === Number(dataIsectionRow)
+      const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(dataIsectionRow, headerRowIdx + 1)
       const dropHeaderRowIdx = parseRowInput(dropdownHeaderRow, 0)
       const dropValuesRowIdx = parseRowInput(dropdownValuesRow, dropHeaderRowIdx + 1)
       setExtraction({ stage: 'Reading dropdown reference…', current: 0, total: 0 })
@@ -740,7 +773,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       // group-label row (matchGroupLabel), and anything it can't recognise
       // falls to Unselected / "Other" — same behaviour in both designs now.
       // Reports live current/total counts as it goes — see its own comment.
-      const built = await buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx, (current, total) => {
+      const built = await buildFields(XLSX, workbook, dataSheetName, cols, headerRowIdx, groupRowIdx, isectionRowIdx, (current, total) => {
         if (!cancelled) setExtraction({ stage: 'Extracting headers…', current, total })
       })
       if (cancelled) return
@@ -762,7 +795,7 @@ export default function TemplateSettingsWizard({ templateId }) {
       setTimeout(() => { if (!cancelled) setExtraction(null) }, 500)
     })()
     return () => { cancelled = true }
-  }, [workbook, dataSheetName, dropdownSheetName, dataHeaderRow, dataGroupRow, dropdownHeaderRow, dropdownValuesRow])
+  }, [workbook, dataSheetName, dropdownSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownHeaderRow, dropdownValuesRow])
 
   function updateField(id, patch) {
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)))
@@ -826,6 +859,7 @@ export default function TemplateSettingsWizard({ templateId }) {
     setDataSheetName(val)
     setDataGroupRow(val ? GROUP_LABEL_ROW_INDEX + 1 : '')
     setDataHeaderRow(val ? HEADER_ROW_INDEX + 1 : '')
+    setDataIsectionRow(val ? HEADER_ROW_INDEX + 1 : '')
     if (!val) { setShowGroups(false); setFields([]); setDropdownColumns({}) }
   }
   function selectDropdownSheet(val) {
@@ -912,6 +946,7 @@ export default function TemplateSettingsWizard({ templateId }) {
     setDropdownSheetName('')
     setDataGroupRow('')
     setDataHeaderRow('')
+    setDataIsectionRow('')
     setDropdownHeaderRow('')
     setDropdownValuesRow('')
     setSourceFileUrl('')
@@ -1097,6 +1132,7 @@ export default function TemplateSettingsWizard({ templateId }) {
     fileName, parsing, extraction, sheetMeta, uploadingSource, sourceFileUrl, handleFile,
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
+    dataIsectionRow, setDataIsectionRow,
     dropdownHeaderRow, setDropdownHeaderRow, dropdownValuesRow, setDropdownValuesRow,
     fields, updateField, deleteHeader, addHeaderToGroup, moveFieldBefore, sortFieldsWithinGroups, bulkAssignFields,
     templateNameInput, setTemplateNameInput, templateNumber,

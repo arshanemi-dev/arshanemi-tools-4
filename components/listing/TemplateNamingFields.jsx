@@ -33,8 +33,9 @@ export function composeFinalName(presetData, categoriesData) {
 
 // Create mode: Template Name is composed automatically from Marketplace +
 // Category 6 ("Meesho_Blouses") and is read-only; edit mode keeps the saved
-// name editable instead (Category 6 isn't persisted, so it can't be
-// recomposed on reload).
+// name editable instead. The bulk page (nameAlwaysComposed) instead keeps
+// this composed name in BOTH modes — see BulkTemplateDesign.jsx's own
+// handleSave, which always saves this exact string as templateName.
 export function composeAutoTemplateName(presetData, categoriesData) {
   return [presetData.marketplaceName, cat(categoriesData, 6)]
     .map((s) => (s || '').trim())
@@ -55,6 +56,8 @@ export default function TemplateNamingFields({
   setTemplateNameInput,
   templateNumber,
   currentPreset,
+  nameEditableInCreate = false,
+  nameAlwaysComposed = false,
 }) {
   const setCat = (n, v) => setCategoriesData({ ...categoriesData, [`category${n}`]: v })
   const setPreset = (k, v) => setPresetData({ ...presetData, [k]: v })
@@ -97,10 +100,10 @@ export default function TemplateNamingFields({
           />
         </Field>
         <Field label="Template Name" className="flex-[2.4_1_170px]">
-          {isEditMode ? (
+          {!nameAlwaysComposed && (isEditMode || nameEditableInCreate) ? (
             <input
               className={inputCls}
-              placeholder="Meesho_Blouses"
+              placeholder={autoTemplateName || 'Meesho_Blouses'}
               value={templateNameInput}
               onChange={(e) => setTemplateNameInput(e.target.value)}
             />

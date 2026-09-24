@@ -91,7 +91,10 @@ export default function BulkPlaceGrid({ headers, onPlace, onUnplace }) {
         <SearchBox value={searchPlaced} onChange={setSearchPlaced} />
         <div className="max-h-64 space-y-2 overflow-y-auto">
           {GROUPS.map((g) => {
-            const cards = placedFiltered.filter((h) => h.group === g.id)
+            // Sorted by the stored position index — same order Save already
+            // uses (buildGroupedSheets), so what you see here is what
+            // actually lands in the template instead of just insertion order.
+            const cards = placedFiltered.filter((h) => h.group === g.id).slice().sort((a, b) => a.position - b.position)
             if (cards.length === 0) return null
             return (
               <div key={g.id}>

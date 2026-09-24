@@ -12,6 +12,13 @@ export const DEFAULT_SHEET_ROWS = {
   ISECTION: 2,
   DROPDOWN_HEADER_ROW: 1,
   DROPDOWN_VALUES_ROW: 3,
+  // Bulk mapping page only (BulkTemplateDesign.jsx) — where a Product fill
+  // sheet's own dropdown-enabled data actually starts, for its own-column
+  // dropdown auto-detect (no separate Validations sheet anymore). Same row
+  // for every marketplace (Meesho, Flipkart, and everything else) — 1-based,
+  // matching Excel's own row numbering, same convention as every other row
+  // constant here.
+  DROPDOWN_DATA_START_ROW: 5,
 }
 
 export const MARKETPLACE_SHEET_RULES = {
@@ -19,8 +26,8 @@ export const MARKETPLACE_SHEET_RULES = {
     dataSheetIndex: 1, // 0-based: 2nd sheet
     dataKeyword: /fill/i,
     dataGroupRow: 1,
-    dataHeaderRow: 2,
-    dataIsectionRow: 2,
+    dataHeaderRow: 3,
+    dataIsectionRow: 3,
 
     validationSheetIndex: 3, // 0-based: 4th sheet
     validationKeyword: /valid/i,
