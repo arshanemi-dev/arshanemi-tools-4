@@ -13,6 +13,18 @@ const GROUPS = [
   { id: 'prefill', label: 'Brand Details', text: 'text-[#2563eb]' },
 ]
 
+// Mapping entries render as boxes of at most this many (each list capped at
+// 100px tall, scrolling inside), 4 per row (1/2 on
+// narrower screens), overflow wrapping onto the next row — instead of one
+// long scrolling list.
+const MAPPING_BOX_SIZE = 30
+
+function chunk(list, size) {
+  const out = []
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
+  return out
+}
+
 // Read-only preview of a saved Header Mapping/Mapping Rule's entries
 // (sheetHeader -> our header) or a Header Place/Place Rule's entries (our
 // header -> group + position index) — shown right above the section it
@@ -58,33 +70,50 @@ export default function RulePreviewPanel({ type, rule, ourHeaders, onApply, appl
       {entries.length === 0 ? (
         <p className="text-[12px] italic text-subtle">This rule has no saved entries.</p>
       ) : type === 'mapping' ? (
-        <div className="max-h-56 space-y-1 overflow-y-auto">
-          {entries.map((e, idx) => (
-            <div key={idx} className="flex items-center gap-2 rounded-md border border-divider/60 bg-background px-2 py-1 text-[12px]">
-              <span className="min-w-0 flex-1 truncate text-foreground" title={e.sheetHeader}>{e.sheetHeader}</span>
-              <ArrowRight className="h-3 w-3 flex-shrink-0 text-subtle" />
-              <span className="min-w-0 flex-1 truncate font-medium text-accent" title={labelFor(e.ourHeaderId)}>{labelFor(e.ourHeaderId)}</span>
+        <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {chunk(entries, MAPPING_BOX_SIZE).map((box, bi) => (
+            <div key={bi} className="min-w-0 rounded-md border border-divider bg-card p-2">
+              <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                {bi * MAPPING_BOX_SIZE + 1}–{bi * MAPPING_BOX_SIZE + box.length} of {entries.length}
+              </p>
+              <div className="max-h-[100px] space-y-1 overflow-y-auto pr-0.5">
+                {box.map((e, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 rounded-md border border-divider/60 bg-background px-2 py-1 text-[12px]">
+                    <span className="min-w-0 flex-1 truncate text-foreground" title={e.sheetHeader}>{e.sheetHeader}</span>
+                    <ArrowRight className="h-3 w-3 flex-shrink-0 text-subtle" />
+                    <span className="min-w-0 flex-1 truncate font-medium text-accent" title={labelFor(e.ourHeaderId)}>{labelFor(e.ourHeaderId)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="max-h-56 space-y-2.5 overflow-y-auto">
+        // One column per group, side by side; each header numbered by its
+        // saved per-group position (0-based in the rule, shown 1-based).
+        <div className="flex flex-col items-start gap-2 sm:flex-row">
           {groupsToRender.map((g) => {
             const groupEntries = sortedForPlace.filter((e) => (e.group || null) === g.id)
-            if (groupEntries.length === 0) return null
             return (
-              <div key={g.id}>
-                <p className={`mb-1 text-[11.5px] font-semibold ${g.text}`}>{g.label}</p>
-                <div className="space-y-1">
-                  {groupEntries.map((e, idx) => (
-                    <div key={idx} className="flex items-center gap-2 rounded-md border border-divider/60 bg-background px-2 py-1 text-[12px]">
-                      <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-card-hover text-[10px] font-semibold text-subtle">
-                        {idx + 1}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-foreground" title={labelFor(e.ourHeaderId)}>{labelFor(e.ourHeaderId)}</span>
-                    </div>
-                  ))}
-                </div>
+              <div key={g.id} className="w-full min-w-0 flex-1 rounded-md border border-divider bg-card p-2">
+                <p className={`mb-1 text-[11.5px] font-semibold ${g.text}`}>{g.label} ({groupEntries.length})</p>
+                {groupEntries.length === 0 ? (
+                  <p className="text-[12px] italic text-subtle">Nothing placed.</p>
+                ) : (
+                  <div className="max-h-[100px] space-y-1 overflow-y-auto pr-0.5">
+                    {groupEntries.map((e, idx) => (
+                      <div key={idx} className="flex items-center gap-2 rounded-md border border-divider/60 bg-background px-2 py-1 text-[12px]">
+                        <span
+                          title={`Position ${(e.position ?? idx) + 1}`}
+                          className="flex h-4 min-w-4 flex-shrink-0 items-center justify-center rounded-full bg-card-hover px-1 text-[10px] font-semibold text-subtle"
+                        >
+                          {(e.position ?? idx) + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-foreground" title={labelFor(e.ourHeaderId)}>{labelFor(e.ourHeaderId)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })}

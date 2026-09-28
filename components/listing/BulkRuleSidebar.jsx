@@ -46,11 +46,12 @@ function ConfirmDialog({ state, onConfirm, onCancel }) {
 // One collapsible section — used 4 times below for Header Mapping / Mapping
 // Rule (both backed by /api/listing-tools/mapping/rules, split by `kind`)
 // and Header Place / Place Rule (/api/listing-tools/mapping/place-rules).
-function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll, selectedMarketplace, ruleNamePrefix, requestConfirm, onPreview, previewedId }) {
+// `hidden`/`onToggleHidden` are owned by BulkTemplateDesign so the eye also
+// collapses the related right-side section (see its SECTION_LINKS).
+function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, showApplyAll, selectedMarketplace, ruleNamePrefix, requestConfirm, onPreview, previewedId, hidden, onToggleHidden }) {
   const { addToast } = useToast()
   const [items, setItems] = useState(null)
   const [search, setSearch] = useState('')
-  const [hidden, setHidden] = useState(false)
   const [renamingId, setRenamingId] = useState(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [busyId, setBusyId] = useState(null)
@@ -214,7 +215,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={() => setHidden(!hidden)}
+            onClick={onToggleHidden}
             title={hidden ? `Show ${title}` : `Hide ${title}`}
             className={eyeBtnCls}
           >
@@ -365,9 +366,8 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
 // same rename/delete affordances the rule sections already have. The
 // search box still supports the quicker "type a name that doesn't exist,
 // press Enter" shortcut too.
-function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings, requestConfirm }) {
+function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings, requestConfirm, hidden, onToggleHidden }) {
   const [search, setSearch] = useState('')
-  const [hidden, setHidden] = useState(false)
   const [drafts, setDrafts] = useState([]) // [{tempId, text}]
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState('')
@@ -471,7 +471,7 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={() => setHidden(!hidden)}
+            onClick={onToggleHidden}
             title={hidden ? "Show Our Headers" : "Hide Our Headers"}
             className={eyeBtnCls}
           >
@@ -935,7 +935,9 @@ export default function BulkRuleSidebar({
   ruleNamePrefix,
   refreshToken,
   previewRule, onPreviewMapping, onPreviewPlace,
+  hiddenSections = {}, onToggleSection,
 }) {
+  const eyeProps = (key) => ({ hidden: !!hiddenSections[key], onToggleHidden: () => onToggleSection?.(key) })
   const [confirmState, setConfirmState] = useState(null) // { message, onConfirm } | null
 
   function requestConfirm(message, onConfirm) {
@@ -976,11 +978,12 @@ export default function BulkRuleSidebar({
         creating={creatingHeader}
         onOpenSettings={onOpenHeaderSettings}
         requestConfirm={requestConfirm}
+        {...eyeProps('Our Headers')}
       />
-      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} />
-      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} />
-      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} />
-      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} />
+      <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} {...eyeProps('Header Mapping')} />
+      <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} {...eyeProps('Mapping Rule')} />
+      <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} {...eyeProps('Header Place')} />
+      <RuleSection title="Place Rule" apiBase="/api/listing-tools/mapping/place-rules" kind="rule" onApply={onApplyPlaceRule} onSaveNew={onSavePlaceRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} {...eyeProps('Place Rule')} />
       <ConfirmDialog state={confirmState} onConfirm={handleConfirm} onCancel={handleCancelConfirm} />
     </aside>
   )

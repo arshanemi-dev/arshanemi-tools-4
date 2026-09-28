@@ -18,6 +18,17 @@ import OurHeaderSettingsModal from './OurHeaderSettingsModal'
 import SheetHeaderTree from './SheetHeaderTree'
 import RulePreviewPanel from './RulePreviewPanel'
 import DropdownValuesForm from './DropdownValuesForm'
+import { readDataValidationLists, createDropdownSourceResolver } from '@/lib/sheetDataValidations'
+import SectionEyeTitle from './SectionEyeTitle'
+
+// Sidebar eye toggles (keyed by section title) → the right-side section they
+// also collapse to title-only. Any linked sidebar section hidden = collapsed;
+// the right-side eye flips all of its linked ones together. "Our Headers"
+// separately collapses just the Our Header column inside Header Mapping.
+const SECTION_LINKS = {
+  mapping: ['Header Mapping', 'Mapping Rule'],
+  place: ['Header Place', 'Place Rule'],
+}
 
 const REAL_GROUPS = ['design_system', 'compulsory', 'prefill']
 const SHEET_LABELS = { design_system: 'Product details', compulsory: 'Compulsory', prefill: 'Brand Details' }
@@ -189,6 +200,7 @@ async function extractSessionHeaders(XLSX, wb, session) {
   // (defaults to row 5) — see its own comment.
   const dropdownDataStartIdx = parseRowInput(session.dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1)
   const dataRows = aoa.slice(Math.max(headerRowIdx + 1, dropdownDataStartIdx))
+  const resolveDropdown = createDropdownSourceResolver(XLSX, wb, session.dataSheetName, rawRow.map((c) => splitHeaderCell(c).label))
   const seen = new Set()
   const rawHeaders = []
   const rawHeaderNotes = {}
@@ -207,7 +219,7 @@ async function extractSessionHeaders(XLSX, wb, session) {
     const note = cellNote || (isectionNote && !isPlaceholderLabel(isectionNote) ? isectionNote : '')
     if (note) rawHeaderNotes[label] = note
     if (groupRowFilled[i]) rawHeaderGroupLabels[label] = groupRowFilled[i]
-    const values = detectColumnDropdownValues(dataRows, i, label)
+    const values = resolveDropdown(i, label, headerRowIdx) || detectColumnDropdownValues(dataRows, i, label)
     if (values) dropdownColumns[label] = { sheetName: session.dataSheetName, columnName: label, values }
   }
   return { rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns }
@@ -461,6 +473,15 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [headerSettingsId, setHeaderSettingsId] = useState(null) // Our Header dictionary id whose OurHeaderSettingsModal is open, or null
   const [previewRule, setPreviewRule] = useState(null) // { type: 'mapping'|'place', item } — the sidebar rule currently previewed, or null
   const [previewApplying, setPreviewApplying] = useState(false)
+  const [hiddenSections, setHiddenSections] = useState({}) // { [sidebar section title]: true } — see SECTION_LINKS
+  const isLinkHidden = (link) => SECTION_LINKS[link].some((k) => hiddenSections[k])
+  function toggleSection(key) {
+    setHiddenSections((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+  function toggleLinkedSections(link) {
+    const next = !isLinkHidden(link)
+    setHiddenSections((prev) => ({ ...prev, ...Object.fromEntries(SECTION_LINKS[link].map((k) => [k, next])) }))
+  }
   const [ourHeaderDropdownDefaults, setOurHeaderDropdownDefaults] = useState({}) // { [ourHeaderId]: string[] } — session-local, see handleUpdateOurHeaderSettings
 
   // The flat state above (workbook…dropdownColumns/presetData/categoriesData)
@@ -676,6 +697,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setExtraction({ stage: 'Parsing workbook…', current: 0, total: 0 })
     await yieldToPaint()
     const wb = XLSX.read(buf, { type: 'array' })
+    // Real Excel list dropdowns — SheetJS CE drops these, see sheetDataValidations.js
+    wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
     const meta = []
     for (let i = 0; i < wb.SheetNames.length; i++) {
       const name = wb.SheetNames[i]
@@ -753,6 +776,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       try {
         const buf = await file.arrayBuffer()
         const wb = XLSX.read(buf, { type: 'array' })
+        wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
         const meta = wb.SheetNames.map((name) => {
           const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 })
           return {
@@ -928,6 +952,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         parseRowInput(dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1),
       )
       const dataRows = aoa.slice(dropdownDataStartIdx)
+      // Real Excel dropdowns / Allowed Values sheet first — a template's fill
+      // rows are often still empty, leaving the filled-values heuristic nothing.
+      const resolveDropdown = createDropdownSourceResolver(XLSX, workbook, dataSheetName, rawRow.map((c) => splitHeaderCell(c).label))
       const seen = new Set()
       const out = []
       const notes = {}
@@ -949,7 +976,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         const note = cellNote || (isectionNote && !isPlaceholderLabel(isectionNote) ? isectionNote : '')
         if (note) notes[label] = note
         if (groupRowFilled[i]) groupLabels[label] = groupRowFilled[i]
-        const values = detectColumnDropdownValues(dataRows, i, label)
+        const values = resolveDropdown(i, label, headerRowIdx) || detectColumnDropdownValues(dataRows, i, label)
         if (values) cols[label] = { sheetName: dataSheetName, columnName: label, values }
       }
       if (cancelled) return
@@ -1715,6 +1742,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           previewRule={previewRule}
           onPreviewMapping={(item) => setPreviewRule((prev) => (prev?.item?.id === item.id ? null : { type: 'mapping', item }))}
           onPreviewPlace={(item) => setPreviewRule((prev) => (prev?.item?.id === item.id ? null : { type: 'place', item }))}
+          hiddenSections={hiddenSections}
+          onToggleSection={toggleSection}
         />
 
         <div className="min-w-0 flex-1 space-y-4">
@@ -1764,35 +1793,39 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           )}
 
           <div>
-            <h2 className="mb-2 text-[15px] font-semibold text-foreground">Header Mapping</h2>
-            {previewRule?.type === 'mapping' && (
-              <RulePreviewPanel
-                type="mapping"
-                rule={previewRule.item}
-                ourHeaders={ourHeaders}
-                onApply={applyPreviewRule}
-                applying={previewApplying}
-                onClose={() => setPreviewRule(null)}
-              />
+            <SectionEyeTitle title="Header Mapping" hidden={isLinkHidden('mapping')} onToggle={() => toggleLinkedSections('mapping')} />
+            {!isLinkHidden('mapping') && (
+              <>
+                {previewRule?.type === 'mapping' && (
+                  <RulePreviewPanel
+                    type="mapping"
+                    rule={previewRule.item}
+                    ourHeaders={ourHeaders}
+                    onApply={applyPreviewRule}
+                    applying={previewApplying}
+                    onClose={() => setPreviewRule(null)}
+                  />
+                )}
+                <BulkMappingGrid
+                  unmappedRawHeaders={unmappedRawHeaders}
+                  commonHeaderKeys={commonHeaderInfo.keys}
+                  ourHeaders={ourHeaders}
+                  mappedHeaders={activeMapped}
+                  onMap={handleMap}
+                  onUnmap={handleUnmap}
+                  onOpenSettings={setModalId}
+                  onOpenRawHeaderSettings={openSettingsForRawHeader}
+                  onOpenOurHeaderSettings={setHeaderSettingsId}
+                  categoryForOurHeaderId={categoryForOurHeaderId}
+                  categoryOrder={categoryOrder}
+                  ourHeaderCollapsed={!!hiddenSections['Our Headers']}
+                />
+              </>
             )}
-            <BulkMappingGrid
-              unmappedRawHeaders={unmappedRawHeaders}
-              commonHeaderKeys={commonHeaderInfo.keys}
-              ourHeaders={ourHeaders}
-              mappedHeaders={activeMapped}
-              onMap={handleMap}
-              onUnmap={handleUnmap}
-              onOpenSettings={setModalId}
-              onOpenRawHeaderSettings={openSettingsForRawHeader}
-              onOpenOurHeaderSettings={setHeaderSettingsId}
-              categoryForOurHeaderId={categoryForOurHeaderId}
-              categoryOrder={categoryOrder}
-            />
           </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-[15px] font-semibold text-foreground">Header Place</h2>
+            <SectionEyeTitle title="Header Place" hidden={isLinkHidden('place')} onToggle={() => toggleLinkedSections('place')}>
               <button
                 type="button"
                 onClick={autoPlaceHeaders}
@@ -1801,18 +1834,22 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
               >
                 Auto-place
               </button>
-            </div>
-            {previewRule?.type === 'place' && (
-              <RulePreviewPanel
-                type="place"
-                rule={previewRule.item}
-                ourHeaders={ourHeaders}
-                onApply={applyPreviewRule}
-                applying={previewApplying}
-                onClose={() => setPreviewRule(null)}
-              />
+            </SectionEyeTitle>
+            {!isLinkHidden('place') && (
+              <>
+                {previewRule?.type === 'place' && (
+                  <RulePreviewPanel
+                    type="place"
+                    rule={previewRule.item}
+                    ourHeaders={ourHeaders}
+                    onApply={applyPreviewRule}
+                    applying={previewApplying}
+                    onClose={() => setPreviewRule(null)}
+                  />
+                )}
+                <BulkPlaceGrid headers={mappedOnly} onMove={handleMoveHeader} onOpenSettings={setModalId} />
+              </>
             )}
-            <BulkPlaceGrid headers={mappedOnly} onMove={handleMoveHeader} onOpenSettings={setModalId} />
           </div>
 
           {/* <div>
