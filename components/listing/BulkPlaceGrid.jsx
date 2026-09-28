@@ -22,12 +22,38 @@ const SECTIONS = [
 ]
 const sectionKeyOf = (h) => h.uiBucket || h.group || 'unassigned'
 
+// Pure version of a drop — moves `ourHeaderId` into the target section
+// (group + uiBucket), inserted before/after `beforeOurHeaderId` (or appended
+// when null), and re-numbers that section's positions 0..n-1. Shared by the
+// live placement (BulkTemplateDesign's handleMoveHeader) and the Place Rule
+// editor (RulePreviewPanel), so both behave identically.
+export function moveHeaderInList(list, ourHeaderId, group, uiBucket, beforeOurHeaderId, after) {
+  const targetSectionId = uiBucket || group || 'unassigned'
+  const moved = list.find((m) => m.ourHeaderId === ourHeaderId)
+  if (!moved) return list
+  const targetCards = list
+    .filter((m) => m.ourHeaderId !== ourHeaderId && sectionKeyOf(m) === targetSectionId)
+    .sort((a, b) => a.position - b.position)
+  let insertAt = targetCards.length
+  if (beforeOurHeaderId) {
+    const idx = targetCards.findIndex((m) => m.ourHeaderId === beforeOurHeaderId)
+    if (idx !== -1) insertAt = after ? idx + 1 : idx
+  }
+  targetCards.splice(insertAt, 0, { ...moved, group, uiBucket })
+  const posById = new Map(targetCards.map((m, idx) => [m.ourHeaderId, idx]))
+  return list.map((m) => {
+    if (m.ourHeaderId === ourHeaderId) return { ...m, group, uiBucket, position: posById.get(ourHeaderId) }
+    return posById.has(m.ourHeaderId) ? { ...m, position: posById.get(m.ourHeaderId) } : m
+  })
+}
+
 // `headers` = [{ourHeaderId, ourHeaderLabel, group, position, uiBucket}].
 // `onMove(ourHeaderId, group, uiBucket, beforeOurHeaderId, after)` — called
 // on every drop, whether it lands on a section (beforeOurHeaderId null,
 // appends at the end) or on another card (inserts before/after it, per
 // `after` — same left-half/right-half convention as /new's own onCardDrop).
-export default function BulkPlaceGrid({ headers, onMove, onOpenSettings }) {
+// `readOnly` = same look, no dragging (a saved Place Rule's preview).
+export default function BulkPlaceGrid({ headers, onMove, onOpenSettings, readOnly = false }) {
   const [search, setSearch] = useState('')
   const [dragId, setDragId] = useState(null)
   const [dragOverSec, setDragOverSec] = useState(null)
@@ -75,9 +101,9 @@ export default function BulkPlaceGrid({ headers, onMove, onOpenSettings }) {
         return (
           <div
             key={sec.id}
-            onDragOver={(e) => { e.preventDefault(); if (dragOverSec !== sec.id) setDragOverSec(sec.id) }}
-            onDragLeave={() => setDragOverSec((c) => (c === sec.id ? null : c))}
-            onDrop={(e) => onSectionDrop(e, sec)}
+            onDragOver={readOnly ? undefined : (e) => { e.preventDefault(); if (dragOverSec !== sec.id) setDragOverSec(sec.id) }}
+            onDragLeave={readOnly ? undefined : () => setDragOverSec((c) => (c === sec.id ? null : c))}
+            onDrop={readOnly ? undefined : (e) => onSectionDrop(e, sec)}
             className="mb-3"
           >
             <div className="mb-1.5 flex items-center gap-2 text-[14px] font-bold" style={{ color: sec.color }}>
@@ -86,17 +112,17 @@ export default function BulkPlaceGrid({ headers, onMove, onOpenSettings }) {
             </div>
             <div className={`-mx-1 flex flex-wrap rounded-md py-0.5 ${dragOverSec === sec.id ? 'bg-card-hover' : ''}`}>
               {cards.length === 0 ? (
-                <p className="px-1 py-1 text-[12.5px] italic text-subtle">Drop headers here.</p>
+                <p className="px-1 py-1 text-[12.5px] italic text-subtle">{readOnly ? 'Nothing placed.' : 'Drop headers here.'}</p>
               ) : (
                 cards.map((h) => (
                   <div
                     key={h.ourHeaderId}
-                    draggable
-                    onDragStart={(e) => { setDragId(h.ourHeaderId); e.dataTransfer.setData('text/plain', h.ourHeaderId); e.dataTransfer.effectAllowed = 'move' }}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => onCardDrop(e, h)}
-                    onDragEnd={() => { setDragId(null); setDragOverSec(null) }}
-                    className="mb-1 shrink-0 grow-0 basis-full cursor-grab px-1 active:cursor-grabbing sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5"
+                    draggable={!readOnly}
+                    onDragStart={readOnly ? undefined : (e) => { setDragId(h.ourHeaderId); e.dataTransfer.setData('text/plain', h.ourHeaderId); e.dataTransfer.effectAllowed = 'move' }}
+                    onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
+                    onDrop={readOnly ? undefined : (e) => onCardDrop(e, h)}
+                    onDragEnd={readOnly ? undefined : () => { setDragId(null); setDragOverSec(null) }}
+                    className={`mb-1 shrink-0 grow-0 basis-full px-1 sm:basis-1/2 md:basis-1/3 lg:basis-1/4 xl:basis-1/5 ${readOnly ? '' : 'cursor-grab active:cursor-grabbing'}`}
                   >
                     <div className="flex items-center gap-1 rounded-md border bg-background px-2 py-1" style={{ borderColor: sec.color }}>
                       <span className="min-w-0 flex-1 truncate text-[12px] text-foreground" title={h.ourHeaderLabel}>{h.ourHeaderLabel}</span>

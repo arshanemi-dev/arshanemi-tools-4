@@ -10,7 +10,7 @@ import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
 import BulkRuleSidebar from './BulkRuleSidebar'
 import BulkMappingGrid from './BulkMappingGrid'
-import BulkPlaceGrid from './BulkPlaceGrid'
+import BulkPlaceGrid, { moveHeaderInList } from './BulkPlaceGrid'
 import HeaderBucketPreview from './HeaderBucketPreview'
 import ExtractionProgressModal from './ExtractionProgressModal'
 import NewDesignColumnModal from './NewDesignColumnModal'
@@ -19,16 +19,31 @@ import SheetHeaderTree from './SheetHeaderTree'
 import RulePreviewPanel from './RulePreviewPanel'
 import DropdownValuesForm from './DropdownValuesForm'
 import { readDataValidationLists, createDropdownSourceResolver } from '@/lib/sheetDataValidations'
-import SectionEyeTitle from './SectionEyeTitle'
+import OurHeadersPanel from './OurHeadersPanel'
 
-// Sidebar eye toggles (keyed by section title) → the right-side section they
-// also collapse to title-only. Any linked sidebar section hidden = collapsed;
-// the right-side eye flips all of its linked ones together. "Our Headers"
-// separately collapses just the Our Header column inside Header Mapping.
+// Sidebar sections (keyed by title) toggled by their eye OR title. Accordion:
+// opening one closes every other; paired sections (Header Mapping + Mapping
+// Rule, Header Place + Place Rule) always open/close together as one.
+const SECTION_GROUPS = [
+  ['Ecommerce Brands'],
+  ['Templates'],
+  ['Uploaded Sheets'],
+  ['Our Headers'],
+  ['Header Mapping', 'Mapping Rule'],
+  ['Header Place', 'Place Rule'],
+]
+// Sidebar section(s) → the right-side section they also hide entirely,
+// title included (the sidebar is the only toggle). "Templates" also hides
+// the top Upload button. "Our Headers" shows its own OurHeadersPanel — the
+// Our Header column inside Header Mapping stays with Header Mapping.
 const SECTION_LINKS = {
+  templates: ['Templates'],
+  ourHeaders: ['Our Headers'],
   mapping: ['Header Mapping', 'Mapping Rule'],
   place: ['Header Place', 'Place Rule'],
 }
+// Everything starts closed except the first sidebar section, Ecommerce Brands.
+const DEFAULT_HIDDEN_SECTIONS = Object.fromEntries(SECTION_GROUPS.flat().map((k) => [k, k !== 'Ecommerce Brands']))
 
 const REAL_GROUPS = ['design_system', 'compulsory', 'prefill']
 const SHEET_LABELS = { design_system: 'Product details', compulsory: 'Compulsory', prefill: 'Brand Details' }
@@ -473,14 +488,17 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [headerSettingsId, setHeaderSettingsId] = useState(null) // Our Header dictionary id whose OurHeaderSettingsModal is open, or null
   const [previewRule, setPreviewRule] = useState(null) // { type: 'mapping'|'place', item } — the sidebar rule currently previewed, or null
   const [previewApplying, setPreviewApplying] = useState(false)
-  const [hiddenSections, setHiddenSections] = useState({}) // { [sidebar section title]: true } — see SECTION_LINKS
-  const isLinkHidden = (link) => SECTION_LINKS[link].some((k) => hiddenSections[k])
+  const [hiddenSections, setHiddenSections] = useState(DEFAULT_HIDDEN_SECTIONS) // { [sidebar section title]: true } — see SECTION_LINKS
+  const isLinkHidden = (link) => SECTION_LINKS[link].every((k) => hiddenSections[k])
   function toggleSection(key) {
-    setHiddenSections((prev) => ({ ...prev, [key]: !prev[key] }))
-  }
-  function toggleLinkedSections(link) {
-    const next = !isLinkHidden(link)
-    setHiddenSections((prev) => ({ ...prev, ...Object.fromEntries(SECTION_LINKS[link].map((k) => [k, next])) }))
+    setHiddenSections((prev) => {
+      const group = SECTION_GROUPS.find((g) => g.includes(key)) || [key]
+      // Closing → just this group; opening → this group only, all others closed.
+      if (!prev[key]) return { ...prev, ...Object.fromEntries(group.map((k) => [k, true])) }
+      const next = Object.fromEntries(SECTION_GROUPS.flat().map((k) => [k, true]))
+      for (const k of group) next[k] = false
+      return next
+    })
   }
   const [ourHeaderDropdownDefaults, setOurHeaderDropdownDefaults] = useState({}) // { [ourHeaderId]: string[] } — session-local, see handleUpdateOurHeaderSettings
 
@@ -1173,26 +1191,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // is null when dropped directly on the section (append at the end);
   // `after` says which side of that card it landed on.
   function handleMoveHeader(ourHeaderId, group, uiBucket, beforeOurHeaderId, after) {
-    setActiveMapped((prev) => {
-      const sectionKeyOf = (m) => m.uiBucket || m.group || 'unassigned'
-      const targetSectionId = uiBucket || group || 'unassigned'
-      const moved = prev.find((m) => m.ourHeaderId === ourHeaderId)
-      if (!moved) return prev
-      const targetCards = prev
-        .filter((m) => m.ourHeaderId !== ourHeaderId && sectionKeyOf(m) === targetSectionId)
-        .sort((a, b) => a.position - b.position)
-      let insertAt = targetCards.length
-      if (beforeOurHeaderId) {
-        const idx = targetCards.findIndex((m) => m.ourHeaderId === beforeOurHeaderId)
-        if (idx !== -1) insertAt = after ? idx + 1 : idx
-      }
-      targetCards.splice(insertAt, 0, { ...moved, group, uiBucket })
-      const posById = new Map(targetCards.map((m, idx) => [m.ourHeaderId, idx]))
-      return prev.map((m) => {
-        if (m.ourHeaderId === ourHeaderId) return { ...m, group, uiBucket, position: posById.get(ourHeaderId) }
-        return posById.has(m.ourHeaderId) ? { ...m, position: posById.get(m.ourHeaderId) } : m
-      })
-    })
+    setActiveMapped((prev) => moveHeaderInList(prev, ourHeaderId, group, uiBucket, beforeOurHeaderId, after))
   }
 
   // Default placement, button-triggered (not automatic on map) — every
@@ -1265,8 +1264,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       if (!res.ok) throw new Error(data?.error || 'Failed to create header')
       setOurHeaders((prev) => [...prev, data.header])
       addToast(`"${label}" added to Our Headers.`, 'success')
+      return true
     } catch (err) {
       addToast(err.message, 'error')
+      return false
     } finally {
       setCreatingHeader(false)
     }
@@ -1392,9 +1393,15 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Apply failed')
+      // The hub's apply only returns group/position — Big/Images (uiBucket)
+      // come straight off the rule's own saved entries when it has them.
+      const savedById = new Map((item.entries || []).map((e) => [e.ourHeaderId, e]))
       setActiveMapped((prev) => prev.map((m) => {
         const hit = data.placed.find((p) => p.ourHeaderId === m.ourHeaderId)
-        return hit ? { ...m, group: hit.group, position: hit.position } : m
+        if (!hit) return m
+        const saved = savedById.get(m.ourHeaderId)
+        const uiBucket = saved && 'uiBucket' in saved ? saved.uiBucket || null : m.uiBucket
+        return { ...m, group: hit.group, position: hit.position, uiBucket }
       }))
       addToast(`Placed ${data.placed.length} header(s).`, 'success')
     } catch (err) {
@@ -1417,6 +1424,53 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setPreviewRule(null)
     } finally {
       setPreviewApplying(false)
+    }
+  }
+
+  // Rule preview's Edit mode (RulePreviewPanel): Save overwrites the
+  // previewed rule's entries in place (hub PATCH already accepts `entries`);
+  // Save As creates a NEW rule of the same kind/scope under the typed name.
+  // Either way the preview switches to what the server returned and the
+  // sidebar lists re-fetch. Return true on success so the panel can leave
+  // edit mode.
+  const ruleApiBase = (type) => (type === 'mapping' ? '/api/listing-tools/mapping/rules' : '/api/listing-tools/mapping/place-rules')
+  const ruleNamePrefix = `${(presetData.marketplaceName || 'Marketplace').trim()}_`
+  async function savePreviewRule(entries) {
+    if (!previewRule) return false
+    const { type, item } = previewRule
+    try {
+      const res = await fetch(`${ruleApiBase(type)}/${item.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'Save failed')
+      setPreviewRule({ type, item: data.rule })
+      setRefreshToken((t) => t + 1)
+      addToast(`"${item.name}" saved.`, 'success')
+      return true
+    } catch (err) {
+      addToast(err.message, 'error')
+      return false
+    }
+  }
+  async function saveAsPreviewRule(name, entries) {
+    if (!previewRule) return false
+    const { type, item } = previewRule
+    const categories = Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [`category${n}`, item[`category${n}`] || null]))
+    try {
+      const res = await fetch(ruleApiBase(type), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: item.kind, name, marketplaceName: item.marketplaceName || presetData.marketplaceName, ...categories, entries }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'Save As failed')
+      setPreviewRule({ type, item: data.rule })
+      setRefreshToken((t) => t + 1)
+      addToast(`Saved as "${name}".`, 'success')
+      return true
+    } catch (err) {
+      addToast(err.message, 'error')
+      return false
     }
   }
 
@@ -1447,7 +1501,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   async function savePlaceAs(kind, name) {
     const label = kind === 'preset' ? 'Header Place' : 'Place Rule'
     if (!name) return
-    const entries = mappedOnly.filter((m) => m.group).map((m) => ({ ourHeaderId: m.ourHeaderId, group: m.group, position: m.position }))
+    const entries = mappedOnly.filter((m) => m.group).map((m) => ({ ourHeaderId: m.ourHeaderId, group: m.group, position: m.position, uiBucket: m.uiBucket || null }))
     if (entries.length === 0) { addToast('Place at least one header first.', 'error'); return }
     try {
       const res = await fetch('/api/listing-tools/mapping/place-rules', {
@@ -1698,7 +1752,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         </div>
       
         <div className="flex flex-wrap items-center gap-2">
-          <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
+          {!isLinkHidden('templates') && (
+            <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
+          )}
           <button
             type="button"
             onClick={handleSave}
@@ -1737,7 +1793,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           onSaveMappingRule={(name) => saveMappingAs('rule', name)}
           onSavePlacePreset={(name) => savePlaceAs('preset', name)}
           onSavePlaceRule={(name) => savePlaceAs('rule', name)}
-          ruleNamePrefix={`${(presetData.marketplaceName || 'Marketplace').trim()}_`}
+          ruleNamePrefix={ruleNamePrefix}
           refreshToken={refreshToken}
           previewRule={previewRule}
           onPreviewMapping={(item) => setPreviewRule((prev) => (prev?.item?.id === item.id ? null : { type: 'mapping', item }))}
@@ -1747,42 +1803,57 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         />
 
         <div className="min-w-0 flex-1 space-y-4">
-          <TemplateNamingFields
-            isEditMode={isEditMode}
-            presetData={presetData}
-            setPresetData={setPresetData}
-            categoriesData={categoriesData}
-            setCategoriesData={setCategoriesData}
-            templateNameInput={templateNameInput}
-            setTemplateNameInput={setTemplateNameInput}
-            templateNumber={templateNumber}
-            currentPreset={null}
-            nameAlwaysComposed
-          />
-
-          <SheetSelectorFields
-            sheetMeta={sheetMeta}
-            dataSheetName={dataSheetName}
-            onSelectDataSheet={selectDataSheet}
-            dataGroupRow={dataGroupRow}
-            setDataGroupRow={setDataGroupRow}
-            dataHeaderRow={dataHeaderRow}
-            setDataHeaderRow={setDataHeaderRow}
-            dataIsectionRow={dataIsectionRow}
-            setDataIsectionRow={setDataIsectionRow}
-            hideDropdownReference
-            dropdownDataStartRow={dropdownDataStartRow}
-            setDropdownDataStartRow={setDropdownDataStartRow}
-          />
-          {Object.keys(dropdownColumns).length > 0 && (
-            <div className="-mt-2 space-y-2 px-1">
-              <p className="text-[12.5px] text-subtle">
-                {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} auto-detected as dropdowns from this sheet&apos;s own data — spot-check the values below:
-              </p>
-              <DropdownValuesForm
-                fields={Object.fromEntries(Object.entries(dropdownColumns).map(([label, col]) => [label, col.values]))}
+          {/* Sidebar "Templates" eye → name inputs, sheet selection and the
+              top Upload button all hide/show together (SECTION_LINKS). */}
+          {!isLinkHidden('templates') && (
+            <div className="space-y-4">
+              <TemplateNamingFields
+                isEditMode={isEditMode}
+                presetData={presetData}
+                setPresetData={setPresetData}
+                categoriesData={categoriesData}
+                setCategoriesData={setCategoriesData}
+                templateNameInput={templateNameInput}
+                setTemplateNameInput={setTemplateNameInput}
+                templateNumber={templateNumber}
+                currentPreset={null}
+                nameAlwaysComposed
               />
+
+              <SheetSelectorFields
+                sheetMeta={sheetMeta}
+                dataSheetName={dataSheetName}
+                onSelectDataSheet={selectDataSheet}
+                dataGroupRow={dataGroupRow}
+                setDataGroupRow={setDataGroupRow}
+                dataHeaderRow={dataHeaderRow}
+                setDataHeaderRow={setDataHeaderRow}
+                dataIsectionRow={dataIsectionRow}
+                setDataIsectionRow={setDataIsectionRow}
+                hideDropdownReference
+                dropdownDataStartRow={dropdownDataStartRow}
+                setDropdownDataStartRow={setDropdownDataStartRow}
+              />
+              {Object.keys(dropdownColumns).length > 0 && (
+                <div className="-mt-2 space-y-2 px-1">
+                  <p className="text-[12.5px] text-subtle">
+                    {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} auto-detected as dropdowns from this sheet&apos;s own data — spot-check the values below:
+                  </p>
+                  <DropdownValuesForm
+                    fields={Object.fromEntries(Object.entries(dropdownColumns).map(([label, col]) => [label, col.values]))}
+                  />
+                </div>
+              )}
             </div>
+          )}
+
+          {!isLinkHidden('ourHeaders') && (
+            <OurHeadersPanel
+              ourHeaders={ourHeaders}
+              onCreateHeader={handleCreateHeader}
+              onDeleteHeader={handleDeleteHeader}
+              creating={creatingHeader}
+            />
           )}
 
           {sheetsIndex.length >= 2 && (
@@ -1792,87 +1863,75 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             </div>
           )}
 
-          <div>
-            <SectionEyeTitle title="Header Mapping" hidden={isLinkHidden('mapping')} onToggle={() => toggleLinkedSections('mapping')} />
-            {!isLinkHidden('mapping') && (
-              <>
-                {previewRule?.type === 'mapping' && (
-                  <RulePreviewPanel
-                    type="mapping"
-                    rule={previewRule.item}
-                    ourHeaders={ourHeaders}
-                    onApply={applyPreviewRule}
-                    applying={previewApplying}
-                    onClose={() => setPreviewRule(null)}
-                  />
-                )}
-                <BulkMappingGrid
-                  unmappedRawHeaders={unmappedRawHeaders}
-                  commonHeaderKeys={commonHeaderInfo.keys}
+          {!isLinkHidden('mapping') && (
+            <div>
+              <h2 className="mb-2 text-[15px] font-semibold text-foreground">Header Mapping</h2>
+              {previewRule?.type === 'mapping' && (
+                <RulePreviewPanel
+                  key={previewRule.item.id}
+                  type="mapping"
+                  rule={previewRule.item}
                   ourHeaders={ourHeaders}
-                  mappedHeaders={activeMapped}
-                  onMap={handleMap}
-                  onUnmap={handleUnmap}
-                  onOpenSettings={setModalId}
-                  onOpenRawHeaderSettings={openSettingsForRawHeader}
-                  onOpenOurHeaderSettings={setHeaderSettingsId}
-                  categoryForOurHeaderId={categoryForOurHeaderId}
-                  categoryOrder={categoryOrder}
-                  ourHeaderCollapsed={!!hiddenSections['Our Headers']}
+                  onApply={applyPreviewRule}
+                  applying={previewApplying}
+                  onClose={() => setPreviewRule(null)}
+                  onSave={savePreviewRule}
+                  onSaveAs={saveAsPreviewRule}
+                  ruleNamePrefix={ruleNamePrefix}
                 />
-              </>
-            )}
-          </div>
+              )}
+              <BulkMappingGrid
+                unmappedRawHeaders={unmappedRawHeaders}
+                commonHeaderKeys={commonHeaderInfo.keys}
+                ourHeaders={ourHeaders}
+                mappedHeaders={activeMapped}
+                onMap={handleMap}
+                onUnmap={handleUnmap}
+                onOpenSettings={setModalId}
+                onOpenRawHeaderSettings={openSettingsForRawHeader}
+                onOpenOurHeaderSettings={setHeaderSettingsId}
+                categoryForOurHeaderId={categoryForOurHeaderId}
+                categoryOrder={categoryOrder}
+              />
+            </div>
+          )}
 
-          <div>
-            <SectionEyeTitle title="Header Place" hidden={isLinkHidden('place')} onToggle={() => toggleLinkedSections('place')}>
-              <button
-                type="button"
-                onClick={autoPlaceHeaders}
-                title="Place every mapped-but-unplaced header by default: Image → Images; same name as its raw sheet column → Compulsory; a canonical name you curated yourself → Product Details"
-                className="rounded-full border border-divider bg-card px-3 py-1 text-[12px] font-medium text-foreground hover:bg-card-hover"
-              >
-                Auto-place
-              </button>
-            </SectionEyeTitle>
-            {!isLinkHidden('place') && (
-              <>
-                {previewRule?.type === 'place' && (
-                  <RulePreviewPanel
-                    type="place"
-                    rule={previewRule.item}
-                    ourHeaders={ourHeaders}
-                    onApply={applyPreviewRule}
-                    applying={previewApplying}
-                    onClose={() => setPreviewRule(null)}
-                  />
-                )}
-                <BulkPlaceGrid headers={mappedOnly} onMove={handleMoveHeader} onOpenSettings={setModalId} />
-              </>
-            )}
-          </div>
+          {!isLinkHidden('place') && (
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-[15px] font-semibold text-foreground">Header Place</h2>
+                <button
+                  type="button"
+                  onClick={autoPlaceHeaders}
+                  title="Place every mapped-but-unplaced header by default: Image → Images; same name as its raw sheet column → Compulsory; a canonical name you curated yourself → Product Details"
+                  className="rounded-full border border-divider bg-card px-3 py-1 text-[12px] font-medium text-foreground hover:bg-card-hover"
+                >
+                  Auto-place
+                </button>
+              </div>
+              {previewRule?.type === 'place' && (
+                <RulePreviewPanel
+                  key={previewRule.item.id}
+                  type="place"
+                  rule={previewRule.item}
+                  ourHeaders={ourHeaders}
+                  onApply={applyPreviewRule}
+                  applying={previewApplying}
+                  onClose={() => setPreviewRule(null)}
+                  onSave={savePreviewRule}
+                  onSaveAs={saveAsPreviewRule}
+                  ruleNamePrefix={ruleNamePrefix}
+                />
+              )}
+              <BulkPlaceGrid headers={mappedOnly} onMove={handleMoveHeader} onOpenSettings={setModalId} />
+            </div>
+          )}
 
           {/* <div>
             <h2 className="mb-2 text-[15px] font-semibold text-foreground">Preview</h2>
             <HeaderBucketPreview headers={previewHeaders} />
           </div> */}
 
-          {/* Save belongs at the END of the flow — sheet selection, mapping
-              and placement all happen first; this is the same handleSave
-              the top toolbar button calls, just also reachable without
-              scrolling back up once everything below is filled in. */}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              title="Saves every template in the working set at once — not just whichever one is open right now"
-              className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60 hover:bg-[#c91753]"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
-              Save All{templatesList.length > 1 ? ` (${templatesList.length})` : ''}
-            </button>
-          </div>
         </div>
       </div>
 

@@ -173,7 +173,6 @@ function MappedHeaderCard({ m, onUnmap, onOpenSettings }) {
 export default function BulkMappingGrid({
   unmappedRawHeaders, commonHeaderKeys, ourHeaders, mappedHeaders, onMap, onUnmap, onOpenSettings,
   onOpenRawHeaderSettings, onOpenOurHeaderSettings, categoryForOurHeaderId, categoryOrder,
-  ourHeaderCollapsed = false, // sidebar "Our Headers" eye is off — show this column's title only
 }) {
   const [selected, setSelected] = useState(() => new Set())
   const [searchCommon, setSearchCommon] = useState('')
@@ -245,11 +244,6 @@ export default function BulkMappingGrid({
         </div>
       </div>
 
-      {ourHeaderCollapsed ? (
-        <div className="flex-none rounded-[7px] border border-divider p-2.5">
-          <h4 className="text-[13px] font-semibold text-foreground">Our Header ({ourFiltered.length})</h4>
-        </div>
-      ) : (
       <div className={colCls}>
         <h4 className="mb-2 text-[13px] font-semibold text-foreground">Our Header ({ourFiltered.length})</h4>
         <SearchBox value={searchOur} onChange={setSearchOur} />
@@ -272,7 +266,6 @@ export default function BulkMappingGrid({
           )}
         </div>
       </div>
-      )}
 
       <div className={colCls}>
         <h4 className="mb-2 text-[13px] font-semibold text-foreground">Map Header ({mappedFiltered.length})</h4>

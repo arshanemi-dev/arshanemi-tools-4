@@ -8,12 +8,14 @@ const addBtnCls = `${titleBtnCls} bg-[#16a34a] text-white hover:bg-[#128a3e]`
 const deleteBtnCls = `${titleBtnCls} border border-[#e59a9a] text-[#d14343] hover:bg-[#fdeeee]`
 const eyeBtnCls = `${titleBtnCls} text-subtle hover:bg-card-hover`
 const checkboxCls = 'h-3.5 w-3.5 flex-shrink-0 accent-[#16a34a]'
+// Section titles toggle their section too, same as the eye button.
+const titleToggleCls = 'min-w-0 flex-1 cursor-pointer select-none truncate text-[12.5px] font-semibold text-foreground hover:text-[#16a34a]'
 
 // Single shared confirmation modal — every delete in this sidebar (rules,
 // presets, headers, uploaded sheets) routes through the one `requestConfirm`
 // passed down from BulkRuleSidebar instead of the browser's own
 // window.confirm(), so there's only ever one dialog instance on screen.
-function ConfirmDialog({ state, onConfirm, onCancel }) {
+export function ConfirmDialog({ state, onConfirm, onCancel }) {
   if (!state) return null
   return (
     <div
@@ -211,7 +213,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
   return (
     <div className="border-b border-divider pb-3 mb-3">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
-        <h3 className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{title}</h3>
+        <h3 onClick={onToggleHidden} title={hidden ? `Show ${title}` : `Hide ${title}`} className={titleToggleCls}>{title}</h3>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
@@ -467,7 +469,7 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
   return (
     <div className="border-b border-divider pb-3 mb-3">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
-        <h3 className="text-[12.5px] font-semibold text-foreground">Our Headers</h3>
+        <h3 onClick={onToggleHidden} title={hidden ? "Show Our Headers" : "Hide Our Headers"} className={titleToggleCls}>Our Headers</h3>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
@@ -621,9 +623,8 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
 // Task 2: display finalName when available (marketplace_cat1…cat6_version).
 // Task 3: the marketplace name is the first underscore-separated token of
 // finalName (composeFinalName always writes marketplaceName first).
-function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selectedMarketplace }) {
+function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selectedMarketplace, hidden, onToggleHidden }) {
   const [search, setSearch] = useState('')
-  const [hidden, setHidden] = useState(false)
 
   // Search against both finalName and templateName so nothing gets lost.
   const filtered = templates.filter((t) => {
@@ -645,11 +646,11 @@ function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selec
   return (
     <div className="border-b border-divider pb-3 mb-3">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
-        <h3 className="text-[12.5px] font-semibold text-foreground">Templates</h3>
+        <h3 onClick={onToggleHidden} title={hidden ? "Show Templates" : "Hide Templates"} className={titleToggleCls}>Templates</h3>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={() => setHidden(!hidden)}
+            onClick={onToggleHidden}
             title={hidden ? "Show Templates" : "Hide Templates"}
             className={eyeBtnCls}
           >
@@ -712,8 +713,7 @@ function TemplatesSection({ templates, activeTemplateId, onSelectTemplate, selec
   )
 }
 
-function UploadedSheetsSection({ uploadedFiles, onClearUpload, requestConfirm }) {
-  const [hidden, setHidden] = useState(false)
+function UploadedSheetsSection({ uploadedFiles, onClearUpload, requestConfirm, hidden, onToggleHidden }) {
   const [search, setSearch] = useState('')
 
   if (!uploadedFiles || uploadedFiles.length === 0) return null
@@ -727,14 +727,14 @@ function UploadedSheetsSection({ uploadedFiles, onClearUpload, requestConfirm })
   return (
     <div className="border-b border-divider pb-3 mb-3 hidden">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
-        <h3 className="text-[12.5px] font-semibold text-foreground flex items-center gap-1.5 min-w-0 truncate">
+        <h3 onClick={onToggleHidden} title={hidden ? "Show Uploaded Sheets" : "Hide Uploaded Sheets"} className={`${titleToggleCls} flex items-center gap-1.5`}>
           <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
           <span className="truncate">Uploaded Sheets ({uploadedFiles.length})</span>
         </h3>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={() => setHidden(!hidden)}
+            onClick={onToggleHidden}
             title={hidden ? "Show Uploaded Sheets" : "Hide Uploaded Sheets"}
             className={eyeBtnCls}
           >
@@ -800,9 +800,8 @@ const DEFAULT_MARKETPLACES = [
   'Tata CLiQ',
 ]
 
-function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
+function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace, hidden, onToggleHidden }) {
   const [marketplaces, setMarketplaces] = useState(DEFAULT_MARKETPLACES)
-  const [hidden, setHidden] = useState(false)
   const [adding, setAdding] = useState(false)
   const [addDraft, setAddDraft] = useState('')
 
@@ -849,11 +848,11 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace }) {
   return (
     <div className="border-b border-divider pb-3 mb-3">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2 mb-2">
-        <h3 className="text-[12.5px] font-semibold text-foreground truncate">Ecommerce Brands</h3>
+        <h3 onClick={onToggleHidden} title={hidden ? "Show Brands" : "Hide Brands"} className={titleToggleCls}>Ecommerce Brands</h3>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button
             type="button"
-            onClick={() => setHidden(!hidden)}
+            onClick={onToggleHidden}
             title={hidden ? "Show Brands" : "Hide Brands"}
             className={eyeBtnCls}
           >
@@ -957,17 +956,20 @@ export default function BulkRuleSidebar({
       <MarketplaceTabsSection
         selectedMarketplace={selectedMarketplace}
         onSelectMarketplace={onSelectMarketplace}
+        {...eyeProps('Ecommerce Brands')}
       />
       <TemplatesSection
         templates={templates}
         activeTemplateId={activeTemplateId}
         onSelectTemplate={onSelectTemplate}
         selectedMarketplace={selectedMarketplace}
+        {...eyeProps('Templates')}
       />
       <UploadedSheetsSection
         uploadedFiles={uploadedFiles}
         onClearUpload={onClearUpload}
         requestConfirm={requestConfirm}
+        {...eyeProps('Uploaded Sheets')}
       />
       <OurHeadersSection
         ourHeaders={ourHeaders}
