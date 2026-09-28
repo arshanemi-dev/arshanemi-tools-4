@@ -60,7 +60,7 @@ export default function BulkPlaceGrid({ headers, onMove, onOpenSettings }) {
 
   return (
     <div>
-      <div className="relative mb-3 max-w-xs">
+      <div className="relative mb-3 max-w-xs hidden">
         <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-subtle" />
         <input
           value={search}

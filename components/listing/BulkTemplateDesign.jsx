@@ -973,6 +973,18 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     () => (isEditMode ? rawHeaders : [...new Set([...rawHeaders, ...Object.values(uploadSessions).flatMap((s) => s.rawHeaders || [])])]),
     [isEditMode, rawHeaders, uploadSessions],
   )
+  // Same pooling as allRawHeaders — uploadMappedHeaders is a shared,
+  // batch-wide pool too (Map Header can show a header mapped from ANY
+  // uploaded file, not just the one currently active), so handleMap's own
+  // dropdown-detection lookup needs every session's dropdownColumns, not
+  // just the active one. Sessions spread first so the current flat state
+  // (freshest) wins on overlap.
+  const allDropdownColumns = useMemo(
+    () => (isEditMode
+      ? dropdownColumns
+      : Object.assign({}, ...Object.values(uploadSessions).map((s) => s.dropdownColumns || {}), dropdownColumns)),
+    [isEditMode, dropdownColumns, uploadSessions],
+  )
   const unmappedRawHeaders = allRawHeaders.filter((h) => !activeMapped.some((m) => m.sheetHeaders.includes(h)))
   const mappedOnly = activeMapped.filter((m) => m.sheetHeaders.length > 0)
   const previewHeaders = mappedOnly.map((m) => ({ id: m.ourHeaderId, label: m.ourHeaderLabel, group: m.group }))
@@ -1078,17 +1090,24 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       }
       // Session-local dropdown defaults set via the Our Header's own
       // Settings button (openSettingsForRawHeader/OurHeaderSettingsModal),
-      // if any, seed this mapping's starting values.
+      // if explicitly set, win — an explicit choice beats a guess.
+      // Otherwise fall back to whatever this raw column's own data was
+      // auto-detected as (dropdownColumns, detectColumnDropdownValues):
+      // without this fallback the values were extracted but never actually
+      // reached the mapped header, so its Settings modal opened on Text
+      // with nothing in the Dropdown tab to show.
       const defaults = ourHeaderDropdownDefaults[ourHeaderId]
+      const detected = allDropdownColumns[sheetHeader]?.values
+      const dropdownValues = defaults && defaults.length ? [...defaults] : (detected && detected.length ? [...detected] : [])
       return [...prev, {
         ourHeaderId,
         ourHeaderLabel: oh.label,
-        dataType: oh.dataType,
+        dataType: oh.dataType && oh.dataType !== 'text' ? oh.dataType : (dropdownValues.length ? 'dropdown' : oh.dataType),
         isUniqueKeyPart: !!oh.isUniqueKeyPart,
         sheetHeaders: [sheetHeader],
         group: null,
         position: 0,
-        dropdownValues: defaults && defaults.length ? [...defaults] : [],
+        dropdownValues,
       }]
     })
   }
@@ -1267,10 +1286,19 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // column) — it has no canonical identity yet, so this finds an existing
   // Our Header with the same name (case-insensitive) to configure, or
   // creates one on the fly (same as the sidebar's quick-add) so there's
-  // something to actually open settings on.
+  // something to actually open settings on. Also seeds this raw column's
+  // own auto-detected dropdown values (allDropdownColumns) into the
+  // session-local defaults the modal reads from, if nothing's been set for
+  // it yet — otherwise the values were extracted but the modal opened
+  // empty anyway, since it has no other way to know which raw column this
+  // Our Header even came from.
   async function openSettingsForRawHeader(rawLabel) {
+    const detected = allDropdownColumns[rawLabel]?.values
     const existing = ourHeaders.find((h) => h.label.trim().toLowerCase() === rawLabel.trim().toLowerCase())
     if (existing) {
+      if (detected && detected.length && !(ourHeaderDropdownDefaults[existing.id]?.length)) {
+        setOurHeaderDropdownDefaults((prev) => ({ ...prev, [existing.id]: [...detected] }))
+      }
       setHeaderSettingsId(existing.id)
       return
     }
@@ -1283,6 +1311,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Failed to create header')
       setOurHeaders((prev) => [...prev, data.header])
+      if (detected && detected.length) {
+        setOurHeaderDropdownDefaults((prev) => ({ ...prev, [data.header.id]: [...detected] }))
+      }
       setHeaderSettingsId(data.header.id)
     } catch (err) {
       addToast(err.message, 'error')
@@ -1728,7 +1759,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           {sheetsIndex.length >= 2 && (
             <div>
               <h2 className="mb-2 text-[15px] font-semibold text-foreground">Sheets &amp; Headers</h2>
-              <SheetHeaderTree marketplaceGroups={marketplaceGroups} />
+              <SheetHeaderTree marketplaceGroups={marketplaceGroups} dropdownColumns={allDropdownColumns} />
             </div>
           )}
 
@@ -1836,10 +1867,17 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       {headerSettingsId && (() => {
         const settingsHeader = ourHeaders.find((h) => h.id === headerSettingsId)
         if (!settingsHeader) return null
+        const settingsValues = ourHeaderDropdownDefaults[headerSettingsId] || []
+        // Same "detected values imply the Dropdown tab" reasoning as
+        // handleMap — otherwise the modal opens on Text with the seeded
+        // values sitting unseen one tab over.
+        const effectiveType = settingsHeader.dataType && settingsHeader.dataType !== 'text'
+          ? settingsHeader.dataType
+          : (settingsValues.length ? 'dropdown' : settingsHeader.dataType)
         return (
           <OurHeaderSettingsModal
-            header={settingsHeader}
-            dropdownValues={ourHeaderDropdownDefaults[headerSettingsId] || []}
+            header={{ ...settingsHeader, dataType: effectiveType }}
+            dropdownValues={settingsValues}
             onUpdate={(patch) => handleUpdateOurHeaderSettings(headerSettingsId, patch)}
             onClose={() => setHeaderSettingsId(null)}
           />

@@ -39,7 +39,7 @@ export default function OurHeaderSettingsModal({ header, dropdownValues, onUpdat
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="my-auto flex max-h-[85vh] w-[520px] max-w-full flex-col rounded-2xl border border-divider bg-background p-5 shadow-2xl sm:p-6">
+      <div className="my-auto flex max-h-[85vh] w-[600px] max-w-full flex-col rounded-2xl border border-divider bg-background p-5 shadow-2xl sm:p-6">
         <div className="mb-3.5 flex flex-shrink-0 items-center justify-between gap-3 border-b border-divider pb-3">
           <b className="min-w-0 flex-1 truncate text-left text-[18px] font-semibold text-foreground">
             {header.label || 'Untitled header'}
