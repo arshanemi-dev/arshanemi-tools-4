@@ -362,110 +362,10 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
   )
 }
 
-// "Our Headers" — the global canonical dictionary. The title's + adds a new
-// blank, editable row (click it again for another — several can be open at
-// once); type a name and confirm to create it. Existing headers get the
-// same rename/delete affordances the rule sections already have. The
-// search box still supports the quicker "type a name that doesn't exist,
-// press Enter" shortcut too.
-function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creating, onOpenSettings, requestConfirm, hidden, onToggleHidden }) {
-  const [search, setSearch] = useState('')
-  const [drafts, setDrafts] = useState([]) // [{tempId, text}]
-  const [editingId, setEditingId] = useState(null)
-  const [editDraft, setEditDraft] = useState('')
-  const [busyId, setBusyId] = useState(null)
-  const [deletingAll, setDeletingAll] = useState(false)
-  const [selected, setSelected] = useState(() => new Set())
-  const [deletingSelected, setDeletingSelected] = useState(false)
-
-  const q = search.trim().toLowerCase()
-  const filtered = ourHeaders.filter((h) => h.label.toLowerCase().includes(q))
-  const exactMatch = ourHeaders.some((h) => h.label.toLowerCase() === q)
-
-  function commitSearchCreate() {
-    if (!search.trim() || exactMatch || creating) return
-    onCreateHeader(search.trim())
-    setSearch('')
-  }
-
-  function addDraftRow() {
-    setDrafts((prev) => [...prev, { tempId: `draft_${Date.now()}_${prev.length}`, text: '' }])
-  }
-  function updateDraft(tempId, text) {
-    setDrafts((prev) => prev.map((d) => (d.tempId === tempId ? { ...d, text } : d)))
-  }
-  function removeDraft(tempId) {
-    setDrafts((prev) => prev.filter((d) => d.tempId !== tempId))
-  }
-  function commitDraft(tempId) {
-    const draft = drafts.find((d) => d.tempId === tempId)
-    if (!draft?.text.trim()) return
-    onCreateHeader(draft.text.trim())
-    removeDraft(tempId)
-  }
-
-  function startEdit(h) {
-    setEditingId(h.id)
-    setEditDraft(h.label)
-  }
-  async function commitEdit(id) {
-    const label = editDraft.trim()
-    if (!label) return
-    setBusyId(id)
-    try {
-      await onRenameHeader(id, label)
-      setEditingId(null)
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  function toggleSelected(id) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function handleDelete(id) {
-    requestConfirm('Delete this header?', async () => {
-      setBusyId(id)
-      try {
-        await onDeleteHeader(id)
-      } finally {
-        setBusyId(null)
-      }
-    })
-  }
-  function handleDeleteAll() {
-    if (ourHeaders.length === 0) return
-    requestConfirm(`Delete all ${ourHeaders.length} header(s) in Our Headers? This can't be undone.`, async () => {
-      setDeletingAll(true)
-      try {
-        await onDeleteAllHeaders()
-        setSelected(new Set())
-      } finally {
-        setDeletingAll(false)
-      }
-    })
-  }
-  function handleDeleteSelected() {
-    if (selected.size === 0) return
-    requestConfirm(`Delete ${selected.size} selected header(s)? This can't be undone.`, async () => {
-      setDeletingSelected(true)
-      try {
-        for (const id of selected) {
-          try { await onDeleteHeader(id) } catch { /* best-effort */ }
-        }
-        setSelected(new Set())
-      } finally {
-        setDeletingSelected(false)
-      }
-    })
-  }
-
+// "Our Headers" — just the title/eye here now. The list itself (add,
+// rename, settings, delete, delete all) lives on the right side in
+// OurHeadersPanel, shown while this section is open.
+function OurHeadersSection({ hidden, onToggleHidden }) {
   return (
     <div className="border-b border-divider pb-3 mb-3">
       <div className="flex items-center justify-between gap-1.5 px-2 pt-2">
@@ -479,137 +379,8 @@ function OurHeadersSection({ ourHeaders, onCreateHeader, onRenameHeader, onDelet
           >
             {hidden ? <EyeOff className="h-3.5 w-3.5 text-subtle" /> : <Eye className="h-3.5 w-3.5 text-[#16a34a]" />}
           </button>
-          <button type="button" onClick={addDraftRow} title="Add a new header" className={addBtnCls}>
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" onClick={handleDeleteAll} disabled={deletingAll || ourHeaders.length === 0} title="Delete every header" className={`${deleteBtnCls} disabled:opacity-40`}>
-            {deletingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-          </button>
         </div>
       </div>
-      {!hidden && (
-        <>
-          <div className="relative mx-2 mt-1.5 mb-1.5">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-subtle" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && commitSearchCreate()}
-          placeholder="Search or type to create…"
-          className="w-full rounded-md border border-divider bg-background pl-6 pr-2 py-1 text-[12px] outline-none focus:border-accent-light"
-        />
-      </div>
-      {q && !exactMatch && (
-        <button
-          type="button"
-          onClick={commitSearchCreate}
-          disabled={creating}
-          className="mx-2 mb-1.5 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md border border-dashed border-accent/40 px-2 py-1 text-[11.5px] text-accent-hover hover:bg-accent/5 disabled:opacity-60"
-        >
-          {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-          Create &ldquo;{search.trim()}&rdquo;
-        </button>
-      )}
-      {selected.size > 0 && (
-        <div className="mx-2 mb-1.5 flex items-center justify-between gap-2 rounded-md bg-[#fdeeee] px-2 py-1">
-          <span className="text-[11px] font-medium text-[#d14343]">{selected.size} selected</span>
-          <button
-            type="button"
-            onClick={handleDeleteSelected}
-            disabled={deletingSelected}
-            className="flex items-center gap-1 rounded-full bg-[#d14343] px-2 py-0.5 text-[10.5px] font-semibold text-white hover:bg-[#b93737] disabled:opacity-60"
-          >
-            {deletingSelected ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-            Delete Selected
-          </button>
-        </div>
-      )}
-      <ul className="max-h-52 space-y-0.5 overflow-y-auto">
-        {drafts.map((d) => (
-          <li key={d.tempId} className="flex items-center gap-1 rounded-md px-2 py-1">
-            <input
-              value={d.text}
-              onChange={(e) => updateDraft(d.tempId, e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && commitDraft(d.tempId)}
-              autoFocus
-              placeholder="New header name…"
-              className="min-w-0 flex-1 rounded border border-divider bg-background px-1.5 py-0.5 text-[12px] outline-none focus:border-accent-light"
-            />
-            <button type="button" onClick={() => commitDraft(d.tempId)} disabled={creating} className="text-emerald-600">
-              <Check className="h-3 w-3" />
-            </button>
-            <button type="button" onClick={() => removeDraft(d.tempId)} className="text-subtle">
-              <X className="h-3 w-3" />
-            </button>
-          </li>
-        ))}
-        {filtered.length === 0 && drafts.length === 0 ? (
-          <p className="px-2 text-[11.5px] italic text-subtle">No headers yet.</p>
-        ) : (
-          filtered.map((h) => (
-            <li key={h.id} className="group flex items-center gap-1 rounded-md px-2 py-1 hover:bg-card-hover">
-              {editingId === h.id ? (
-                <>
-                  <input
-                    value={editDraft}
-                    onChange={(e) => setEditDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && commitEdit(h.id)}
-                    autoFocus
-                    className="min-w-0 flex-1 rounded border border-divider bg-background px-1.5 py-0.5 text-[12px] outline-none focus:border-accent-light"
-                  />
-                  <button type="button" onClick={() => commitEdit(h.id)} disabled={busyId === h.id} className="text-emerald-600">
-                    {busyId === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                  </button>
-                  <button type="button" onClick={() => setEditingId(null)} className="text-subtle">
-                    <X className="h-3 w-3" />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(h.id)}
-                    onChange={() => toggleSelected(h.id)}
-                    className={checkboxCls}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground" title={h.label}>
-                    {h.label}
-                  </span>
-                  {onOpenSettings && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenSettings(h.id)}
-                      title="Header settings — type, dropdown default values, unique key…"
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-subtle opacity-0 group-hover:opacity-100 hover:bg-card-hover"
-                    >
-                      <Settings className="h-3 w-3" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => startEdit(h)}
-                    title="Rename"
-                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-subtle opacity-0 group-hover:opacity-100 hover:bg-card-hover"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(h.id)}
-                    disabled={busyId === h.id}
-                    title="Delete"
-                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[#d14343] opacity-0 group-hover:opacity-100 hover:bg-[#fdeeee]"
-                  >
-                    {busyId === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                  </button>
-                </>
-              )}
-            </li>
-          ))
-        )}
-      </ul>
-        </>
-      )}
     </div>
   )
 }
@@ -925,7 +696,6 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace, hidd
 // one shared ConfirmDialog instead of window.confirm() — Templates is the
 // one section left as a plain picker (no add/delete/checkboxes at all).
 export default function BulkRuleSidebar({
-  ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, creatingHeader, onOpenHeaderSettings,
   templates, activeTemplateId, onSelectTemplate,
   uploadedFiles, onClearUpload,
   selectedMarketplace, onSelectMarketplace,
@@ -971,17 +741,7 @@ export default function BulkRuleSidebar({
         requestConfirm={requestConfirm}
         {...eyeProps('Uploaded Sheets')}
       />
-      <OurHeadersSection
-        ourHeaders={ourHeaders}
-        onCreateHeader={onCreateHeader}
-        onRenameHeader={onRenameHeader}
-        onDeleteHeader={onDeleteHeader}
-        onDeleteAllHeaders={onDeleteAllHeaders}
-        creating={creatingHeader}
-        onOpenSettings={onOpenHeaderSettings}
-        requestConfirm={requestConfirm}
-        {...eyeProps('Our Headers')}
-      />
+      <OurHeadersSection {...eyeProps('Our Headers')} />
       <RuleSection title="Header Mapping" apiBase="/api/listing-tools/mapping/rules" kind="preset" onApply={onApplyMappingPreset} onSaveNew={onSaveMappingPreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} {...eyeProps('Header Mapping')} />
       <RuleSection title="Mapping Rule" apiBase="/api/listing-tools/mapping/rules" kind="rule" onApply={onApplyMappingRule} onSaveNew={onSaveMappingRule} refreshToken={refreshToken} showApplyAll selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewMapping} previewedId={previewRule?.item?.id} {...eyeProps('Mapping Rule')} />
       <RuleSection title="Header Place" apiBase="/api/listing-tools/mapping/place-rules" kind="preset" onApply={onApplyPlacePreset} onSaveNew={onSavePlacePreset} refreshToken={refreshToken} selectedMarketplace={selectedMarketplace} ruleNamePrefix={ruleNamePrefix} requestConfirm={requestConfirm} onPreview={onPreviewPlace} previewedId={previewRule?.item?.id} {...eyeProps('Header Place')} />

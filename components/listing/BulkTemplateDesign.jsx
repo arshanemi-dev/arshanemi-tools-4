@@ -18,7 +18,9 @@ import OurHeaderSettingsModal from './OurHeaderSettingsModal'
 import SheetHeaderTree from './SheetHeaderTree'
 import RulePreviewPanel from './RulePreviewPanel'
 import DropdownValuesForm from './DropdownValuesForm'
-import { readDataValidationLists, createDropdownSourceResolver } from '@/lib/sheetDataValidations'
+import DropdownDebugPanel from './DropdownDebugPanel'
+import { readDataValidationLists } from '@/lib/sheetDataValidations'
+import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
 import OurHeadersPanel from './OurHeadersPanel'
 
 // Sidebar sections (keyed by title) toggled by their eye OR title. Accordion:
@@ -107,37 +109,35 @@ function parseRowInput(raw, fallbackIdx) {
   if (raw === '' || raw === null || raw === undefined || Number.isNaN(n)) return fallbackIdx
   return Math.max(0, Math.trunc(n) - 1)
 }
-// Same value-filtering rule as TemplateSettingsWizard.jsx's own
-// isPlaceholderValue — duplicated (not imported) for the same reason
-// cleanLabel/computeDropdownRowDefaults already are (see cleanLabel's own
-// comment): that file pulls in a lot of unrelated Kanban-era state.
-function isPlaceholderValue(value, headerName = '') {
-  if (value === undefined || value === null) return true
-  const str = String(value).trim()
-  if (str === '') return true
-  if (headerName && str.toLowerCase() === headerName.trim().toLowerCase()) return true
-  const isInstruction = /^(select|choose|enter|type|pick)(\s+\S+)*$/i.test(str)
-  const isHeaderDefault = /^product\s+.*%$/i.test(str)
-  const isNullMarker = /^(none|null|undefined|n[\/\s-]?a|tbd|-+|\.+)$/i.test(str)
-  return isInstruction || isHeaderDefault || isNullMarker
+// A session's Validations-sheet settings (modes + 1-based inputs, as typed)
+// → resolveValidationLayout's options. See that function for the modes.
+function validationOptions(session) {
+  const headerLine = parseRowInput(session.dropdownHeaderRow, 0)
+  return {
+    sheetMode: session.dropdownSheetMode === 'pinned' ? 'pinned' : 'auto',
+    sheetName: session.dropdownSheetName || '',
+    layoutMode: session.dropdownLayoutMode || 'auto',
+    orientation: session.dropdownOrientation === 'horizontal' ? 'horizontal' : 'vertical',
+    headerLine,
+    valuesLine: Math.max(headerLine + 1, parseRowInput(session.dropdownValuesRow, headerLine + 1)),
+  }
 }
-// No separate Validations/Dropdown Reference Sheet — a column counts as a
-// dropdown when the Product fill sheet's OWN data for it repeats (2-20
-// distinct real values, fewer distinct values than filled rows) rather than
-// reading like free text. Same rule as TemplateSettingsWizard.jsx's own
-// Task 3 own-column auto-detect, just promoted here from a no-match
-// fallback to the only strategy — same sheet, same column, no cross-sheet
-// name-matching needed at all.
-function detectColumnDropdownValues(dataRows, colIdx, headerLabel) {
-  const raw = dataRows
-    .map((r) => r[colIdx])
-    .filter((v) => v !== undefined && v !== null && String(v).trim() !== '')
-    .map((v) => String(v).trim())
-    .filter((v) => v.length < 70 && !isPlaceholderValue(v, headerLabel))
-  if (raw.length < 2) return null
-  const distinct = [...new Set(raw)]
-  if (distinct.length < 2 || distinct.length > 20 || distinct.length >= raw.length) return null
-  return distinct
+// The marketplace rule's Validations sheet + rows (1-based there) as a
+// 0-based layout hint — wins ties in auto-detect, never overrides evidence.
+function ruleValidationHint(rule) {
+  return { orientation: 'vertical', headerLine: rule.dropdownHeaderRow - 1, valuesLine: rule.dropdownValuesRow - 1 }
+}
+const NO_VALIDATION_INPUTS = { dropdownSheetName: '', dropdownOrientation: 'vertical', dropdownHeaderRow: '', dropdownValuesRow: '' }
+// 0-based resolved layout (or null) → the values the sheet picker, toggle
+// and row/column inputs display (1-based strings).
+function layoutToInputs(layout) {
+  if (!layout) return NO_VALIDATION_INPUTS
+  return {
+    dropdownSheetName: layout.sheetName,
+    dropdownOrientation: layout.orientation,
+    dropdownHeaderRow: String(layout.headerLine + 1),
+    dropdownValuesRow: String(layout.valuesLine + 1),
+  }
 }
 // A merged Group Row cell only populates its first column in the raw data —
 // carry the last seen label forward across the blanks so every column
@@ -188,16 +188,33 @@ function computeCommonHeaderInfo(sheets) {
   return { keys, labels }
 }
 
-// Eagerly extracts one session's headers/I section notes/dropdown columns
-// in a single pass — same read as the combined extraction effect further
-// down, but for a file that ISN'T the currently active session. A
-// multi-file upload needs every file's headers pooled into the shared
-// Unmapped Headers list right away (see allRawHeaders), not only whichever
-// file happens to be selected first — no per-column progress reporting
-// here, unlike the live effect, since this runs quietly in the background
-// per file during the upload's own "Reading file N of M…" stage.
-async function extractSessionHeaders(XLSX, wb, session) {
-  const empty = { rawHeaders: [], rawHeaderNotes: {}, rawHeaderGroupLabels: {}, dropdownColumns: {} }
+// One session's headers / I section notes / group labels / dropdown columns
+// in a single pass — shared by the live extraction effect (the active file,
+// with `onProgress` driving the progress modal) and the multi-file upload
+// (every file eagerly, quietly, so the whole batch's headers pool into
+// Unmapped Headers right away — see allRawHeaders). A different sheet or
+// row number means different headers, so everything is always re-read
+// together rather than patched piecemeal.
+//
+// Header Row and I section are allowed to be configured as the SAME number
+// (Meesho's default is both = 3) — that's not "read this row twice", it
+// means "1st line is Headers, 2nd line (right after) is I section". Only
+// offset when they're equal; different rows (Flipkart's header=1/
+// isection=3) read literally.
+//
+// Dropdown values come from lib/dropdownExtraction.js — Excel's own list
+// validations, the Validations sheet (Vertical or Horizontal), Allowed
+// Values blocks, and finally repeats in the fill sheet's own input rows,
+// which start at the editable "Dropdown Data Row" (defaults to row 5, never
+// earlier than the row after the headers). The Validations sheet's layout
+// is resolved HERE, against the headers just read (resolveValidationLayout)
+// — whatever the user hasn't overridden is auto — and the effective sheet/
+// orientation/lines come back in the result for the inputs to display.
+// Typed (manual) lines are never echoed back, so a half-typed number isn't
+// rewritten mid-keystroke. `session.brand` picks the marketplace rule whose
+// Validations sheet/rows are the tie-winning hint.
+async function extractSessionSheet(XLSX, wb, session, onProgress) {
+  const empty = { rawHeaders: [], rawHeaderNotes: {}, rawHeaderGroupLabels: {}, dropdownColumns: {}, dropdownReport: null }
   if (!session.dataSheetName) return empty
   const ws = wb.Sheets[session.dataSheetName]
   if (!ws) return empty
@@ -209,35 +226,64 @@ async function extractSessionHeaders(XLSX, wb, session) {
   const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(session.dataIsectionRow, headerRowIdx + 1)
   const rawRow = aoa[headerRowIdx] || []
   const isectionRow = aoa[isectionRowIdx] || []
+  // Group Row, forward-filled across merged cells — kept on each raw header
+  // for session fidelity; autoPlaceHeaders no longer reads it.
   const groupRowIdx = parseRowInput(session.dataGroupRow, headerRowIdx)
   const groupRowFilled = forwardFillRow(aoa[groupRowIdx] || [], rawRow.length)
-  // Same editable "Dropdown Data Row" as the live extraction effect below
-  // (defaults to row 5) — see its own comment.
-  const dropdownDataStartIdx = parseRowInput(session.dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1)
-  const dataRows = aoa.slice(Math.max(headerRowIdx + 1, dropdownDataStartIdx))
-  const resolveDropdown = createDropdownSourceResolver(XLSX, wb, session.dataSheetName, rawRow.map((c) => splitHeaderCell(c).label))
+  const dataStartIdx = Math.max(
+    headerRowIdx + 1,
+    parseRowInput(session.dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1),
+  )
   const seen = new Set()
   const rawHeaders = []
   const rawHeaderNotes = {}
   const rawHeaderGroupLabels = {}
-  const dropdownColumns = {}
+  const headerCells = []
   for (let i = 0; i < rawRow.length; i++) {
+    if (onProgress) {
+      onProgress('Extracting headers…', i + 1, rawRow.length)
+      if (i > 0 && i % 12 === 0) await yieldToPaint()
+    }
     const { label, description: cellNote } = splitHeaderCell(rawRow[i])
     if (!label || isPlaceholderLabel(label)) continue
     const key = label.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
     rawHeaders.push(label)
+    headerCells.push({ label, colIdx: i })
     // In-cell note (same cell, split by line/lead-in) wins over the I
     // section row's note when both exist.
     const isectionNote = cleanLabel(isectionRow[i])
     const note = cellNote || (isectionNote && !isPlaceholderLabel(isectionNote) ? isectionNote : '')
     if (note) rawHeaderNotes[label] = note
     if (groupRowFilled[i]) rawHeaderGroupLabels[label] = groupRowFilled[i]
-    const values = resolveDropdown(i, label, headerRowIdx) || detectColumnDropdownValues(dataRows, i, label)
-    if (values) dropdownColumns[label] = { sheetName: session.dataSheetName, columnName: label, values }
   }
-  return { rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns }
+  if (onProgress) {
+    onProgress('Reading dropdown values…', rawHeaders.length, rawHeaders.length)
+    await yieldToPaint()
+  }
+  const rule = detectMarketplaceSheetDefaults(wb.SheetNames, session.brand || '')
+  const options = validationOptions(session)
+  const validation = resolveValidationLayout(XLSX, wb, {
+    ...options,
+    dataSheetName: session.dataSheetName,
+    productLabels: rawHeaders,
+    hintSheetName: rule.dropdownSheetName,
+    hintLayout: ruleValidationHint(rule),
+  })
+  const { columns, report } = extractDropdownColumns(XLSX, wb, {
+    dataSheetName: session.dataSheetName,
+    headerCells,
+    headerRowIdx,
+    dataRows: aoa.slice(dataStartIdx),
+    dataStartIdx,
+    validation,
+  })
+  const typed = options.sheetMode === 'pinned' && options.layoutMode === 'manual'
+  return {
+    rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns: columns, dropdownReport: report,
+    ...(typed ? {} : layoutToInputs(validation)),
+  }
 }
 
 // A freshly-uploaded file's own name is usually the best hint for this
@@ -318,10 +364,10 @@ function seedFromExistingContent(content) {
   return out
 }
 
-// `dropdownColumns` — this session's own-column dropdown auto-detect (see
-// detectColumnDropdownValues/extractSessionHeaders), keyed directly by the
-// raw sheetHeader label it came from — same sheet, same column, so no
-// cross-sheet name-matching is needed, just a direct lookup. A match
+// `dropdownColumns` — this session's detected dropdown values (see
+// extractSessionSheet / lib/dropdownExtraction.js), keyed directly by the
+// raw sheetHeader label they belong to, so this is just a direct lookup
+// (any cross-sheet Validations-sheet matching already happened). A match
 // upgrades a plain 'text' dataType to 'dropdown'; an Our Header already
 // configured as dropdown/multiselect keeps its own dataType and just gets
 // the values. `rawHeaderNotes` — the I section row's text, keyed by raw
@@ -460,13 +506,28 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // own-column dropdown auto-detect — editable like every other row here,
   // defaults to DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW (row 5).
   const [dropdownDataStartRow, setDropdownDataStartRow] = useState('')
+  // The Validations sheet — a second dropdown source alongside the fill
+  // sheet's own input rows (see lib/dropdownExtraction.js). Orientation is
+  // the Vertical/Horizontal toggle; the two inputs mean rows when Vertical,
+  // columns when Horizontal (1-based). The four values below are what's
+  // DISPLAYED — effective, written back by each extraction pass — while the
+  // two modes say what the user has overridden (resolveValidationLayout):
+  // picking a sheet pins it, the toggle pins the orientation too, typing a
+  // line pins everything; Re-detect returns both to auto.
+  const [dropdownSheetName, setDropdownSheetName] = useState('')
+  const [dropdownOrientation, setDropdownOrientation] = useState('vertical')
+  const [dropdownHeaderRow, setDropdownHeaderRow] = useState('')
+  const [dropdownValuesRow, setDropdownValuesRow] = useState('')
+  const [dropdownSheetMode, setDropdownSheetMode] = useState('auto') // 'auto' | 'pinned'
+  const [dropdownLayoutMode, setDropdownLayoutMode] = useState('auto') // 'auto' | 'orientation' | 'manual'
+  const [dropdownReport, setDropdownReport] = useState(null) // lib/dropdownExtraction.js's report for the active file — feeds DropdownDebugPanel
   const [parsing, setParsing] = useState(false)
   const [extraction, setExtraction] = useState(null)
   const [sourceFileUrl, setSourceFileUrl] = useState('')
   const [rawHeaders, setRawHeaders] = useState([])
   const [rawHeaderNotes, setRawHeaderNotes] = useState({}) // { [label]: noteText } — the I section row, column-aligned to rawHeaders, see the combined extraction effect below
   const [rawHeaderGroupLabels, setRawHeaderGroupLabels] = useState({}) // { [label]: groupLabelText } — the Group Row, forward-filled and column-aligned to rawHeaders, feeds autoPlaceHeaders
-  const [dropdownColumns, setDropdownColumns] = useState({}) // { [label]: {sheetName, columnName, values} } — own-column auto-detect off the Product fill sheet itself, see detectColumnDropdownValues
+  const [dropdownColumns, setDropdownColumns] = useState({}) // { [label]: {sheetName, columnName, values, source} } — see extractSessionSheet / lib/dropdownExtraction.js
 
   const [ourHeaders, setOurHeaders] = useState([])
   const [creatingHeader, setCreatingHeader] = useState(false)
@@ -513,7 +574,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     return {
       workbook, sheetMeta, dataSheetName,
       dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow,
-      rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns, presetData, categoriesData, fileName, sourceFileUrl,
+      dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownSheetMode, dropdownLayoutMode,
+      rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns, dropdownReport, presetData, categoriesData, fileName, sourceFileUrl,
     }
   }
   function applySnapshot(session) {
@@ -524,10 +586,17 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataHeaderRow(session.dataHeaderRow)
     setDataIsectionRow(session.dataIsectionRow)
     setDropdownDataStartRow(session.dropdownDataStartRow)
+    setDropdownSheetName(session.dropdownSheetName || '')
+    setDropdownOrientation(session.dropdownOrientation || 'vertical')
+    setDropdownHeaderRow(session.dropdownHeaderRow || '')
+    setDropdownValuesRow(session.dropdownValuesRow || '')
+    setDropdownSheetMode(session.dropdownSheetMode || 'auto')
+    setDropdownLayoutMode(session.dropdownLayoutMode || 'auto')
     setRawHeaders(session.rawHeaders)
     setRawHeaderNotes(session.rawHeaderNotes || {})
     setRawHeaderGroupLabels(session.rawHeaderGroupLabels || {})
     setDropdownColumns(session.dropdownColumns || {})
+    setDropdownReport(session.dropdownReport || null)
     setPresetData(session.presetData)
     setCategoriesData(session.categoriesData)
     setFileName(session.fileName)
@@ -647,11 +716,18 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setDataHeaderRow('')
       setDataIsectionRow('')
       setDropdownDataStartRow('')
+      setDropdownSheetName('')
+      setDropdownOrientation('vertical')
+      setDropdownHeaderRow('')
+      setDropdownValuesRow('')
+      setDropdownSheetMode('auto')
+      setDropdownLayoutMode('auto')
       setSourceFileUrl('')
       setRawHeaders([])
       setRawHeaderNotes({})
       setRawHeaderGroupLabels({})
       setDropdownColumns({})
+      setDropdownReport(null)
     })()
     return () => { cancelled = true }
   }, [activeTemplateId, templatesData])
@@ -674,7 +750,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // new session never has anything to "not overwrite", so this sets
   // presetData/categoriesData directly rather than going through the
   // only-fill-empty-slots helpers above (those are for topping up an
-  // already-in-progress session from header-derived hints instead).
+  // already-in-progress session from header-derived hints instead). The
+  // Validations sheet starts fully auto — extraction picks it against the
+  // fill sheet's real headers (see extractSessionSheet).
   function buildUploadSession(file, wb, meta) {
     const { brand, categories } = extractBrandAndCategories(file.name)
     const effectiveBrand = brand || presetData.marketplaceName || selectedMarketplace
@@ -688,10 +766,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       dataHeaderRow: nextDataSheetName ? rule.dataHeaderRow : '',
       dataIsectionRow: nextDataSheetName ? rule.dataIsectionRow : '',
       dropdownDataStartRow: nextDataSheetName ? DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW : '',
+      ...NO_VALIDATION_INPUTS,
+      dropdownSheetMode: 'auto',
+      dropdownLayoutMode: 'auto',
       rawHeaders: [],
       rawHeaderNotes: {},
       rawHeaderGroupLabels: {},
       dropdownColumns: {},
+      dropdownReport: null,
       presetData: { marketplaceName: effectiveBrand, exportVersion: presetData.exportVersion || 'v1.0', description: '' },
       categoriesData: {
         category1: categories[0], category2: categories[1], category3: categories[2],
@@ -810,7 +892,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         // ends up active below) — that's what lets Header Mapping show the
         // whole batch's headers immediately instead of only after clicking
         // through each file one by one.
-        const extracted = await extractSessionHeaders(XLSX, wb, baseSession)
+        const extracted = await extractSessionSheet(XLSX, wb, { ...baseSession, brand: baseSession.presetData.marketplaceName })
         const session = { ...baseSession, ...extracted }
         sessions[fileId] = session
         entries.push({ id: fileId, templateName: file.name, finalName: file.name })
@@ -887,10 +969,13 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataHeaderRow('')
     setDataIsectionRow('')
     setDropdownDataStartRow('')
+    applyValidationInputs(NO_VALIDATION_INPUTS)
+    redetectValidation()
     setRawHeaders([])
     setRawHeaderNotes({})
     setRawHeaderGroupLabels({})
     setDropdownColumns({})
+    setDropdownReport(null)
   }
 
   function confirmClearUpload() {
@@ -902,13 +987,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // as TemplateSettingsWizard.jsx's own selectDataSheet, but rows default
   // off the current marketplace's rule (constants/sheetDefaults.js) instead
   // of one flat set of numbers, since Meesho and Flipkart/default disagree
-  // on which row is which. No Dropdown Reference Sheet picker here anymore
-  // — dropdown columns auto-detect off this same sheet's own data instead.
+  // on which row is which. A pinned Validations sheet that just became the
+  // fill sheet can't be both, so the Validations side drops back to auto.
   function currentBrand() {
     return presetData.marketplaceName || selectedMarketplace
   }
   function selectDataSheet(val) {
     setDataSheetName(val)
+    if (val && val === dropdownSheetName) redetectValidation()
     if (!val) {
       setDataGroupRow('')
       setDataHeaderRow('')
@@ -922,91 +1008,90 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataIsectionRow(rule.dataIsectionRow)
     setDropdownDataStartRow(DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW)
   }
-  // Re-reads the Product fill sheet's headers AND its own dropdown columns
-  // together, on ANY of Section 2's data-sheet inputs changing — same
-  // combined-effect idea as TemplateSettingsWizard.jsx's own rebuild effect
-  // (a different sheet or a different row number means different headers,
-  // so a partial re-read left stale data behind before). No separate
-  // Validations/Dropdown Reference Sheet to also watch — dropdown columns
-  // come from this same sheet's own data now (detectColumnDropdownValues).
-  // Header-label cleaning stays deliberately simpler than that file's
-  // splitHeaderCell (see cleanLabel's own comment).
+  function applyValidationInputs(inputs) {
+    setDropdownSheetName(inputs.dropdownSheetName)
+    setDropdownOrientation(inputs.dropdownOrientation)
+    setDropdownHeaderRow(inputs.dropdownHeaderRow)
+    setDropdownValuesRow(inputs.dropdownValuesRow)
+  }
+  // Validations sheet controls — each only records what the user overrode;
+  // the extraction effect resolves everything else against the fill
+  // sheet's real headers (resolveValidationLayout). Picking a sheet pins
+  // it (layout still auto-detected); the Vertical/Horizontal toggle pins
+  // the orientation too (best lines for it still detected — a row number
+  // doesn't carry over as a column number); typing a line pins everything.
+  function selectDropdownSheet(name) {
+    setDropdownSheetMode('pinned')
+    setDropdownLayoutMode('auto')
+    setDropdownSheetName(name)
+  }
+  function changeDropdownOrientation(orientation) {
+    setDropdownSheetMode('pinned')
+    setDropdownLayoutMode('orientation')
+    setDropdownOrientation(orientation)
+  }
+  const typeDropdownLine = (setter) => (value) => {
+    setDropdownSheetMode('pinned')
+    setDropdownLayoutMode('manual')
+    setter(value)
+  }
+  function redetectValidation() {
+    setDropdownSheetMode('auto')
+    setDropdownLayoutMode('auto')
+  }
+  const pinned = dropdownSheetMode === 'pinned'
+  // One line under the Validations sheet inputs: how the layout was arrived
+  // at and how well it lines up with this fill sheet's headers.
+  const validationNote = (() => {
+    if (!dropdownReport) return ''
+    const v = dropdownReport.validation
+    if (!v) return pinned ? '' : 'No Validations sheet detected — pick one to read it.'
+    const how = !pinned ? 'Auto-detected' : dropdownLayoutMode === 'manual' ? 'Typed layout' : dropdownLayoutMode === 'orientation' ? 'Lines auto-detected' : 'Layout auto-detected'
+    return `${how} · ${v.matched} of ${dropdownReport.headers.length} headers matched.`
+  })()
+  // Only the Validations-sheet values the user actually controls in the
+  // current modes — the rest are effective values the extraction writes
+  // back, which must not re-trigger it.
+  const validationKey = [
+    dropdownSheetMode,
+    pinned ? dropdownSheetName : '',
+    pinned ? dropdownLayoutMode : '',
+    pinned && dropdownLayoutMode !== 'auto' ? dropdownOrientation : '',
+    pinned && dropdownLayoutMode === 'manual' ? `${dropdownHeaderRow}/${dropdownValuesRow}` : '',
+  ].join('|')
+  // Re-reads the Product fill sheet's headers AND every dropdown source
+  // together (extractSessionSheet), on ANY of Section 2's inputs changing —
+  // fill sheet rows or Validations sheet overrides alike — then shows the
+  // effective Validations layout it resolved.
   useEffect(() => {
     if (!workbook || !dataSheetName) return
     let cancelled = false
     ;(async () => {
       const XLSX = await import('xlsx')
       if (cancelled) return
-      const ws = workbook.Sheets[dataSheetName]
-      if (!ws) return
-      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
-      const headerRowIdx = parseRowInput(dataHeaderRow, HEADER_ROW_INDEX)
-      // The Header Row and I section inputs are allowed to be configured as
-      // the SAME number (Meesho's default is both = 2) — that's not "read
-      // this row twice", it means "1st line is Headers, 2nd line (right
-      // after) is I section". Only actually offset when they're equal;
-      // configured as different rows (e.g. Flipkart's header=1/isection=3)
-      // reads isection literally at its own row, no adjustment.
-      const sameConfiguredRow = String(dataHeaderRow ?? '').trim() !== ''
-        && String(dataIsectionRow ?? '').trim() !== ''
-        && Number(dataHeaderRow) === Number(dataIsectionRow)
-      const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(dataIsectionRow, headerRowIdx + 1)
-      const rawRow = aoa[headerRowIdx] || []
-      const isectionRow = aoa[isectionRowIdx] || []
-      // Group Row, forward-filled across merged cells — kept on each raw
-      // header for session fidelity; autoPlaceHeaders no longer reads it
-      // (see that function's own comment on why).
-      const groupRowIdx = parseRowInput(dataGroupRow, headerRowIdx)
-      const groupRowFilled = forwardFillRow(aoa[groupRowIdx] || [], rawRow.length)
-      // Dropdown detection reads this SAME sheet's own data rows for each
-      // column (detectColumnDropdownValues) — no separate Validations/
-      // Dropdown Reference Sheet involved at all. Real dropdown-enabled
-      // data starts at the "Dropdown Data Row" input (defaults to row 5,
-      // same for every marketplace — Meesho and Flipkart both confirmed the
-      // same, unlike Header Row/I section which differ — but editable like
-      // every other row here), never earlier than the header row itself.
-      const dropdownDataStartIdx = Math.max(
-        headerRowIdx + 1,
-        parseRowInput(dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1),
+      const result = await extractSessionSheet(
+        XLSX,
+        workbook,
+        {
+          dataSheetName, dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow,
+          dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownSheetMode, dropdownLayoutMode,
+          brand: currentBrand(),
+        },
+        (stage, current, total) => { if (!cancelled) setExtraction({ stage, current, total }) },
       )
-      const dataRows = aoa.slice(dropdownDataStartIdx)
-      // Real Excel dropdowns / Allowed Values sheet first — a template's fill
-      // rows are often still empty, leaving the filled-values heuristic nothing.
-      const resolveDropdown = createDropdownSourceResolver(XLSX, workbook, dataSheetName, rawRow.map((c) => splitHeaderCell(c).label))
-      const seen = new Set()
-      const out = []
-      const notes = {}
-      const groupLabels = {}
-      const cols = {}
-      const total = rawRow.length
-      for (let i = 0; i < total; i++) {
-        setExtraction({ stage: 'Extracting headers…', current: i + 1, total })
-        if (i > 0 && i % 12 === 0) await yieldToPaint()
-        const { label, description: cellNote } = splitHeaderCell(rawRow[i])
-        if (!label || isPlaceholderLabel(label)) continue
-        const key = label.toLowerCase()
-        if (seen.has(key)) continue
-        seen.add(key)
-        out.push(label)
-        // In-cell note (same cell, split by line/lead-in) wins over the I
-        // section row's note when both exist.
-        const isectionNote = cleanLabel(isectionRow[i])
-        const note = cellNote || (isectionNote && !isPlaceholderLabel(isectionNote) ? isectionNote : '')
-        if (note) notes[label] = note
-        if (groupRowFilled[i]) groupLabels[label] = groupRowFilled[i]
-        const values = resolveDropdown(i, label, headerRowIdx) || detectColumnDropdownValues(dataRows, i, label)
-        if (values) cols[label] = { sheetName: dataSheetName, columnName: label, values }
-      }
       if (cancelled) return
-      setRawHeaders(out)
-      setRawHeaderNotes(notes)
-      setRawHeaderGroupLabels(groupLabels)
-      setDropdownColumns(cols)
-      setExtraction({ stage: 'Done', current: out.length, total: out.length })
+      setRawHeaders(result.rawHeaders)
+      setRawHeaderNotes(result.rawHeaderNotes)
+      setRawHeaderGroupLabels(result.rawHeaderGroupLabels)
+      setDropdownColumns(result.dropdownColumns)
+      setDropdownReport(result.dropdownReport)
+      if ('dropdownSheetName' in result) applyValidationInputs(result)
+      setExtraction({ stage: 'Done', current: result.rawHeaders.length, total: result.rawHeaders.length })
       setTimeout(() => { if (!cancelled) setExtraction(null) }, 500)
     })()
     return () => { cancelled = true }
-  }, [workbook, dataSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownDataStartRow])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Validations-sheet state enters through validationKey (only what the user controls in the current modes); depending on those values directly would re-run this on its own write-back. currentBrand() only picks a tie-break hint.
+  }, [workbook, dataSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownDataStartRow, validationKey])
 
   // Every uploaded file's own raw headers pooled into one set — Header
   // Mapping/Place work off the whole batch, not just whichever file happens
@@ -1136,8 +1221,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       // Session-local dropdown defaults set via the Our Header's own
       // Settings button (openSettingsForRawHeader/OurHeaderSettingsModal),
       // if explicitly set, win — an explicit choice beats a guess.
-      // Otherwise fall back to whatever this raw column's own data was
-      // auto-detected as (dropdownColumns, detectColumnDropdownValues):
+      // Otherwise fall back to whatever this raw column was auto-detected
+      // as (dropdownColumns, see extractSessionSheet):
       // without this fallback the values were extracted but never actually
       // reached the mapped header, so its Settings modal opened on Text
       // with nothing in the Dropdown tab to show.
@@ -1280,8 +1365,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Rename failed')
       setOurHeaders((prev) => prev.map((h) => (h.id === id ? data.header : h)))
+      return true
     } catch (err) {
       addToast(err.message, 'error')
+      return false
     }
   }
   // Header Settings (OurHeaderSettingsModal) — Type/Unique Key Part persist
@@ -1612,9 +1699,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         sourceFileUrl: session.sourceFileUrl || null,
         sourceSheetName: session.sourceFileUrl ? session.dataSheetName : null,
         sheets: grouped.filter((g) => g.headers.length > 0),
-        // No separate Validations/Dropdown Reference Sheet — dropdown
-        // values were auto-detected off the Product fill sheet's own
-        // columns (see the combined extraction effect above).
+        // Keyed by the fill sheet's own header labels, whichever source
+        // each list actually came from (Excel dropdown / Validations sheet /
+        // Allowed values / input rows — see extractSessionSheet); the
+        // per-header dropdownSource above records the exact origin.
         dropdownReference: Object.keys(session.dropdownColumns).length
           ? { sheetName: session.dataSheetName || null, columns: Object.fromEntries(Object.entries(session.dropdownColumns).map(([k, v]) => [k, v.values])) }
           : { sheetName: null, columns: {} },
@@ -1771,13 +1859,6 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
 
       <div className="flex flex-col gap-4 sm:flex-row">
         <BulkRuleSidebar
-          ourHeaders={ourHeaders}
-          onCreateHeader={handleCreateHeader}
-          onRenameHeader={handleRenameHeader}
-          onDeleteHeader={handleDeleteHeader}
-          onDeleteAllHeaders={handleDeleteAllHeaders}
-          creatingHeader={creatingHeader}
-          onOpenHeaderSettings={setHeaderSettingsId}
           templates={templatesList}
           activeTemplateId={activeTemplateId}
           onSelectTemplate={handleSelectWorkItem}
@@ -1830,14 +1911,24 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 setDataHeaderRow={setDataHeaderRow}
                 dataIsectionRow={dataIsectionRow}
                 setDataIsectionRow={setDataIsectionRow}
-                hideDropdownReference
                 dropdownDataStartRow={dropdownDataStartRow}
                 setDropdownDataStartRow={setDropdownDataStartRow}
+                dropdownSheetTitle="Validations Sheet"
+                dropdownSheetName={dropdownSheetName}
+                onSelectDropdownSheet={selectDropdownSheet}
+                dropdownOrientation={dropdownOrientation}
+                setDropdownOrientation={changeDropdownOrientation}
+                dropdownHeaderRow={dropdownHeaderRow}
+                setDropdownHeaderRow={typeDropdownLine(setDropdownHeaderRow)}
+                dropdownValuesRow={dropdownValuesRow}
+                setDropdownValuesRow={typeDropdownLine(setDropdownValuesRow)}
+                dropdownLayoutNote={validationNote}
+                onRedetectDropdown={pinned ? redetectValidation : null}
               />
               {Object.keys(dropdownColumns).length > 0 && (
                 <div className="-mt-2 space-y-2 px-1">
                   <p className="text-[12.5px] text-subtle">
-                    {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} auto-detected as dropdowns from this sheet&apos;s own data — spot-check the values below:
+                    {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} detected as dropdowns (Excel lists, Validations sheet, input rows) — spot-check below, or see where each came from in Dropdown Values Debug at the bottom:
                   </p>
                   <DropdownValuesForm
                     fields={Object.fromEntries(Object.entries(dropdownColumns).map(([label, col]) => [label, col.values]))}
@@ -1851,7 +1942,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             <OurHeadersPanel
               ourHeaders={ourHeaders}
               onCreateHeader={handleCreateHeader}
+              onRenameHeader={handleRenameHeader}
               onDeleteHeader={handleDeleteHeader}
+              onDeleteAllHeaders={handleDeleteAllHeaders}
+              onOpenSettings={setHeaderSettingsId}
               creating={creatingHeader}
             />
           )}
@@ -1934,6 +2028,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
 
         </div>
       </div>
+
+      {/* Last thing on the page, full width (not squeezed beside the
+          sidebar) — the active file's dropdown extraction, header by header. */}
+      {dropdownReport && <DropdownDebugPanel report={dropdownReport} fileName={fileName} />}
 
       {modalId && (() => {
         const modalHeader = activeMapped.find((m) => m.ourHeaderId === modalId)

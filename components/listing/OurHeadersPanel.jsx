@@ -1,14 +1,16 @@
 'use client'
 import { useState } from 'react'
-import { Plus, Search, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Search, Trash2, Loader2, Pencil, Settings, Check, X } from 'lucide-react'
 import { ConfirmDialog } from './BulkRuleSidebar'
 
 // Our Headers on the right side (shown while the sidebar's "Our Headers"
-// section is open) — the global header dictionary in boxes of at most
-// BOX_SIZE, 5 per row (fewer on narrower screens), overflow wrapping onto
-// the next row, same idea as a Mapping Rule's preview boxes. Add/delete go
-// through the page's own handleCreateHeader/handleDeleteHeader, so the
-// sidebar list and this panel always show the same headers.
+// section is open — the sidebar itself only carries the title/eye now) —
+// the global header dictionary in boxes of at most BOX_SIZE, 5 per row
+// (fewer on narrower screens), overflow wrapping onto the next row. Every
+// header gets Settings (OurHeaderSettingsModal), inline Rename and Delete;
+// Add and Delete All sit in the title row. All of it goes through the
+// page's own handle*Header functions, so the mapping grid always sees the
+// same dictionary.
 const BOX_SIZE = 20
 
 function chunk(list, size) {
@@ -17,22 +19,48 @@ function chunk(list, size) {
   return out
 }
 
-export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHeader, creating }) {
+const iconBtnCls = 'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded disabled:opacity-50'
+
+export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onOpenSettings, creating }) {
   const [search, setSearch] = useState('')
   const [newLabel, setNewLabel] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editDraft, setEditDraft] = useState('')
   const [busyId, setBusyId] = useState(null)
+  const [deletingAll, setDeletingAll] = useState(false)
   const [confirmState, setConfirmState] = useState(null) // { message, onConfirm } | null
 
   const q = search.trim().toLowerCase()
   const filtered = q ? ourHeaders.filter((h) => h.label.toLowerCase().includes(q)) : ourHeaders
+  const labelTaken = (label, exceptId) => ourHeaders.some((h) => h.id !== exceptId && h.label.trim().toLowerCase() === label.trim().toLowerCase())
+
   const trimmedNew = newLabel.trim()
-  const duplicate = !!trimmedNew && ourHeaders.some((h) => h.label.trim().toLowerCase() === trimmedNew.toLowerCase())
+  const duplicate = !!trimmedNew && labelTaken(trimmedNew)
   const canAdd = !!trimmedNew && !duplicate && !creating
+
+  const trimmedEdit = editDraft.trim()
+  const editDuplicate = !!editingId && !!trimmedEdit && labelTaken(trimmedEdit, editingId)
 
   async function handleAdd() {
     if (!canAdd) return
     const ok = await onCreateHeader(trimmedNew)
     if (ok !== false) setNewLabel('')
+  }
+
+  function startEdit(h) {
+    setEditingId(h.id)
+    setEditDraft(h.label)
+  }
+  async function commitEdit(h) {
+    if (!trimmedEdit || editDuplicate) return
+    if (trimmedEdit === h.label) { setEditingId(null); return }
+    setBusyId(h.id)
+    try {
+      const ok = await onRenameHeader(h.id, trimmedEdit)
+      if (ok !== false) setEditingId(null)
+    } finally {
+      setBusyId(null)
+    }
   }
 
   function handleDelete(h) {
@@ -44,6 +72,20 @@ export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHe
           await onDeleteHeader(h.id)
         } finally {
           setBusyId(null)
+        }
+      },
+    })
+  }
+  function handleDeleteAll() {
+    if (ourHeaders.length === 0) return
+    setConfirmState({
+      message: `Delete all ${ourHeaders.length} header(s) in Our Headers? This can't be undone.`,
+      onConfirm: async () => {
+        setDeletingAll(true)
+        try {
+          await onDeleteAllHeaders()
+        } finally {
+          setDeletingAll(false)
         }
       },
     })
@@ -61,7 +103,7 @@ export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHe
           Our Headers <span className="text-[12px] font-normal text-subtle">({q ? `${filtered.length} of ${ourHeaders.length}` : ourHeaders.length})</span>
         </h2>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-48 sm:flex-none">
+          <div className="relative min-w-0 flex-1 sm:w-44 sm:flex-none">
             <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-subtle" />
             <input
               value={search}
@@ -77,7 +119,7 @@ export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHe
               onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
               placeholder="New header name…"
               title={duplicate ? 'A header with this name already exists' : undefined}
-              className={`min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[12px] outline-none sm:w-48 sm:flex-none ${
+              className={`min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[12px] outline-none sm:w-44 sm:flex-none ${
                 duplicate ? 'border-[#d14343]' : 'border-divider focus:border-accent-light'
               }`}
             />
@@ -92,6 +134,16 @@ export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHe
               Add
             </button>
           </div>
+          <button
+            type="button"
+            onClick={handleDeleteAll}
+            disabled={deletingAll || ourHeaders.length === 0}
+            title="Delete every header"
+            className="flex flex-shrink-0 items-center gap-1 rounded-full border border-[#e59a9a] px-3 py-1 text-[12px] font-semibold text-[#d14343] hover:bg-[#fdeeee] disabled:opacity-40"
+          >
+            {deletingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+            Delete All
+          </button>
         </div>
       </div>
       {duplicate && <p className="-mt-1 mb-2 text-right text-[11px] text-[#d14343]">&quot;{trimmedNew}&quot; is already in Our Headers.</p>}
@@ -110,16 +162,58 @@ export default function OurHeadersPanel({ ourHeaders, onCreateHeader, onDeleteHe
               <div className="space-y-1">
                 {box.map((h) => (
                   <div key={h.id} className="flex items-center gap-1 rounded-md border border-divider/60 bg-background px-2 py-1">
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-foreground" title={h.label}>{h.label}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(h)}
-                      disabled={busyId === h.id}
-                      title="Delete"
-                      className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d14343] hover:text-[#a83232] disabled:opacity-50"
-                    >
-                      {busyId === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                    </button>
+                    {editingId === h.id ? (
+                      <>
+                        <input
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(h); if (e.key === 'Escape') setEditingId(null) }}
+                          autoFocus
+                          title={editDuplicate ? 'Another header already has this name' : undefined}
+                          className={`min-w-0 flex-1 rounded border bg-background px-1 py-0.5 text-[12px] outline-none ${
+                            editDuplicate ? 'border-[#d14343]' : 'border-divider focus:border-accent-light'
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => commitEdit(h)}
+                          disabled={busyId === h.id || !trimmedEdit || editDuplicate}
+                          title="Save name"
+                          className={`${iconBtnCls} text-emerald-600`}
+                        >
+                          {busyId === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                        </button>
+                        <button type="button" onClick={() => setEditingId(null)} title="Cancel" className={`${iconBtnCls} text-subtle`}>
+                          <X className="h-3 w-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground" title={h.label}>{h.label}</span>
+                        {onOpenSettings && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenSettings(h.id)}
+                            title="Header settings — type, dropdown default values, unique key…"
+                            className={`${iconBtnCls} text-subtle hover:text-foreground`}
+                          >
+                            <Settings className="h-3 w-3" />
+                          </button>
+                        )}
+                        <button type="button" onClick={() => startEdit(h)} title="Rename" className={`${iconBtnCls} text-subtle hover:text-foreground`}>
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(h)}
+                          disabled={busyId === h.id}
+                          title="Delete"
+                          className={`${iconBtnCls} text-[#d14343] hover:text-[#a83232]`}
+                        >
+                          {busyId === h.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

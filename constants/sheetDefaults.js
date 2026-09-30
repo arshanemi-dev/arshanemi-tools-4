@@ -13,8 +13,8 @@ export const DEFAULT_SHEET_ROWS = {
   DROPDOWN_HEADER_ROW: 1,
   DROPDOWN_VALUES_ROW: 3,
   // Bulk mapping page only (BulkTemplateDesign.jsx) — where a Product fill
-  // sheet's own dropdown-enabled data actually starts, for its own-column
-  // dropdown auto-detect (no separate Validations sheet anymore). Same row
+  // sheet's own input rows start, for the input-rows dropdown source (one
+  // of four, see lib/dropdownExtraction.js). Same row
   // for every marketplace (Meesho, Flipkart, and everything else) — 1-based,
   // matching Excel's own row numbering, same convention as every other row
   // constant here.

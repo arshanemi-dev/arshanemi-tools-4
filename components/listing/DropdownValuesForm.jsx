@@ -3,10 +3,10 @@ import { useState } from 'react'
 
 // Renders one native <select> per key in `fields` ({ [headerLabel]:
 // string[] }) — a quick spot-check form for whatever dropdown values got
-// auto-detected off the uploaded sheet's own data for each header
-// (BulkTemplateDesign.jsx's dropdownColumns, via detectColumnDropdownValues
-// — that header's dataType becomes 'dropdown' and these values are what get
-// saved under it, template-wise, on Save). Picking a value here is just a
+// auto-detected for each header (BulkTemplateDesign.jsx's dropdownColumns,
+// via lib/dropdownExtraction.js — that header's dataType becomes 'dropdown'
+// and these values are what get saved under it, template-wise, on Save;
+// DropdownDebugPanel shows which source each came from). Picking a value here is just a
 // preview/confirmation that the right options were captured; it doesn't
 // change anything on the header itself unless a caller hooks in via
 // `onChange`, which fires with the full { [headerLabel]: pickedValue } map
