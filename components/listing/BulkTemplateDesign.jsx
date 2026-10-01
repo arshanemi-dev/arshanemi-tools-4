@@ -122,11 +122,16 @@ function validationOptions(session) {
     valuesLine: Math.max(headerLine + 1, parseRowInput(session.dropdownValuesRow, headerLine + 1)),
   }
 }
-// The marketplace rule's Validations sheet + rows (1-based there) as a
-// 0-based layout hint — wins ties in auto-detect, never overrides evidence.
+// The marketplace rule's Validations sheet + rows/columns (1-based there) as
+// a 0-based layout hint — wins ties in auto-detect, never overrides
+// evidence. null when the brand has no Validations sheet (Myntra).
 function ruleValidationHint(rule) {
-  return { orientation: 'vertical', headerLine: rule.dropdownHeaderRow - 1, valuesLine: rule.dropdownValuesRow - 1 }
+  if (!rule.dropdownSheetName || !rule.dropdownHeaderRow || !rule.dropdownValuesRow) return null
+  return { orientation: rule.dropdownOrientation, headerLine: rule.dropdownHeaderRow - 1, valuesLine: rule.dropdownValuesRow - 1 }
 }
+// Group Row / I section: blank or 0 = the sheet has no such row (Flipkart
+// has no Group Row, Myntra has neither — constants/sheetDefaults.js).
+const hasRow = (raw) => Number(raw) >= 1
 const NO_VALIDATION_INPUTS = { dropdownSheetName: '', dropdownOrientation: 'vertical', dropdownHeaderRow: '', dropdownValuesRow: '' }
 // 0-based resolved layout (or null) → the values the sheet picker, toggle
 // and row/column inputs display (1-based strings).
@@ -200,13 +205,14 @@ function computeCommonHeaderInfo(sheets) {
 // (Meesho's default is both = 3) — that's not "read this row twice", it
 // means "1st line is Headers, 2nd line (right after) is I section". Only
 // offset when they're equal; different rows (Flipkart's header=1/
-// isection=3) read literally.
+// isection=4) read literally. A blank/0 Group Row or I section means the
+// sheet has none (hasRow).
 //
 // Dropdown values come from lib/dropdownExtraction.js — Excel's own list
 // validations, the Validations sheet (Vertical or Horizontal), Allowed
 // Values blocks, and finally repeats in the fill sheet's own input rows,
-// which start at the editable "Dropdown Data Row" (defaults to row 5, never
-// earlier than the row after the headers). The Validations sheet's layout
+// which start at the editable "Dropdown Data Row" (the brand rule's own
+// row, never earlier than the row after the headers). The Validations sheet's layout
 // is resolved HERE, against the headers just read (resolveValidationLayout)
 // — whatever the user hasn't overridden is auto — and the effective sheet/
 // orientation/lines come back in the result for the inputs to display.
@@ -225,11 +231,12 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     && Number(session.dataHeaderRow) === Number(session.dataIsectionRow)
   const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(session.dataIsectionRow, headerRowIdx + 1)
   const rawRow = aoa[headerRowIdx] || []
-  const isectionRow = aoa[isectionRowIdx] || []
+  const isectionRow = hasRow(session.dataIsectionRow) ? aoa[isectionRowIdx] || [] : []
   // Group Row, forward-filled across merged cells — kept on each raw header
   // for session fidelity; autoPlaceHeaders no longer reads it.
-  const groupRowIdx = parseRowInput(session.dataGroupRow, headerRowIdx)
-  const groupRowFilled = forwardFillRow(aoa[groupRowIdx] || [], rawRow.length)
+  const groupRowFilled = hasRow(session.dataGroupRow)
+    ? forwardFillRow(aoa[parseRowInput(session.dataGroupRow, headerRowIdx)] || [], rawRow.length)
+    : []
   const dataStartIdx = Math.max(
     headerRowIdx + 1,
     parseRowInput(session.dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1),
@@ -482,7 +489,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [loadError, setLoadError] = useState(false)
 
   const [selectedMarketplace, setSelectedMarketplace] = useState('Meesho')
-  const [presetData, setPresetData] = useState({ marketplaceName: 'Meesho', exportVersion: 'v1.0', description: '' })
+  const [presetData, setPresetData] = useState({ marketplaceName: 'Meesho', exportVersion: '1', description: '' })
   const [categoriesData, setCategoriesData] = useState(DEFAULT_CATEGORIES)
   const [templateNameInput, setTemplateNameInput] = useState('')
   const [templateNumber, setTemplateNumber] = useState('')
@@ -504,7 +511,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [dataIsectionRow, setDataIsectionRow] = useState('')
   // Where the Product fill sheet's own dropdown-enabled data starts, for
   // own-column dropdown auto-detect — editable like every other row here,
-  // defaults to DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW (row 5).
+  // defaults to the brand rule's dropdownDataStartRow (constants/sheetDefaults.js).
   const [dropdownDataStartRow, setDropdownDataStartRow] = useState('')
   // The Validations sheet — a second dropdown source alongside the fill
   // sheet's own input rows (see lib/dropdownExtraction.js). Orientation is
@@ -643,20 +650,31 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         return
       }
       try {
-        const results = await Promise.all(
-          templateIds.map((id) =>
-            fetch(`/api/listing-tools/${id}`, { credentials: 'include' })
-              .then((res) => (res.ok ? res.json() : null))
-              .then((data) => [id, data])
-              .catch(() => [id, null]),
+        // The light versions list (no header snapshots) rides along so each
+        // template's automatic Version can be set to the number its next
+        // save will create in the hub (latest + 1). If it fails, nextVersion
+        // stays null and the template keeps its saved exportVersion.
+        const [results, versions] = await Promise.all([
+          Promise.all(
+            templateIds.map((id) =>
+              fetch(`/api/listing-tools/${id}`, { credentials: 'include' })
+                .then((res) => (res.ok ? res.json() : null))
+                .then((data) => [id, data])
+                .catch(() => [id, null]),
+            ),
           ),
-        )
+          fetch('/api/listing-tools/versions', { credentials: 'include' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => data?.versions || null)
+            .catch(() => null),
+        ])
         if (cancelled) return
         const map = {}
         const list = []
         for (const [id, data] of results) {
           if (!data?.template || !data?.content) continue
-          map[id] = data
+          const latest = (versions || []).reduce((max, v) => (v.templateId === id ? Math.max(max, v.versionNumber || 0) : max), 0)
+          map[id] = { ...data, nextVersion: versions ? String(latest + 1) : null }
           list.push({
             id,
             templateName: data.template.templateName,
@@ -702,7 +720,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       })
       setPresetData({
         marketplaceName: data.template.marketplaceName || '',
-        exportVersion: data.template.exportVersion || '',
+        exportVersion: data.nextVersion || data.template.exportVersion || '',
         description: data.template.description || '',
       })
       setMappedHeaders(seedFromExistingContent(data.content))
@@ -765,7 +783,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       dataGroupRow: nextDataSheetName ? rule.dataGroupRow : '',
       dataHeaderRow: nextDataSheetName ? rule.dataHeaderRow : '',
       dataIsectionRow: nextDataSheetName ? rule.dataIsectionRow : '',
-      dropdownDataStartRow: nextDataSheetName ? DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW : '',
+      dropdownDataStartRow: nextDataSheetName ? rule.dropdownDataStartRow : '',
       ...NO_VALIDATION_INPUTS,
       dropdownSheetMode: 'auto',
       dropdownLayoutMode: 'auto',
@@ -774,7 +792,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       rawHeaderGroupLabels: {},
       dropdownColumns: {},
       dropdownReport: null,
-      presetData: { marketplaceName: effectiveBrand, exportVersion: presetData.exportVersion || 'v1.0', description: '' },
+      // A brand-new template's first save is always its version 1.
+      presetData: { marketplaceName: effectiveBrand, exportVersion: '1', description: '' },
       categoriesData: {
         category1: categories[0], category2: categories[1], category3: categories[2],
         category4: categories[3], category5: categories[4], category6: categories[5],
@@ -1006,7 +1025,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataGroupRow(rule.dataGroupRow)
     setDataHeaderRow(rule.dataHeaderRow)
     setDataIsectionRow(rule.dataIsectionRow)
-    setDropdownDataStartRow(DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW)
+    setDropdownDataStartRow(rule.dropdownDataStartRow)
   }
   function applyValidationInputs(inputs) {
     setDropdownSheetName(inputs.dropdownSheetName)
@@ -1612,7 +1631,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     }
     const s = uploadSessions[id] || {}
     return {
-      presetData: s.presetData || { marketplaceName: '', exportVersion: '', description: '' },
+      presetData: s.presetData || { marketplaceName: '', exportVersion: '1', description: '' },
       categoriesData: s.categoriesData || DEFAULT_CATEGORIES,
       rawHeaders: s.rawHeaders || [],
       dropdownColumns: s.dropdownColumns || {},
@@ -1641,17 +1660,23 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         // something bulk-save can fix on its own).
         const data = templatesData[t.id]
         if (!data?.content?.sheets?.length) return null
+        // This re-save still records a new version, so its automatic
+        // Version (and the Final Name that ends in it) moves up too.
+        const exportVersion = data.nextVersion || data.template.exportVersion
+        const finalName = data.nextVersion
+          ? composeFinalName({ marketplaceName: data.template.marketplaceName, exportVersion }, data.template)
+          : data.template.finalName
         return {
           isReal: true,
           body: {
             templateId: t.id,
             templateName: data.template.templateName,
-            finalName: data.template.finalName,
+            finalName,
             description: data.template.description,
             marketplaceName: data.template.marketplaceName,
             category1: data.template.category1, category2: data.template.category2, category3: data.template.category3,
             category4: data.template.category4, category5: data.template.category5, category6: data.template.category6,
-            exportVersion: data.template.exportVersion,
+            exportVersion,
             sheets: data.content.sheets,
           },
         }
@@ -1899,6 +1924,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 templateNumber={templateNumber}
                 currentPreset={null}
                 nameAlwaysComposed
+                versionAuto
               />
 
               <SheetSelectorFields

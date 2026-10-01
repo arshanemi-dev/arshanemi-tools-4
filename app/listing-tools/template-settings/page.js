@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Search, Plus, Download, Upload, Loader2, CopyCheck, Layers } from 'lucide-react'
+import { Search, Download, Upload, Loader2, CopyCheck, Layers } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import TemplateSettingsListRow from '@/components/listing/TemplateSettingsListRow'
 import MarketplaceTabs from '@/components/listing/MarketplaceTabs'
@@ -394,11 +394,6 @@ export default function TemplateSettingsListPage() {
             AI Copy Template ({selectedIds.size})
           </PillButton>
         )}
-        <Link href="/listing-tools/template-settings/new">
-          <PillButton variant="upload" icon={Plus}>
-            Create Template
-          </PillButton>
-        </Link>
         <Link href="/listing-tools/template-settings/new-bulk">
           <PillButton variant="upload" icon={Layers}>
             Create Bulk Listing

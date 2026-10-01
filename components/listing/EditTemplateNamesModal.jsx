@@ -124,16 +124,10 @@ export default function EditTemplateNamesModal({ template, onClose, onSaved }) {
             />
           </label>
         ))}
-        <label className="flex flex-col gap-1">
-          <span className={labelCls}>Version</span>
-          <input
-            type="text"
-            value={presetDraft.exportVersion}
-            onChange={(e) => setPreset('exportVersion', e.target.value)}
-            placeholder="v1.0"
-            className={fieldCls}
-          />
-        </label>
+        {/* No Version input — it's automatic (bumped on every save, see
+            BulkTemplateDesign.jsx). presetDraft still carries the saved
+            exportVersion, so it's sent back unchanged and stays in the
+            Final Name below. */}
       </div>
 
       <div className="mt-1 border-t border-divider pt-4 grid gap-3">

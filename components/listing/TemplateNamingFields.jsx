@@ -58,6 +58,9 @@ export default function TemplateNamingFields({
   currentPreset,
   nameEditableInCreate = false,
   nameAlwaysComposed = false,
+  // Bulk page: Version is a whole number the caller assigns (1 for a new
+  // template, latest saved version + 1 for an existing one) — shown, never typed.
+  versionAuto = false,
 }) {
   // Lowercased on the way in — same reason extractBrandAndCategories
   // lowercases a category pulled off a filename (BulkTemplateDesign.jsx): a
@@ -85,12 +88,22 @@ export default function TemplateNamingFields({
           </Field>
         ))}
         <Field label="Version" className="flex-[0_1_105px]">
-          <input
-            className={inputCls}
-            placeholder="v1.0"
-            value={presetData.exportVersion || ''}
-            onChange={(e) => setPreset('exportVersion', e.target.value)}
-          />
+          {versionAuto ? (
+            <input
+              readOnly
+              disabled
+              title="Automatic — goes up by 1 (1, 2, 3…) every time this template is saved"
+              className={`${inputCls} bg-surface font-semibold text-muted`}
+              value={presetData.exportVersion || '1'}
+            />
+          ) : (
+            <input
+              className={inputCls}
+              placeholder="v1.0"
+              value={presetData.exportVersion || ''}
+              onChange={(e) => setPreset('exportVersion', e.target.value)}
+            />
+          )}
         </Field>
       </div>
 

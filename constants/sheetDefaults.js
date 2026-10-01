@@ -1,10 +1,28 @@
-// Default row indices & marketplace-specific sheet detection rules
-// Meesho:
-//  - Product Fill Sheet: 2nd sheet (or "Fill"), Header Row 2, I section Row 2
-//  - Validation Sheet: 4th sheet (or "Validation"), Header Row 1, Dropdown Values Row 3
-// Flipkart & Default / Other Brands:
-//  - Product Fill Sheet: 3rd sheet (or "Fill"), Header Row 1, I section Row 3
-//  - Validation Sheet: 2nd sheet (or "Validation"), Header Row 2, Dropdown Values Row 3
+// Default row indices & marketplace-specific sheet detection rules.
+//
+// Per-brand defaults for reading an uploaded marketplace template (bulk
+// page, BulkTemplateDesign.jsx). Every number is 1-based, exactly as Excel
+// counts sheets/rows/columns — same as the brand table this came from:
+//
+//              ─────────── INPUT SHEET ───────────   ──── VALIDATIONS SHEET ────
+//   BRAND      Sheet  Group  Header  I sec  Dropdown  Sheet  Type        Header  Value
+//   Meesho       2      2      3      3       5        4    Vertical      1      2
+//   Flipkart     3      0      1      4       5        2    Vertical      2      3
+//   Amazon       5      3      4      6       8        7    Horizontal    2      3
+//   Myntra       2      –      3      –       4        –
+//
+// - Group 0 / blank = the sheet has no group row; I sec blank = no I section
+//   row (both stored as null here, shown as an empty input).
+// - Header = I sec (Meesho) means "headers on that row, I section notes on
+//   the very next one" — see extractSessionSheet.
+// - Dropdown = the first input row of the fill sheet (where the input-rows
+//   dropdown source starts reading).
+// - Validations Header/Value are ROWS when Vertical, COLUMNS when
+//   Horizontal (Amazon: field names down column 2, values from column 3).
+//   They're the preferred layout for auto-detect, which still overrides
+//   them when another layout clearly matches more of the fill sheet's
+//   headers (lib/dropdownExtraction.js). Myntra has no Validations sheet.
+// Any other brand falls back to `default` (the old generic rule).
 
 export const DEFAULT_SHEET_ROWS = {
   GROUP_ROW: 1,
@@ -12,90 +30,116 @@ export const DEFAULT_SHEET_ROWS = {
   ISECTION: 2,
   DROPDOWN_HEADER_ROW: 1,
   DROPDOWN_VALUES_ROW: 3,
-  // Bulk mapping page only (BulkTemplateDesign.jsx) — where a Product fill
-  // sheet's own input rows start, for the input-rows dropdown source (one
-  // of four, see lib/dropdownExtraction.js). Same row
-  // for every marketplace (Meesho, Flipkart, and everything else) — 1-based,
-  // matching Excel's own row numbering, same convention as every other row
-  // constant here.
+  // Where a Product fill sheet's own input rows start (input-rows dropdown
+  // source, lib/dropdownExtraction.js) when the brand's rule doesn't say —
+  // each brand rule below carries its own dropdownDataStartRow.
   DROPDOWN_DATA_START_ROW: 5,
 }
 
 export const MARKETPLACE_SHEET_RULES = {
   meesho: {
-    dataSheetIndex: 1, // 0-based: 2nd sheet
-    dataKeyword: /fill/i,
-    dataGroupRow: 1,
+    dataSheetNo: 2,
+    dataGroupRow: 2,
     dataHeaderRow: 3,
     dataIsectionRow: 3,
+    dropdownDataStartRow: 5,
 
-    validationSheetIndex: 3, // 0-based: 4th sheet
-    validationKeyword: /valid/i,
+    validationSheetNo: 4,
+    dropdownOrientation: 'vertical',
     dropdownHeaderRow: 1,
-    dropdownValuesRow: 3,
+    dropdownValuesRow: 2,
   },
   flipkart: {
-    dataSheetIndex: 2, // 0-based: 3rd sheet
-    dataKeyword: /fill/i,
-    dataGroupRow: 1,
+    dataSheetNo: 3,
+    dataGroupRow: null, // 0 in the brand table — no group row
     dataHeaderRow: 1,
-    dataIsectionRow: 3,
+    dataIsectionRow: 4,
+    dropdownDataStartRow: 5,
 
-    validationSheetIndex: 1, // 0-based: 2nd sheet
-    validationKeyword: /valid/i,
+    validationSheetNo: 2,
+    dropdownOrientation: 'vertical',
     dropdownHeaderRow: 2,
     dropdownValuesRow: 3,
   },
+  amazon: {
+    dataSheetNo: 5,
+    dataGroupRow: 3,
+    dataHeaderRow: 4,
+    dataIsectionRow: 6,
+    dropdownDataStartRow: 8,
+
+    validationSheetNo: 7,
+    dropdownOrientation: 'horizontal',
+    dropdownHeaderRow: 2, // column B
+    dropdownValuesRow: 3, // column C onwards
+  },
+  myntra: {
+    dataSheetNo: 2,
+    dataGroupRow: null,
+    dataHeaderRow: 3,
+    dataIsectionRow: null,
+    dropdownDataStartRow: 4,
+
+    validationSheetNo: null, // no Validations sheet
+    dropdownOrientation: 'vertical',
+    dropdownHeaderRow: null,
+    dropdownValuesRow: null,
+  },
+  // Any brand not listed above. Unlike the brand rules, a sheet NAMED like
+  // a fill/validations sheet wins over the position here, since an unknown
+  // brand's sheet order is a guess.
   default: {
-    dataSheetIndex: 2, // 0-based: 3rd sheet
-    dataKeyword: /fill/i,
+    keywordFirst: true,
+    dataSheetNo: 3,
     dataGroupRow: 1,
     dataHeaderRow: 1,
     dataIsectionRow: 3,
+    dropdownDataStartRow: DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW,
 
-    validationSheetIndex: 1, // 0-based: 2nd sheet
-    validationKeyword: /valid/i,
+    validationSheetNo: 2,
+    dropdownOrientation: 'vertical',
     dropdownHeaderRow: 2,
     dropdownValuesRow: 3,
   },
 }
 
+const DATA_KEYWORD = /fill/i
+const VALIDATION_KEYWORD = /valid/i
+
+// A known brand's sheet sits at its configured position (sheetNo, 1-based);
+// a name match is only the fallback when the workbook is shorter than that.
+// `default` (keywordFirst) tries the name first.
+function pickSheet(sheetNames, sheetNo, keyword, { keywordFirst = false, exclude = '' } = {}) {
+  const byIndex = sheetNo ? sheetNames[sheetNo - 1] : ''
+  const atIndex = byIndex && byIndex !== exclude ? byIndex : ''
+  const byKeyword = sheetNames.find((name) => name !== exclude && keyword.test(name)) || ''
+  return keywordFirst ? byKeyword || atIndex : atIndex || byKeyword
+}
+
 export function detectMarketplaceSheetDefaults(sheetNames = [], brandName = '') {
-  const brandKey = (brandName || '').toLowerCase()
+  const brandKey = (brandName || '').trim().toLowerCase()
   const rule = MARKETPLACE_SHEET_RULES[brandKey] || MARKETPLACE_SHEET_RULES.default
+  const names = Array.isArray(sheetNames) ? sheetNames : []
 
-  let dataSheetName = ''
-  if (Array.isArray(sheetNames) && sheetNames.length > 0) {
-    const keywordMatch = sheetNames.find((name) => rule.dataKeyword.test(name))
-    if (keywordMatch) {
-      dataSheetName = keywordMatch
-    } else if (sheetNames[rule.dataSheetIndex]) {
-      dataSheetName = sheetNames[rule.dataSheetIndex]
-    } else {
-      dataSheetName = sheetNames[0]
-    }
-  }
+  const dataSheetName = names.length
+    ? pickSheet(names, rule.dataSheetNo, DATA_KEYWORD, { keywordFirst: rule.keywordFirst }) || names[0]
+    : ''
+  const dropdownSheetName = names.length && rule.validationSheetNo
+    ? pickSheet(names, rule.validationSheetNo, VALIDATION_KEYWORD, { keywordFirst: rule.keywordFirst, exclude: dataSheetName })
+      || (rule.keywordFirst ? names.find((name) => name !== dataSheetName) || '' : '')
+    : ''
 
-  let dropdownSheetName = ''
-  if (Array.isArray(sheetNames) && sheetNames.length > 0) {
-    const keywordMatch = sheetNames.find((name) => name !== dataSheetName && rule.validationKeyword.test(name))
-    if (keywordMatch) {
-      dropdownSheetName = keywordMatch
-    } else if (sheetNames[rule.validationSheetIndex] && sheetNames[rule.validationSheetIndex] !== dataSheetName) {
-      dropdownSheetName = sheetNames[rule.validationSheetIndex]
-    } else {
-      const remaining = sheetNames.find((name) => name !== dataSheetName)
-      dropdownSheetName = remaining || ''
-    }
-  }
-
+  // null (no such row) → '' so the input shows empty.
+  const asInput = (n) => (n == null ? '' : n)
   return {
     dataSheetName,
-    dataGroupRow: rule.dataGroupRow,
-    dataHeaderRow: rule.dataHeaderRow,
-    dataIsectionRow: rule.dataIsectionRow,
+    dataGroupRow: asInput(rule.dataGroupRow),
+    dataHeaderRow: asInput(rule.dataHeaderRow),
+    dataIsectionRow: asInput(rule.dataIsectionRow),
+    dropdownDataStartRow: asInput(rule.dropdownDataStartRow),
     dropdownSheetName,
-    dropdownHeaderRow: rule.dropdownHeaderRow,
-    dropdownValuesRow: rule.dropdownValuesRow,
+    dropdownOrientation: rule.dropdownOrientation,
+    dropdownHeaderRow: asInput(rule.dropdownHeaderRow),
+    dropdownValuesRow: asInput(rule.dropdownValuesRow),
   }
 }
