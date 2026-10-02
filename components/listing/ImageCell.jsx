@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { ImagePlus, X, Loader2, Clock, AlertCircle } from 'lucide-react'
 import { useListingImageUpload } from '@/hooks/useListingImageUpload'
 
@@ -59,12 +59,15 @@ export default function ImageCell({ value, onChange, uploadUrl, disabled, onMult
 
   // Stay in sync with `value` changing from outside this cell (an upload finishing, a bulk fill,
   // the row getting auto-filled/cleared elsewhere) — but not while the user has their own edit
-  // in progress and it just doesn't match yet (see the dependency below).
-  useEffect(() => {
+  // in progress and it just doesn't match yet (only a real `value` change resets the draft).
+  // Adjusted during render rather than in an effect (react.dev "you might not need an effect").
+  const [syncedValue, setSyncedValue] = useState(value)
+  if (value !== syncedValue) {
+    setSyncedValue(value)
     setUrlDraft(value || '')
     setUrlInvalid(false)
     setImgBroken(false)
-  }, [value])
+  }
 
   async function handleFiles(fileList) {
     const files = Array.from(fileList || [])

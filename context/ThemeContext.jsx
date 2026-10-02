@@ -5,7 +5,7 @@ import '@/lib/tokenHandoff' // side effect only — must run before any auth che
 import { createContext, useContext, useEffect, useState } from 'react'
 import { defaultTheme } from '@/data/defaultTheme'
 
-// Same key the anti-FOUC inline <Script id="theme-init"> in app/layout.js
+// Same key the anti-FOUC inline theme-init script (InlineScript) in app/layout.js
 // reads before hydration — must match, or that script never finds this
 // provider's cached theme and always falls back to the hardcoded dark theme
 // for a flash before this effect runs.
@@ -84,13 +84,14 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     // Cached theme applies instantly (avoids FOUC while the fresh fetch below
-    // runs) — same cache + key the inline <Script> in app/layout.js reads
+    // runs) — same cache + key the inline theme-init script in app/layout.js reads
     // before hydration.
     try {
       const raw = localStorage.getItem(THEME_CACHE_KEY)
       if (raw) {
         const { data, ts } = JSON.parse(raw)
         if (Date.now() - ts < THEME_CACHE_TTL && data?.mode) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- cached theme lives in localStorage, readable only after hydration
           setSiteTheme(data)
           applyFullTheme(data)
         }

@@ -107,7 +107,7 @@ function ScopedAutoDetails({ templateId }) {
         setSessionRows(blankSessionFor(d.content.sheets))
       })
     return () => { cancelled = true }
-  }, [templateId])
+  }, [templateId, addToast]) // addToast is a stable useCallback — never re-fires this
 
   useEffect(() => {
     let cancelled = false

@@ -18,16 +18,18 @@ const TABS = [
 
 export default function ListingHistoryPage() {
   const [active, setActive] = useState('product')
-  const [rows, setRows] = useState(null)
+  // Rows remember which tab they were loaded for, so switching tabs shows the
+  // spinner (rows === null) until that tab's own fetch lands — no reset needed.
+  const [loaded, setLoaded] = useState({ key: null, rows: null })
   const tab = TABS.find((t) => t.key === active)
+  const rows = loaded.key === active ? loaded.rows : null
 
   useEffect(() => {
     let cancelled = false
-    setRows(null)
     fetch(tab.endpoint, { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { history: [] }))
-      .then((data) => { if (!cancelled) setRows(data.history || []) })
-      .catch(() => { if (!cancelled) setRows([]) })
+      .then((data) => { if (!cancelled) setLoaded({ key: active, rows: data.history || [] }) })
+      .catch(() => { if (!cancelled) setLoaded({ key: active, rows: [] }) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])

@@ -29,20 +29,28 @@ export default function OtpPasswordResetModal({ open, identifier: fixedIdentifie
   const intervalRef = useRef(null)
   const inputRefs = useRef([])
 
-  useEffect(() => {
-    if (!open) return
-    setError('')
-    setOtp(['', '', '', '', '', ''])
-    setResetToken('')
-    setPassword('')
-    setConfirm('')
-    if (fixedIdentifier) {
-      setIdentifier(fixedIdentifier)
-      sendOtp(fixedIdentifier)
-    } else {
-      setIdentifier('')
-      setStep('identifier')
+  // Fresh form every time the modal opens — reset during render on the
+  // open transition (react.dev "you might not need an effect"), not in an effect.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setError('')
+      setOtp(['', '', '', '', '', ''])
+      setResetToken('')
+      setPassword('')
+      setConfirm('')
+      setIdentifier(fixedIdentifier || '')
+      if (!fixedIdentifier) setStep('identifier')
     }
+  }
+
+  // Known identifier → send the OTP right away. Deferred a tick and cancelled
+  // on cleanup, so React's dev double-run of effects can't send two OTPs.
+  useEffect(() => {
+    if (!open || !fixedIdentifier) return
+    const t = setTimeout(() => sendOtp(fixedIdentifier), 0)
+    return () => clearTimeout(t)
     // Only re-run when the modal is opened — sendOtp is intentionally excluded
     // to avoid re-firing on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,5 +1,5 @@
 import './globals.css';
-import Script from 'next/script';
+import InlineScript from '@/components/ui/InlineScript';
 import { headers } from 'next/headers';
 import { ThemeProvider } from '@/context/ThemeContext';
 import SplashScreen from '@/components/ui/SplashScreen';
@@ -32,6 +32,10 @@ export const metadata = {
   },
 };
 
+// Anti-FOUC theme init — applies the cached theme (same key/TTL as
+// context/ThemeContext.jsx) to <html> before first paint, else light.
+const THEME_INIT_SCRIPT = `(function(){var d=document.documentElement;try{var raw=localStorage.getItem('barmeto-theme-config');if(raw){var obj=JSON.parse(raw),data=obj.data,ts=obj.ts;if(Date.now()-ts<600000&&data&&data.mode){var mode=data.mode,colors=data[mode]||{},t=data.typography,br=data.borderRadius;d.setAttribute('data-theme',mode);for(var k in colors)d.style.setProperty('--color-'+k,colors[k]);function rgb(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)].join(',')}if(colors['accent'])d.style.setProperty('--color-accent-rgb',rgb(colors['accent']));if(colors['accent-light'])d.style.setProperty('--color-accent-light-rgb',rgb(colors['accent-light']));if(colors['accent-vivid'])d.style.setProperty('--color-accent-vivid-rgb',rgb(colors['accent-vivid']));if(colors['cyan'])d.style.setProperty('--color-cyan-rgb',rgb(colors['cyan']));if(t){if(t.fontFamily)d.style.setProperty('--font-sans',t.fontFamily+',ui-sans-serif,system-ui,sans-serif');if(t.scale!=null)d.style.setProperty('--si-font-scale',t.scale);}if(br)for(var k2 in br){if(k2!=='preset')d.style.setProperty(k2==='base'?'--radius':'--radius-'+k2,br[k2]);}return;}}}catch(e){}d.setAttribute('data-theme','light');})()`;
+
 export default async function RootLayout({ children }) {
   const headersList = await headers()
   const pathname = headersList.get('x-pathname') || ''
@@ -40,14 +44,14 @@ export default async function RootLayout({ children }) {
   const isAdmin = pathname.startsWith('/listing-tools')
 
   return (
-    <html lang="en-IN" suppressHydrationWarning>
+    <html lang="en-IN" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
+        <InlineScript id="theme-init" html={THEME_INIT_SCRIPT} />
         <link rel="icon" type="image/png" href="/images/barmeto-logo.png" />
         <link rel="shortcut icon" type="image/png" href="/images/barmeto-logo.png" />
         <link rel="apple-touch-icon" href="/images/barmeto-logo.png" />
       </head>
       <body className={`antialiased bg-background text-foreground ${isAdmin ? 'overflow-hidden' : 'min-h-screen'}`}>
-        <Script id="theme-init" strategy="beforeInteractive">{`(function(){var d=document.documentElement;try{var raw=localStorage.getItem('barmeto-theme-config');if(raw){var obj=JSON.parse(raw),data=obj.data,ts=obj.ts;if(Date.now()-ts<600000&&data&&data.mode){var mode=data.mode,colors=data[mode]||{},t=data.typography,br=data.borderRadius;d.setAttribute('data-theme',mode);for(var k in colors)d.style.setProperty('--color-'+k,colors[k]);function rgb(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)].join(',')}if(colors['accent'])d.style.setProperty('--color-accent-rgb',rgb(colors['accent']));if(colors['accent-light'])d.style.setProperty('--color-accent-light-rgb',rgb(colors['accent-light']));if(colors['accent-vivid'])d.style.setProperty('--color-accent-vivid-rgb',rgb(colors['accent-vivid']));if(colors['cyan'])d.style.setProperty('--color-cyan-rgb',rgb(colors['cyan']));if(t){if(t.fontFamily)d.style.setProperty('--font-sans',t.fontFamily+',ui-sans-serif,system-ui,sans-serif');if(t.scale!=null)d.style.setProperty('--si-font-scale',t.scale);}if(br)for(var k2 in br){if(k2!=='preset')d.style.setProperty(k2==='base'?'--radius':'--radius-'+k2,br[k2]);}return;}}}catch(e){}d.setAttribute('data-theme','light');})()`}</Script>
         <ThemeProvider>
           <SplashScreen />
           <SessionManager />

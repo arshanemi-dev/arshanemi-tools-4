@@ -23,25 +23,30 @@ export default function TemplateAccessPanel() {
   const [error, setError] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  async function load() {
+  // State is only set in the promise callbacks, never synchronously, so the
+  // mount effect can call this directly. Initial state is already
+  // loading/no-error — only Retry needs to reset it first.
+  function load() {
+    return Promise.all([
+      fetch('/api/admin/users').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+      fetch('/api/admin/companies').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+      fetch('/api/admin/listing-template-access').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+    ])
+      .then(([usersData, companiesData, accessData]) => {
+        setUsers(usersData)
+        const companyMap = {}
+        ;(companiesData.companies || []).forEach((c) => { companyMap[c.id] = c.name })
+        setCompanies(companyMap)
+        setAccess(accessData.access || {})
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
+  }
+
+  function retry() {
     setError(false)
     setLoading(true)
-    try {
-      const [usersData, companiesData, accessData] = await Promise.all([
-        fetch('/api/admin/users').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
-        fetch('/api/admin/companies').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
-        fetch('/api/admin/listing-template-access').then((r) => { if (!r.ok) throw new Error(); return r.json() }),
-      ])
-      setUsers(usersData)
-      const companyMap = {}
-      ;(companiesData.companies || []).forEach((c) => { companyMap[c.id] = c.name })
-      setCompanies(companyMap)
-      setAccess(accessData.access || {})
-    } catch {
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
+    load()
   }
 
   useEffect(() => { load() }, [])
@@ -89,7 +94,7 @@ export default function TemplateAccessPanel() {
     return (
       <div className="px-6 py-10 text-center text-sm text-subtle">
         Couldn’t load users.{' '}
-        <button type="button" onClick={load} className="text-accent font-medium hover:underline">Retry</button>
+        <button type="button" onClick={retry} className="text-accent font-medium hover:underline">Retry</button>
       </div>
     )
   }

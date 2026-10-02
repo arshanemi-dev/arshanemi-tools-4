@@ -25,6 +25,7 @@ export default function ProfilePage() {
       router.replace('/login')
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auth lives in browser storage, readable only after hydration
     setUser(getStoredUser())
     setAuthStatus('authed')
   }, [router])

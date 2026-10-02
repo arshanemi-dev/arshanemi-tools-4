@@ -582,6 +582,7 @@ function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace, hidd
       if (saved) {
         const parsed = JSON.parse(saved)
         if (Array.isArray(parsed) && parsed.length) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is readable only after hydration
           setMarketplaces((prev) => [...new Set([...prev, ...parsed])])
         }
       }
