@@ -158,8 +158,8 @@ export default function SheetSelectorFields({
 }
 
 // Sheets Excel hides (lib/sheetVisibility.js) — kept out of both pickers
-// above, named here so it's clear what else the file carries. Their lists
-// still feed dropdown detection (Excel's own dropdowns point into them).
+// above, named here so it's clear what else the file carries. Never read,
+// except where a column's own Excel dropdown list points into one.
 function HiddenSheetsNote({ sheets }) {
   if (!sheets.length) return null
   return (

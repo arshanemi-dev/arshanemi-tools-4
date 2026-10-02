@@ -10,6 +10,7 @@ import MarketplaceTabs from '@/components/listing/MarketplaceTabs'
 import { useToast } from '@/components/admin/Toast'
 import { versionLabelOf } from '@/lib/templateLogActions'
 import { buildMarketplaceTabs, marketplaceKeyOf, resolveActiveTab } from '@/lib/marketplaceTabs'
+import { visibleSheetNames } from '@/lib/sheetVisibility'
 
 const BULK_COLUMNS = ['Template Name', 'Template Description', 'Title', 'Description', 'Keywords', 'Rules', 'Rule-1', 'Rule-2']
 
@@ -239,7 +240,7 @@ export default function TemplateSettingsListPage() {
       const XLSX = await import('xlsx')
       const buf = await file.arrayBuffer()
       const wb = XLSX.read(buf, { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
+      const ws = wb.Sheets[visibleSheetNames(wb)[0]] // first sheet Excel shows, never a hidden one
       const rows = XLSX.utils.sheet_to_json(ws)
 
       const byName = new Map((templates || []).map((t) => [t.templateName.trim().toLowerCase(), t]))
