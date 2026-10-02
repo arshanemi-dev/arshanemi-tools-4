@@ -7,6 +7,7 @@ import { useToast } from '@/components/admin/Toast'
 import { UNMAPPED_TAB_ID } from './GroupTabsStep'
 import AiRulesSection from './AiRulesSection'
 import { HEADER_ROW_INDEX, GROUP_LABEL_ROW_INDEX, DEFAULT_SHEET_ROWS } from '@/lib/listingSheetLayout'
+import { visibleSheetNames, hiddenSheets } from '@/lib/sheetVisibility'
 import DEFAULT_HEADERS_CONFIG from './defaultHeaders.json'
 import NewTemplateDesign from './NewTemplateDesign'
 
@@ -658,25 +659,27 @@ export default function TemplateSettingsWizard({ templateId }) {
       setExtraction({ stage: 'Parsing workbook…', current: 0, total: 0 })
       await yieldToPaint()
       const wb = XLSX.read(buf, { type: 'array' })
+      // Only the sheets Excel shows — hidden lookup/list sheets stay out of the pickers.
+      const sheetNames = visibleSheetNames(wb)
       const meta = []
-      for (let i = 0; i < wb.SheetNames.length; i++) {
-        const name = wb.SheetNames[i]
+      for (let i = 0; i < sheetNames.length; i++) {
+        const name = sheetNames[i]
         const ws = wb.Sheets[name]
         const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
         const headerRowIdx = findHeaderRowIndex(aoa)
         const colCount = (aoa[headerRowIdx] || []).filter((v) => String(v ?? '').trim() !== '').length
         meta.push({ name, colCount, rowCount: Math.max(aoa.length - headerRowIdx - 1, 0) })
-        setExtraction({ stage: 'Scanning sheets…', current: i + 1, total: wb.SheetNames.length })
+        setExtraction({ stage: 'Scanning sheets…', current: i + 1, total: sheetNames.length })
         if (i > 0 && i % 5 === 0) await yieldToPaint()
       }
       // Defaults mirror source/11.html: sheet 1 is the data sheet, sheet 2
       // the dropdown reference — but prefer sheets whose names actually look
       // the part (e.g. "Blouses-Fill this" for data, "Validation Sheet" for
       // dropdowns) over blindly trusting sheet order.
-      const dataGuess = wb.SheetNames.find(guessIsDataSheet)
-      const nextDataSheetName = dataGuess || wb.SheetNames[0] || ''
-      const validationGuess = wb.SheetNames.find((n) => n !== nextDataSheetName && guessIsValidationSheet(n))
-      const nextDropdownSheetName = validationGuess || wb.SheetNames.find((n) => n !== nextDataSheetName) || ''
+      const dataGuess = sheetNames.find(guessIsDataSheet)
+      const nextDataSheetName = dataGuess || sheetNames[0] || ''
+      const validationGuess = sheetNames.find((n) => n !== nextDataSheetName && guessIsValidationSheet(n))
+      const nextDropdownSheetName = validationGuess || sheetNames.find((n) => n !== nextDataSheetName) || ''
       // Section 2's 4 row inputs default the moment a sheet is picked — Fill
       // Sheet's Group/Header Row default to the app's fixed, confirmed
       // layout (same constants findHeaderRowIndex used to hardcode);
@@ -1130,6 +1133,7 @@ export default function TemplateSettingsWizard({ templateId }) {
   const api = {
     isEditMode, showGroups,
     fileName, parsing, extraction, sheetMeta, uploadingSource, sourceFileUrl, handleFile,
+    hiddenSheets: hiddenSheets(workbook), // sheets Excel hides — named under the sheet pickers
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
     dataIsectionRow, setDataIsectionRow,

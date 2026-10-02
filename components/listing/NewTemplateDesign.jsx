@@ -133,7 +133,7 @@ export default function NewTemplateDesign({ api }) {
   const [dragOverSec, setDragOverSec] = useState(null)
 
   const {
-    isEditMode, fields, parsing, extraction, sheetMeta, uploadingSource,
+    isEditMode, fields, parsing, extraction, sheetMeta, hiddenSheets, uploadingSource,
     dataSheetName, dropdownSheetName, selectDataSheet, selectDropdownSheet,
     dataGroupRow, setDataGroupRow, dataHeaderRow, setDataHeaderRow,
     dataIsectionRow, setDataIsectionRow,
@@ -335,6 +335,7 @@ export default function NewTemplateDesign({ api }) {
       {!collapsed && !isEditMode && (
         <SheetSelectorFields
           sheetMeta={sheetMeta}
+          hiddenSheets={hiddenSheets}
           dataSheetName={dataSheetName}
           onSelectDataSheet={selectDataSheet}
           dataGroupRow={dataGroupRow}

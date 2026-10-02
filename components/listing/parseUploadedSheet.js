@@ -1,3 +1,5 @@
+import { visibleSheetNames } from '@/lib/sheetVisibility'
+
 // Shared "Upload Sheet" / "Upload Old Sheet" parser — matches an uploaded
 // .xlsx's first sheet columns to the current grid's headers by label text
 // (case-insensitive), so re-uploading an updated copy of the same sheet
@@ -7,7 +9,7 @@ export async function parseUploadedSheetRows(file, headers) {
   const XLSX = await import('xlsx')
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array' })
-  const ws = wb.Sheets[wb.SheetNames[0]]
+  const ws = wb.Sheets[visibleSheetNames(wb)[0]] // first sheet Excel shows, not a hidden one
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
   const [headerRow, ...dataRows] = aoa
   const labelToId = Object.fromEntries(headers.map((h) => [String(h.label).trim().toLowerCase(), h.id]))
@@ -33,7 +35,7 @@ export async function importIntoBestMatchingGroup(file, sheets) {
   const XLSX = await import('xlsx')
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array' })
-  const ws = wb.Sheets[wb.SheetNames[0]]
+  const ws = wb.Sheets[visibleSheetNames(wb)[0]] // first sheet Excel shows, not a hidden one
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
   const [headerRow, ...dataRows] = aoa
   const uploadedLabels = new Set((headerRow || []).map((l) => String(l).trim().toLowerCase()))

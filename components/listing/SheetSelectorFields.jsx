@@ -1,5 +1,5 @@
 'use client'
-import { Columns3, Rows3 } from 'lucide-react'
+import { Columns3, EyeOff, Rows3 } from 'lucide-react'
 import { inputCls } from './TemplateNamingFields'
 import { columnLetter } from '@/lib/dropdownExtraction'
 
@@ -79,6 +79,7 @@ export default function SheetSelectorFields({
   dropdownSheetTitle = 'Dropdowns Reference Sheet',
   dropdownOrientation = 'vertical', setDropdownOrientation,
   dropdownLayoutNote = '', onRedetectDropdown,
+  hiddenSheets = [],
 }) {
   const horizontal = !!setDropdownOrientation && dropdownOrientation === 'horizontal'
   return (
@@ -151,6 +152,34 @@ export default function SheetSelectorFields({
           </div>
         )}
       </div>
+      <HiddenSheetsNote sheets={hiddenSheets} />
+    </div>
+  )
+}
+
+// Sheets Excel hides (lib/sheetVisibility.js) — kept out of both pickers
+// above, named here so it's clear what else the file carries. Their lists
+// still feed dropdown detection (Excel's own dropdowns point into them).
+function HiddenSheetsNote({ sheets }) {
+  if (!sheets.length) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-divider pt-2.5 text-[12px] text-subtle">
+      <EyeOff className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+      <span>
+        {sheets.length} hidden sheet{sheets.length === 1 ? '' : 's'} in this file (hidden in Excel, so not listed above):
+      </span>
+      {sheets.map((s) => (
+        <span
+          key={s.name}
+          title={s.veryHidden
+            ? 'Very hidden — not in Excel’s Unhide menu; only the VBA editor can show it'
+            : 'Hidden — Excel: right-click any sheet tab → Unhide'}
+          className="inline-flex items-center gap-1 rounded border border-divider bg-surface px-1.5 py-0.5"
+        >
+          <span className="font-medium text-muted">{s.name}</span>
+          <span className={s.veryHidden ? 'text-amber-600' : 'text-subtle'}>· {s.veryHidden ? 'very hidden' : 'hidden'}</span>
+        </span>
+      ))}
     </div>
   )
 }

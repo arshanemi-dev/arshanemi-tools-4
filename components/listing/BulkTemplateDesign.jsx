@@ -20,6 +20,7 @@ import RulePreviewPanel from './RulePreviewPanel'
 import DropdownValuesForm from './DropdownValuesForm'
 import DropdownDebugPanel from './DropdownDebugPanel'
 import { readDataValidationLists } from '@/lib/sheetDataValidations'
+import { visibleSheetNames, hiddenSheets } from '@/lib/sheetVisibility'
 import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
 import OurHeadersPanel from './OurHeadersPanel'
 
@@ -269,7 +270,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     onProgress('Reading dropdown values…', rawHeaders.length, rawHeaders.length)
     await yieldToPaint()
   }
-  const rule = detectMarketplaceSheetDefaults(wb.SheetNames, session.brand || '')
+  const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), session.brand || '')
   const options = validationOptions(session)
   const validation = resolveValidationLayout(XLSX, wb, {
     ...options,
@@ -505,6 +506,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [uploadedFiles, setUploadedFiles] = useState([]) // [{name, sheets: []}]
   const [workbook, setWorkbook] = useState(null)
   const [sheetMeta, setSheetMeta] = useState([])
+  // Sheets Excel hides in the active file — named under the sheet pickers.
+  const hiddenInWorkbook = useMemo(() => hiddenSheets(workbook), [workbook])
   const [dataSheetName, setDataSheetName] = useState('')
   const [dataGroupRow, setDataGroupRow] = useState('')
   const [dataHeaderRow, setDataHeaderRow] = useState('')
@@ -774,8 +777,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   function buildUploadSession(file, wb, meta) {
     const { brand, categories } = extractBrandAndCategories(file.name)
     const effectiveBrand = brand || presetData.marketplaceName || selectedMarketplace
-    const rule = detectMarketplaceSheetDefaults(wb.SheetNames, effectiveBrand)
-    const nextDataSheetName = rule.dataSheetName || wb.SheetNames[0] || ''
+    // Sheet No counts the tabs Excel actually shows — hidden sheets skipped.
+    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), effectiveBrand)
+    const nextDataSheetName = rule.dataSheetName || visibleSheetNames(wb)[0] || ''
     return {
       workbook: wb,
       sheetMeta: meta,
@@ -818,13 +822,15 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     const wb = XLSX.read(buf, { type: 'array' })
     // Real Excel list dropdowns — SheetJS CE drops these, see sheetDataValidations.js
     wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
+    // Only the sheets Excel shows — hidden lookup/list sheets stay out of the pickers.
+    const sheetNames = visibleSheetNames(wb)
     const meta = []
-    for (let i = 0; i < wb.SheetNames.length; i++) {
-      const name = wb.SheetNames[i]
+    for (let i = 0; i < sheetNames.length; i++) {
+      const name = sheetNames[i]
       const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 })
       const colCount = (aoa[HEADER_ROW_INDEX] || []).filter((v) => String(v ?? '').trim() !== '').length
       meta.push({ name, colCount, rowCount: Math.max(aoa.length - HEADER_ROW_INDEX - 1, 0) })
-      setExtraction({ stage: 'Scanning sheets…', current: i + 1, total: wb.SheetNames.length })
+      setExtraction({ stage: 'Scanning sheets…', current: i + 1, total: sheetNames.length })
       if (i > 0 && i % 5 === 0) await yieldToPaint()
     }
     const session = buildUploadSession(file, wb, meta)
@@ -896,7 +902,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         const buf = await file.arrayBuffer()
         const wb = XLSX.read(buf, { type: 'array' })
         wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
-        const meta = wb.SheetNames.map((name) => {
+        const sheetNames = visibleSheetNames(wb) // hidden sheets stay out of the pickers
+        const meta = sheetNames.map((name) => {
           const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 })
           return {
             name,
@@ -904,7 +911,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             rowCount: Math.max(aoa.length - HEADER_ROW_INDEX - 1, 0),
           }
         })
-        fileInfos.push({ name: file.name, sheets: wb.SheetNames })
+        fileInfos.push({ name: file.name, sheets: sheetNames })
         const fileId = `file_${Date.now()}_${fi}`
         const baseSession = buildUploadSession(file, wb, meta)
         // Extracted eagerly for every file here (not just whichever one
@@ -1021,7 +1028,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setDropdownDataStartRow('')
       return
     }
-    const rule = detectMarketplaceSheetDefaults(workbook?.SheetNames || [], currentBrand())
+    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(workbook), currentBrand())
     setDataGroupRow(rule.dataGroupRow)
     setDataHeaderRow(rule.dataHeaderRow)
     setDataIsectionRow(rule.dataIsectionRow)
@@ -1929,6 +1936,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
 
               <SheetSelectorFields
                 sheetMeta={sheetMeta}
+                hiddenSheets={hiddenInWorkbook}
                 dataSheetName={dataSheetName}
                 onSelectDataSheet={selectDataSheet}
                 dataGroupRow={dataGroupRow}
