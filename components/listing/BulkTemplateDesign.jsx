@@ -4,12 +4,13 @@ import Link from 'next/link'
 import { ArrowLeft, Loader2, Bookmark } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/admin/Toast'
+import Modal from '@/components/admin/Modal'
 import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults } from '@/lib/listingSheetLayout'
 import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
 import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
 import BulkRuleSidebar from './BulkRuleSidebar'
-import BulkMappingGrid from './BulkMappingGrid'
+import HeaderMappingSection from './HeaderMappingSection'
 import BulkPlaceGrid, { moveHeaderInList } from './BulkPlaceGrid'
 import HeaderBucketPreview from './HeaderBucketPreview'
 import ExtractionProgressModal from './ExtractionProgressModal'
@@ -22,7 +23,6 @@ import DropdownDebugPanel from './DropdownDebugPanel'
 import { readDataValidationLists } from '@/lib/sheetDataValidations'
 import { visibleSheetNames, hiddenSheets } from '@/lib/sheetVisibility'
 import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
-import OurHeadersPanel from './OurHeadersPanel'
 
 // Sidebar sections (keyed by title) toggled by their eye OR title. Accordion:
 // opening one closes every other; paired sections (Header Mapping + Mapping
@@ -37,8 +37,9 @@ const SECTION_GROUPS = [
 ]
 // Sidebar section(s) → the right-side section they also hide entirely,
 // title included (the sidebar is the only toggle). "Templates" also hides
-// the top Upload button. "Our Headers" shows its own OurHeadersPanel — the
-// Our Header column inside Header Mapping stays with Header Mapping.
+// the top Upload button. "Our Headers" and "Header Mapping" share one
+// HeaderMappingSection — Our Headers shows just its list, Header Mapping
+// adds the sheet-header columns.
 const SECTION_LINKS = {
   templates: ['Templates'],
   ourHeaders: ['Our Headers'],
@@ -555,6 +556,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [refreshToken, setRefreshToken] = useState(0)
 
   const [saving, setSaving] = useState(false)
+  // Unsaved-changes guard for the open, already-saved template: `sig` is
+  // what Save would send right after it was opened / last saved (captured
+  // on the render after the populate effect — `pending` until then).
+  // pendingSwitch = the sidebar item waiting on the Save / Discard / Stay prompt.
+  const [baseline, setBaseline] = useState({ id: null, sig: null, pending: false })
+  const [pendingSwitch, setPendingSwitch] = useState(null)
   const [modalId, setModalId] = useState(null) // ourHeaderId of the Header Settings modal currently open, or null
   const [headerSettingsId, setHeaderSettingsId] = useState(null) // Our Header dictionary id whose OurHeaderSettingsModal is open, or null
   const [previewRule, setPreviewRule] = useState(null) // { type: 'mapping'|'place', item } — the sidebar rule currently previewed, or null
@@ -727,6 +734,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         description: data.template.description || '',
       })
       setMappedHeaders(seedFromExistingContent(data.content))
+      setBaseline({ id: activeTemplateId, sig: null, pending: true })
       // Switching templates drops any in-progress upload session — a raw
       // sheet extracted for one template isn't meaningful against another.
       setWorkbook(null)
@@ -932,8 +940,13 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setTemplatesList((prev) => [...prev, ...entries])
     const firstId = entries[0]?.id
     if (firstId) {
-      applySnapshot(sessions[firstId])
-      setActiveTemplateId(firstId)
+      // The open template has unsaved edits — the new files are in the
+      // sidebar already; ask before switching to the first one.
+      if (activeIsDirty) setPendingSwitch(firstId)
+      else {
+        applySnapshot(sessions[firstId])
+        setActiveTemplateId(firstId)
+      }
     }
     setExtraction({ stage: 'Done', current: files.length, total: files.length })
     setTimeout(() => setExtraction(null), 500)
@@ -1350,7 +1363,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     })
   }
 
-  // Per-header "Settings" button (BulkMappingGrid's Map Header column) —
+  // Per-header column-settings button (a mapped row in HeaderMappingTable) —
   // same NewDesignColumnModal /new uses for its own field cards (type tabs,
   // dropdown/multiselect values, formula, Auto-Fill From, unique key,
   // disable), reused as-is rather than a re-styled copy. `patch` here is
@@ -1754,6 +1767,57 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // failed/skipped summary toast, then redirects back to the template list
   // (which loads fresh from the server on its own, no stale cache to work
   // around) after a beat so the toast is actually readable first.
+  // Save This Template — only the open, already-saved template. Same payload
+  // (buildSavePayloadForItem) and same endpoints as Save All, but one item:
+  // no other template in the batch is re-saved or gets a new version, and
+  // the page stays open so the next template can be edited and saved the
+  // same way, one by one. Its cached copy is refreshed from what the server
+  // saved, so switching away and back shows the saved state, and its
+  // automatic Version moves on to the next number.
+  async function handleSaveActive() {
+    const entry = templatesList.find((t) => t.id === activeTemplateId)
+    if (!entry || !isRealTemplateId(entry.id)) return false
+    const item = buildSavePayloadForItem(entry)
+    if (!item) {
+      addToast('Map and place at least one header before saving this template.', 'error')
+      return false
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/listing-tools/bulk-update-template', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templates: [item.body] }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const result = data.results?.[0]
+      if (!res.ok || !result?.ok) throw new Error(result?.error || data.error || 'Could not save this template')
+      const versionData = await fetch('/api/listing-tools/versions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId: entry.id, snapshot: { sheets: item.body.sheets } }),
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      const savedVersion = versionData?.version?.versionNumber
+      setTemplatesData((prev) => ({
+        ...prev,
+        [entry.id]: {
+          ...prev[entry.id],
+          template: result.template || prev[entry.id]?.template,
+          content: result.content || prev[entry.id]?.content,
+          nextVersion: savedVersion ? String(savedVersion + 1) : prev[entry.id]?.nextVersion ?? null,
+        },
+      }))
+      if (result.template?.templateName) {
+        setTemplatesList((prev) => prev.map((t) => (t.id === entry.id ? { ...t, templateName: result.template.templateName } : t)))
+      }
+      addToast(`"${result.template?.templateName || entry.templateName}" saved${savedVersion ? ` as V${savedVersion}` : ''} — other templates untouched.`, 'success')
+      return true
+    } catch (err) {
+      addToast(err.message, 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleSave() {
     const items = templatesList.map(buildSavePayloadForItem).filter(Boolean)
     const skipped = templatesList.length - items.length
@@ -1835,6 +1899,50 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     }
   }
 
+  // What Save would send for the open real template right now vs. when it
+  // was opened / last saved — any difference (mapping, unmapping, placement,
+  // column settings, names, an attached sheet) counts as unsaved.
+  const activeEntry = isEditMode ? templatesList.find((t) => t.id === activeTemplateId) : null
+  const activeSig = activeEntry ? JSON.stringify(buildSavePayloadForItem(activeEntry)?.body ?? null) : null
+  if (baseline.pending && baseline.id === activeTemplateId && activeEntry) {
+    setBaseline({ id: activeTemplateId, sig: activeSig, pending: false })
+  }
+  const activeIsDirty = !!activeEntry && baseline.id === activeTemplateId && !baseline.pending && baseline.sig !== activeSig
+  // New uploads aren't in the database at all until saved.
+  const hasUnsavedUploads = uploadMappedHeaders.some((m) => m.sheetHeaders.length > 0)
+
+  // Sidebar clicks go through here: leaving an open template with unsaved
+  // edits asks first (Save & switch / Discard & switch / Stay).
+  function requestSelectWorkItem(id) {
+    if (id === activeTemplateId) return
+    if (activeIsDirty) { setPendingSwitch(id); return }
+    handleSelectWorkItem(id)
+  }
+  async function saveAndSwitch() {
+    const target = pendingSwitch
+    const ok = await handleSaveActive()
+    if (!ok) return
+    setPendingSwitch(null)
+    handleSelectWorkItem(target)
+  }
+  function discardAndSwitch() {
+    const target = pendingSwitch
+    setPendingSwitch(null)
+    handleSelectWorkItem(target)
+  }
+
+  // Refresh / close tab with unsaved work → the browser's own "Leave site?" prompt.
+  const hasUnsavedWork = activeIsDirty || hasUnsavedUploads
+  useEffect(() => {
+    if (!hasUnsavedWork) return
+    const onBeforeUnload = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [hasUnsavedWork])
+
   if (templateIds.length > 0 && loadingExisting) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -1875,6 +1983,25 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           {!isLinkHidden('templates') && (
             <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
           )}
+          {activeIsDirty && (
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-600" title="This template has changes that aren't saved yet">
+              <span className="h-2 w-2 rounded-full bg-amber-500" /> Unsaved changes
+            </span>
+          )}
+          {/* One-by-one: saves only the open (already-saved) template — the
+              rest of the batch isn't re-saved and gets no new version. */}
+          {isEditMode && templatesList.length > 1 && (
+            <button
+              type="button"
+              onClick={handleSaveActive}
+              disabled={saving}
+              title="Save only the template that's open now — the other templates aren't touched"
+              className="flex items-center gap-1.5 rounded-full border border-[#ec1e63] px-4 py-2 text-[14px] font-medium text-[#ec1e63] disabled:opacity-60 hover:bg-[#ec1e63]/10"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
+              Save This Template
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSave}
@@ -1893,7 +2020,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         <BulkRuleSidebar
           templates={templatesList}
           activeTemplateId={activeTemplateId}
-          onSelectTemplate={handleSelectWorkItem}
+          onSelectTemplate={requestSelectWorkItem}
           uploadedFiles={uploadedFiles}
           onClearUpload={handleClearUpload}
           selectedMarketplace={selectedMarketplace}
@@ -1972,18 +2099,6 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             </div>
           )}
 
-          {!isLinkHidden('ourHeaders') && (
-            <OurHeadersPanel
-              ourHeaders={ourHeaders}
-              onCreateHeader={handleCreateHeader}
-              onRenameHeader={handleRenameHeader}
-              onDeleteHeader={handleDeleteHeader}
-              onDeleteAllHeaders={handleDeleteAllHeaders}
-              onOpenSettings={setHeaderSettingsId}
-              creating={creatingHeader}
-            />
-          )}
-
           {sheetsIndex.length >= 2 && (
             <div>
               <h2 className="mb-2 text-[15px] font-semibold text-foreground">Sheets &amp; Headers</h2>
@@ -1991,10 +2106,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             </div>
           )}
 
-          {!isLinkHidden('mapping') && (
-            <div>
-              <h2 className="mb-2 text-[15px] font-semibold text-foreground">Header Mapping</h2>
-              {previewRule?.type === 'mapping' && (
+          {/* Our Headers + Header Mapping — tools-5's Header section UI. The
+              sidebar opens one at a time: "Our Headers" shows just the list,
+              "Header Mapping" adds the sheet-header columns + Mapped. */}
+          {(!isLinkHidden('ourHeaders') || !isLinkHidden('mapping')) && (
+            <div className="space-y-3">
+              {!isLinkHidden('mapping') && previewRule?.type === 'mapping' && (
                 <RulePreviewPanel
                   key={previewRule.item.id}
                   type="mapping"
@@ -2008,16 +2125,23 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                   ruleNamePrefix={ruleNamePrefix}
                 />
               )}
-              <BulkMappingGrid
+              <HeaderMappingSection
+                title={isLinkHidden('mapping') ? 'Our Headers' : 'Header Mapping'}
+                showMapping={!isLinkHidden('mapping')}
+                ourHeaders={ourHeaders}
+                creating={creatingHeader}
+                onCreateHeader={handleCreateHeader}
+                onRenameHeader={handleRenameHeader}
+                onDeleteHeader={handleDeleteHeader}
+                onDeleteAllHeaders={handleDeleteAllHeaders}
+                onOpenHeaderSettings={setHeaderSettingsId}
                 unmappedRawHeaders={unmappedRawHeaders}
                 commonHeaderKeys={commonHeaderInfo.keys}
-                ourHeaders={ourHeaders}
                 mappedHeaders={activeMapped}
                 onMap={handleMap}
                 onUnmap={handleUnmap}
-                onOpenSettings={setModalId}
+                onOpenColumnSettings={setModalId}
                 onOpenRawHeaderSettings={openSettingsForRawHeader}
-                onOpenOurHeaderSettings={setHeaderSettingsId}
                 categoryForOurHeaderId={categoryForOurHeaderId}
                 categoryOrder={categoryOrder}
               />
@@ -2066,6 +2190,33 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       {/* Last thing on the page, full width (not squeezed beside the
           sidebar) — the active file's dropdown extraction, header by header. */}
       {dropdownReport && <DropdownDebugPanel report={dropdownReport} fileName={fileName} />}
+
+      {pendingSwitch && (
+        <Modal
+          open
+          onClose={() => setPendingSwitch(null)}
+          title="Unsaved changes"
+          maxWidth="max-w-md"
+          footer={(
+            <div className="flex w-full flex-wrap justify-end gap-2">
+              <button type="button" onClick={() => setPendingSwitch(null)} disabled={saving} className="rounded-full border border-divider px-4 py-1.5 text-[13px] font-medium text-muted hover:bg-card-hover disabled:opacity-50">
+                Stay
+              </button>
+              <button type="button" onClick={discardAndSwitch} disabled={saving} className="rounded-full border border-neg/40 px-4 py-1.5 text-[13px] font-medium text-neg hover:bg-neg/10 disabled:opacity-50">
+                Discard &amp; switch
+              </button>
+              <button type="button" onClick={saveAndSwitch} disabled={saving} className="inline-flex items-center gap-1.5 rounded-full bg-action px-4 py-1.5 text-[13px] font-semibold text-white hover:bg-action-hover disabled:opacity-50">
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />} Save &amp; switch
+              </button>
+            </div>
+          )}
+        >
+          <p className="text-[13.5px] text-muted">
+            <span className="font-semibold text-foreground">{activeEntry?.templateName || 'This template'}</span> has changes that aren&apos;t saved.
+            Switching to <span className="font-semibold text-foreground">{templatesList.find((t) => t.id === pendingSwitch)?.templateName || 'the other template'}</span> without saving drops them.
+          </p>
+        </Modal>
+      )}
 
       {modalId && (() => {
         const modalHeader = activeMapped.find((m) => m.ourHeaderId === modalId)

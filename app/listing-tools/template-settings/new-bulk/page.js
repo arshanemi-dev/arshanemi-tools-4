@@ -6,8 +6,8 @@ export const metadata = {
 }
 
 // ?templates=id1,id2,... — set by the template list page's "Edit Bulk
-// Listing" toolbar button (enabled once 2+ templates are checkbox-selected
-// there). No query at all = a fresh Create Bulk Listing with nothing
+// Listing" toolbar button (1+ templates checkbox-selected there) or a row's
+// own "Edit Headers" button (?templates=<that one id>). No query at all = a fresh Create Bulk Listing with nothing
 // pre-loaded. See BulkTemplateDesign.jsx for how templateIds drives the
 // sidebar/active-template state.
 export default async function BulkTemplateSettingsPage({ searchParams }) {

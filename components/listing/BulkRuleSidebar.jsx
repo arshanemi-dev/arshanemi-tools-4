@@ -364,7 +364,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
 
 // "Our Headers" — just the title/eye here now. The list itself (add,
 // rename, settings, delete, delete all) lives on the right side in
-// OurHeadersPanel, shown while this section is open.
+// HeaderMappingSection, shown while this section is open.
 function OurHeadersSection({ hidden, onToggleHidden }) {
   return (
     <div className="border-b border-divider pb-3 mb-3">

@@ -22,7 +22,7 @@ function TreeBranch({ label, count, icon: Icon, children, defaultOpen }) {
 }
 
 // A header with no detected dropdown values is still just a plain chip. One
-// that has any (dropdownColumns, same auto-detection BulkMappingGrid/
+// that has any (dropdownColumns, same auto-detection the Header Mapping/
 // handleMap already read off the sheet's own data) becomes its own small
 // card instead — the header name as a title, each of its own values as a
 // smaller chip underneath — so a dropdown-type header visibly carries its

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Eye, Pencil, Copy, Check, X, Trash2, ClipboardPaste, CornerDownRight } from 'lucide-react'
+import { Loader2, Eye, Pencil, Copy, Check, X, Trash2, ClipboardPaste, CornerDownRight, Layers } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import TemplateBadge from '@/components/listing/TemplateBadge'
 import EditTemplateNamesModal from '@/components/listing/EditTemplateNamesModal'
@@ -316,6 +316,11 @@ export default function TemplateSettingsListRow({
               <>
                 <Link href={detailsHref}>
                   <PillButton variant="view" icon={Eye}>View</PillButton>
+                </Link>
+                {/* Just this one template on the bulk page — its headers,
+                    mapping and placement, saved on its own. */}
+                <Link href={`/listing-tools/template-settings/new-bulk?templates=${template.id}`}>
+                  <PillButton variant="ghost" icon={Layers} title="Edit this template's headers, mapping and placement on its own">Edit Headers</PillButton>
                 </Link>
                 <PillButton variant="ghost" icon={Pencil} onClick={() => setEditNamesOpen(true)} title="Edit the Template Name and Template Final Name">
                   Edit Name

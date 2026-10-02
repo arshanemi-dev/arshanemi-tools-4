@@ -403,8 +403,8 @@ export default function TemplateSettingsListPage() {
         <PillButton
           variant="ghost"
           icon={Layers}
-          disabled={selectedIds.size < 2}
-          title={selectedIds.size < 2 ? 'Select 2 or more templates below to bulk-edit them' : undefined}
+          disabled={selectedIds.size < 1}
+          title={selectedIds.size < 1 ? 'Select one or more templates below to edit them' : undefined}
           onClick={() => router.push(`/listing-tools/template-settings/new-bulk?templates=${[...selectedIds].join(',')}`)}
         >
           Edit Bulk Listing
