@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, Bookmark } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/admin/Toast'
 import Modal from '@/components/admin/Modal'
-import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults } from '@/lib/listingSheetLayout'
+import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults, hasMarketplaceSheetRule } from '@/lib/listingSheetLayout'
 import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
 import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
@@ -146,6 +146,32 @@ function layoutToInputs(layout) {
     dropdownValuesRow: String(layout.valuesLine + 1),
   }
 }
+// The brand whose marketplace rule applies: the first candidate with its own
+// row in constants/sheetDefaults.js, else the first non-empty one (→ the
+// `default` rule). A filename's first word isn't always a marketplace
+// ("Sarees_Cotton.xlsx") — the selected brand's row still applies then.
+function ruleBrandOf(...candidates) {
+  return candidates.find((c) => hasMarketplaceSheetRule(c)) || candidates.find(Boolean) || ''
+}
+// A fresh upload's Validations-sheet inputs + modes. A listed brand gets
+// exactly its sheetDefaults.js row, read as typed (pinned + manual) until
+// the user hits Re-detect; a brand with no Validations sheet (Myntra)
+// starts on None. An unknown brand, or a workbook that doesn't have the
+// row's sheet, starts fully auto (see extractSessionSheet).
+function ruleValidationSession(rule) {
+  const auto = { ...NO_VALIDATION_INPUTS, dropdownSheetMode: 'auto', dropdownLayoutMode: 'auto' }
+  if (!rule.isBrandRule) return auto
+  if (!rule.dropdownHeaderRow || !rule.dropdownValuesRow) return { ...auto, dropdownSheetMode: 'pinned' }
+  if (!rule.dropdownSheetName) return auto
+  return {
+    dropdownSheetName: rule.dropdownSheetName,
+    dropdownOrientation: rule.dropdownOrientation,
+    dropdownHeaderRow: String(rule.dropdownHeaderRow),
+    dropdownValuesRow: String(rule.dropdownValuesRow),
+    dropdownSheetMode: 'pinned',
+    dropdownLayoutMode: 'manual',
+  }
+}
 // A merged Group Row cell only populates its first column in the raw data —
 // carry the last seen label forward across the blanks so every column
 // under that merged span resolves to its group's label. Same idea as
@@ -216,11 +242,12 @@ function computeCommonHeaderInfo(sheets) {
 // which start at the editable "Dropdown Data Row" (the brand rule's own
 // row, never earlier than the row after the headers). The Validations sheet's layout
 // is resolved HERE, against the headers just read (resolveValidationLayout)
-// — whatever the user hasn't overridden is auto — and the effective sheet/
-// orientation/lines come back in the result for the inputs to display.
-// Typed (manual) lines are never echoed back, so a half-typed number isn't
+// — whatever isn't pinned is auto — and the effective sheet/orientation/
+// lines come back in the result for the inputs to display. Typed (manual)
+// lines — a listed brand's upload defaults included (ruleValidationSession)
+// — are read as-is and never echoed back, so a half-typed number isn't
 // rewritten mid-keystroke. `session.brand` picks the marketplace rule whose
-// Validations sheet/rows are the tie-winning hint.
+// Validations sheet/rows are the tie-winning hint once on auto.
 async function extractSessionSheet(XLSX, wb, session, onProgress) {
   const empty = { rawHeaders: [], rawHeaderNotes: {}, rawHeaderGroupLabels: {}, dropdownColumns: {}, dropdownReport: null }
   if (!session.dataSheetName) return empty
@@ -780,13 +807,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // presetData/categoriesData directly rather than going through the
   // only-fill-empty-slots helpers above (those are for topping up an
   // already-in-progress session from header-derived hints instead). The
-  // Validations sheet starts fully auto — extraction picks it against the
-  // fill sheet's real headers (see extractSessionSheet).
+  // Validations sheet comes off the same rule row (ruleValidationSession).
   function buildUploadSession(file, wb, meta) {
     const { brand, categories } = extractBrandAndCategories(file.name)
     const effectiveBrand = brand || presetData.marketplaceName || selectedMarketplace
     // Sheet No counts the tabs Excel actually shows — hidden sheets skipped.
-    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), effectiveBrand)
+    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), ruleBrandOf(brand, presetData.marketplaceName, selectedMarketplace))
     const nextDataSheetName = rule.dataSheetName || visibleSheetNames(wb)[0] || ''
     return {
       workbook: wb,
@@ -796,9 +822,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       dataHeaderRow: nextDataSheetName ? rule.dataHeaderRow : '',
       dataIsectionRow: nextDataSheetName ? rule.dataIsectionRow : '',
       dropdownDataStartRow: nextDataSheetName ? rule.dropdownDataStartRow : '',
-      ...NO_VALIDATION_INPUTS,
-      dropdownSheetMode: 'auto',
-      dropdownLayoutMode: 'auto',
+      ...ruleValidationSession(rule),
       rawHeaders: [],
       rawHeaderNotes: {},
       rawHeaderGroupLabels: {},
@@ -926,7 +950,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         // ends up active below) — that's what lets Header Mapping show the
         // whole batch's headers immediately instead of only after clicking
         // through each file one by one.
-        const extracted = await extractSessionSheet(XLSX, wb, { ...baseSession, brand: baseSession.presetData.marketplaceName })
+        const extracted = await extractSessionSheet(XLSX, wb, { ...baseSession, brand: ruleBrandOf(baseSession.presetData.marketplaceName, selectedMarketplace) })
         const session = { ...baseSession, ...extracted }
         sessions[fileId] = session
         entries.push({ id: fileId, templateName: file.name, finalName: file.name })
@@ -1029,7 +1053,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // on which row is which. A pinned Validations sheet that just became the
   // fill sheet can't be both, so the Validations side drops back to auto.
   function currentBrand() {
-    return presetData.marketplaceName || selectedMarketplace
+    return ruleBrandOf(presetData.marketplaceName, selectedMarketplace)
   }
   function selectDataSheet(val) {
     setDataSheetName(val)
@@ -1079,13 +1103,21 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDropdownLayoutMode('auto')
   }
   const pinned = dropdownSheetMode === 'pinned'
+  // Still exactly the brand's own sheetDefaults.js row, as filled in at upload?
+  const brandDefaults = workbook ? ruleValidationSession(detectMarketplaceSheetDefaults(visibleSheetNames(workbook), currentBrand())) : null
+  const onBrandDefaults = pinned && brandDefaults?.dropdownSheetMode === 'pinned'
+    && dropdownSheetName === brandDefaults.dropdownSheetName
+    && (!dropdownSheetName || (dropdownLayoutMode === 'manual'
+      && dropdownOrientation === brandDefaults.dropdownOrientation
+      && String(dropdownHeaderRow) === brandDefaults.dropdownHeaderRow
+      && String(dropdownValuesRow) === brandDefaults.dropdownValuesRow))
   // One line under the Validations sheet inputs: how the layout was arrived
   // at and how well it lines up with this fill sheet's headers.
   const validationNote = (() => {
     if (!dropdownReport) return ''
     const v = dropdownReport.validation
-    if (!v) return pinned ? '' : 'No Validations sheet detected — pick one to read it.'
-    const how = !pinned ? 'Auto-detected' : dropdownLayoutMode === 'manual' ? 'Typed layout' : dropdownLayoutMode === 'orientation' ? 'Lines auto-detected' : 'Layout auto-detected'
+    if (!v) return !pinned ? 'No Validations sheet detected — pick one to read it.' : onBrandDefaults ? `${currentBrand()} default — no Validations sheet.` : ''
+    const how = !pinned ? 'Auto-detected' : onBrandDefaults ? `${currentBrand()} default` : dropdownLayoutMode === 'manual' ? 'Typed layout' : dropdownLayoutMode === 'orientation' ? 'Lines auto-detected' : 'Layout auto-detected'
     return `${how} · ${v.matched} of ${dropdownReport.headers.length} headers matched.`
   })()
   // Only the Validations-sheet values the user actually controls in the

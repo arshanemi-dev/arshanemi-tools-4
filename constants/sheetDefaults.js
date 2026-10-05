@@ -19,10 +19,13 @@
 //   dropdown source starts reading).
 // - Validations Header/Value are ROWS when Vertical, COLUMNS when
 //   Horizontal (Amazon: field names down column 2, values from column 3).
-//   They're the preferred layout for auto-detect, which still overrides
-//   them when another layout clearly matches more of the fill sheet's
-//   headers (lib/dropdownExtraction.js). Myntra has no Validations sheet.
-// Any other brand falls back to `default` (the old generic rule).
+//   Myntra has no Validations sheet.
+// - A listed brand's whole row is filled in at upload exactly as written
+//   and read as-is — Validations side included. Only "Re-detect" switches
+//   that side to auto-detect (lib/dropdownExtraction.js), where these
+//   values are the tie-winning hint.
+// Any other brand falls back to `default` (the old generic rule), whose
+// Validations sheet is auto-detected from the start — its position is a guess.
 
 export const DEFAULT_SHEET_ROWS = {
   GROUP_ROW: 1,
@@ -116,9 +119,15 @@ function pickSheet(sheetNames, sheetNo, keyword, { keywordFirst = false, exclude
   return keywordFirst ? byKeyword || atIndex : atIndex || byKeyword
 }
 
+// Whether `brandName` has its own row in the table above (not `default`).
+export function hasMarketplaceSheetRule(brandName = '') {
+  const brandKey = String(brandName || '').trim().toLowerCase()
+  return brandKey !== 'default' && Object.hasOwn(MARKETPLACE_SHEET_RULES, brandKey)
+}
+
 export function detectMarketplaceSheetDefaults(sheetNames = [], brandName = '') {
-  const brandKey = (brandName || '').trim().toLowerCase()
-  const rule = MARKETPLACE_SHEET_RULES[brandKey] || MARKETPLACE_SHEET_RULES.default
+  const isBrandRule = hasMarketplaceSheetRule(brandName)
+  const rule = isBrandRule ? MARKETPLACE_SHEET_RULES[String(brandName).trim().toLowerCase()] : MARKETPLACE_SHEET_RULES.default
   const names = Array.isArray(sheetNames) ? sheetNames : []
 
   const dataSheetName = names.length
@@ -132,6 +141,7 @@ export function detectMarketplaceSheetDefaults(sheetNames = [], brandName = '') 
   // null (no such row) → '' so the input shows empty.
   const asInput = (n) => (n == null ? '' : n)
   return {
+    isBrandRule,
     dataSheetName,
     dataGroupRow: asInput(rule.dataGroupRow),
     dataHeaderRow: asInput(rule.dataHeaderRow),
