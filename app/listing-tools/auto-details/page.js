@@ -18,6 +18,7 @@ import { importIntoBestMatchingGroup } from '@/components/listing/parseUploadedS
 import { resolveLinkedFill, buildPickerOptions, propagateFromGroup, linkedIdentityGroups, keyValueOf } from '@/components/listing/linkedHeaders'
 import { findGroupKeyMatch, backfillEmptyFields, rowFromLabelKeyed } from '@/components/listing/historyFill'
 import { recomputeFormulas } from '@/components/listing/formula'
+import { rowMatchesSearch } from '@/components/listing/rowSearch'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
@@ -200,11 +201,21 @@ function ScopedAutoDetails({ templateId }) {
     return base
   }
 
-  function filteredRowsFor(group) {
-    const rows = sessionRowsFor(group)
-    if (!search.trim()) return rows
-    const q = search.toLowerCase()
-    return rows.filter((r, i) => i === rows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
+  // Which rows the Search box hides. A grid always gets a group's WHOLE row
+  // list plus one of these (SheetGrid's isRowVisible) — never a filtered
+  // copy, see components/listing/rowSearch.js for why. The last row always
+  // shows, so there's somewhere to type the next entry.
+  const query = search.trim().toLowerCase()
+  // Excel View — one group's own rows.
+  function rowVisibleIn(group) {
+    return (row, i) => !query || i === sessionRowsFor(group).length - 1 || rowMatchesSearch(row, query)
+  }
+  // Input Box View — a product: its Product Details row or any of the boxes under it.
+  function productVisible(row, i) {
+    return !query
+      || i === sessionRowsFor('design_system').length - 1
+      || rowMatchesSearch(row, query)
+      || realGroups.some((g) => g !== 'design_system' && rowMatchesSearch(sessionRowsFor(g)[i], query))
   }
 
   // Deleting a row here never hits the backend directly for the row's OWN sheet content (see the
@@ -881,7 +892,7 @@ function ScopedAutoDetails({ templateId }) {
             group: mg,
             label: ms.sheetName || (mg === 'compulsory' ? 'Compulsory' : 'Brand Details'),
             headers: ms.headers,
-            rows: filteredRowsFor(mg),
+            rows: sessionRowsFor(mg),
             onRowsChange: (nextRows) => handleRowsChange(mg, nextRows),
             onCellChange: cellChangeFor(mg),
             onHeaderChange: (headerId, patch) => handleHeaderChange(mg, headerId, patch),
@@ -902,7 +913,7 @@ function ScopedAutoDetails({ templateId }) {
             bucket,
             headers: gsheet.headers,
             visibleHeaderIds: ids,
-            rows: filteredRowsFor(g),
+            rows: sessionRowsFor(g),
             onRowsChange: (nextRows) => handleRowsChange(g, nextRows),
             onCellChange: dsOnCellChange,
             onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
@@ -923,7 +934,8 @@ function ScopedAutoDetails({ templateId }) {
             headerInfo
             autoAppendRow={false}
             headers={coreHeaders}
-            rows={filteredRowsFor(g)}
+            rows={sessionRowsFor(g)}
+            isRowVisible={productVisible}
             onRowsChange={(nextRows) => handleRowsChange(g, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             pickerOptions={pickerOptionsFor(g)}
@@ -963,7 +975,8 @@ function ScopedAutoDetails({ templateId }) {
           <SheetGrid
             headerInfo
             headers={sheetsByGroup[openGroup].headers}
-            rows={filteredRowsFor(openGroup)}
+            rows={sessionRowsFor(openGroup)}
+            isRowVisible={rowVisibleIn(openGroup)}
             onRowsChange={(nextRows) => handleRowsChange(openGroup, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             pickerOptions={pickerOptionsFor(openGroup)}

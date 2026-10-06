@@ -13,11 +13,12 @@ function isRowEmpty(row) {
 // image to yet) — one row's boxes are listed in full before the next
 // row's, column order within a row follows header.order. This list IS the
 // upload capacity: (filled rows × image columns) − boxes already holding
-// an image.
-export function buildEmptySlots(rows, imageHeaders) {
+// an image. A row the grid is currently hiding (`isRowVisible`, a page's
+// search/filter) is skipped too — images only ever land in boxes on screen.
+export function buildEmptySlots(rows, imageHeaders, isRowVisible) {
   const slots = []
   rows.forEach((row, rowIndex) => {
-    if (isRowEmpty(row)) return
+    if (isRowEmpty(row) || (isRowVisible && !isRowVisible(row, rowIndex))) return
     imageHeaders.forEach((h) => {
       if (!row[h.id]) slots.push({ rowIndex, headerId: h.id })
     })
@@ -38,7 +39,7 @@ export function buildEmptySlots(rows, imageHeaders) {
 // `slots` it was matched to into `slotStatus`, a `{rowIndex:headerId}` →
 // upload-status map, so every affected cell can show its own queued /
 // uploading / retrying / error state directly in its own row's box.
-export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl, onImageUploaded }) {
+export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl, onImageUploaded, isRowVisible }) {
   const [message, setMessage] = useState(null) // { text, warning }
   const [activeSlots, setActiveSlots] = useState([])
   const rowsRef = useRef(rows)
@@ -49,7 +50,7 @@ export function useBulkImageUpload({ headers, rows, onRowsChange, uploadUrl, onI
     const files = Array.from(fileList || [])
     if (files.length === 0 || !uploadUrl) return
 
-    const slots = buildEmptySlots(rows, imageHeaders)
+    const slots = buildEmptySlots(rows, imageHeaders, isRowVisible)
     if (files.length > slots.length) {
       setMessage({
         warning: true,

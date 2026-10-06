@@ -14,6 +14,7 @@ import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
 import { resolveLinkedFill, buildPickerOptions, linkedIdentityGroups, keyValueOf } from '@/components/listing/linkedHeaders'
+import { rowMatchesSearch } from '@/components/listing/rowSearch'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import useDebouncedCallback from '@/hooks/useDebouncedCallback'
@@ -122,21 +123,28 @@ function ScopedProductDetails({ templateId }) {
   const filledRowCount = (activeSheet?.rows || []).filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
   const hasAnyFilledRow = filledRowCount > 1
 
-  // Same filter + search pipeline as before, now resolved per group.
-  function filteredRowsFor(group) {
-    const gsheet = sheetsByGroup[group]
-    if (!gsheet) return []
-    let out = gsheet.rows
+  // Which rows the Search box and a key-column filter hide. A grid always gets
+  // a group's WHOLE row list plus one of these (SheetGrid's isRowVisible) —
+  // never a filtered copy: an edit saves the list the grid was given, so the
+  // hidden rows would be deleted from the sheet (see
+  // components/listing/rowSearch.js). The last row always shows, so there's
+  // somewhere to type the next entry.
+  const query = search.trim().toLowerCase()
+  function passesKeyFilter(group, row) {
     const f = filter[group]
-    if (f?.key && String(f.value).trim()) {
-      const fq = String(f.value).toLowerCase()
-      out = out.filter((r, i) => i === gsheet.rows.length - 1 || String(r[f.key] ?? '').toLowerCase().includes(fq))
-    }
-    if (search.trim()) {
-      const sq = search.toLowerCase()
-      out = out.filter((r, i) => i === out.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(sq)))
-    }
-    return out
+    if (!f?.key || !String(f.value).trim()) return true
+    return String(row?.[f.key] ?? '').toLowerCase().includes(String(f.value).toLowerCase())
+  }
+  // Excel View — one group's own rows.
+  function rowVisibleIn(group) {
+    return (row, i) => i === sheetsByGroup[group].rows.length - 1
+      || (passesKeyFilter(group, row) && (!query || rowMatchesSearch(row, query)))
+  }
+  // Input Box View — a product: its Product Details row or any of the boxes under it.
+  function productVisible(row, i) {
+    return i === sheetsByGroup.design_system.rows.length - 1
+      || (passesKeyFilter('design_system', row)
+        && (!query || rowMatchesSearch(row, query) || mergeGroups.some((g) => rowMatchesSearch(sheetsByGroup[g].rows[i], query))))
   }
 
   function onFilterChange(group, headerId, value) {
@@ -413,7 +421,7 @@ function ScopedProductDetails({ templateId }) {
             group: mg,
             label: ms.sheetName || (mg === 'compulsory' ? 'Compulsory' : 'Brand Details'),
             headers: ms.headers,
-            rows: filteredRowsFor(mg),
+            rows: ms.rows,
             onRowsChange: (nextRows) => saveRows(mg, nextRows),
             onCellChange: (headerId, value, rowIndex) => resolveLinkedFill(ms.headers, headerId, value, rowIndex, sheetsByGroup),
             onHeaderChange: (headerId, patch) => handleHeaderChange(mg, headerId, patch),
@@ -431,7 +439,7 @@ function ScopedProductDetails({ templateId }) {
             bucket,
             headers: gsheet.headers,
             visibleHeaderIds: ids,
-            rows: filteredRowsFor(g),
+            rows: gsheet.rows,
             onRowsChange: (nextRows) => saveRows(g, nextRows),
             onCellChange: dsOnCellChange,
             onHeaderChange: (headerId, patch) => handleHeaderChange(g, headerId, patch),
@@ -452,7 +460,8 @@ function ScopedProductDetails({ templateId }) {
             headerInfo
             autoAppendRow={false}
             headers={coreHeaders}
-            rows={filteredRowsFor(g)}
+            rows={gsheet.rows}
+            isRowVisible={productVisible}
             onRowsChange={(nextRows) => saveRows(g, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             activeFilterHeaderId={filter[g]?.key || null}
@@ -491,7 +500,8 @@ function ScopedProductDetails({ templateId }) {
             <SheetGrid
               headerInfo
               headers={gsheet.headers}
-              rows={filteredRowsFor(g)}
+              rows={gsheet.rows}
+              isRowVisible={rowVisibleIn(g)}
               onRowsChange={(nextRows) => saveRows(g, nextRows)}
               uploadUrl={`/api/listing-tools/${templateId}/images`}
               activeFilterHeaderId={filter[g]?.key || null}
@@ -502,9 +512,8 @@ function ScopedProductDetails({ templateId }) {
               onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}
               onImageUploaded={(rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url)}
               // A Product Details row goes the same way it does in the Input
-              // Box View (its Brand Details row with it) — the row's real
-              // position, not its place in a searched/filtered list.
-              onDeleteRow={(row) => (g === 'design_system' ? handleDeleteProductRow(row, gsheet.rows.indexOf(row)) : handleDeleteRow(g, row))}
+              // Box View (its Brand Details row with it).
+              onDeleteRow={(row, rowIndex) => (g === 'design_system' ? handleDeleteProductRow(row, rowIndex) : handleDeleteRow(g, row))}
             />
           </div>
         )

@@ -88,6 +88,13 @@ export default function SheetGrid({
   // row — new rows are added only on demand by the caller (an "Add Product"
   // button). Default keeps the old always-one-trailing-blank behaviour.
   autoAppendRow = true,
+  // Opt-in — `isRowVisible(row, rowIndex)` hides a row from view (a page's
+  // search box / column filter) WITHOUT taking it out of `rows`. This is how
+  // a page must filter (see rowSearch.js): every edit hands `onRowsChange`
+  // the whole `rows` list back and pages save exactly that, so a filtered
+  // copy passed as `rows` would lose every hidden row on the first
+  // keystroke. Row indexes given to every callback stay the real ones.
+  isRowVisible,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -129,7 +136,7 @@ export default function SheetGrid({
   // own single-file path, so a multi-select from inside a cell behaves
   // exactly like the dedicated BulkImageDropZone toolbar above the grid:
   // same row-by-row empty-box fill, same capacity check, same progress UI.
-  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl, onImageUploaded })
+  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl, onImageUploaded, isRowVisible })
 
   // Cascade a single cell's new value into the rest of that same row —
   // connected-header auto-fill, then formula recompute (in that order, so a
@@ -285,7 +292,7 @@ export default function SheetGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
+          {rows.map((row, rowIndex) => (isRowVisible && !isRowVisible(row, rowIndex) ? null : (
             <Fragment key={rowIndex}>
             <tr className="hover:bg-surface/80 group">
               {onDeleteRow && (
@@ -399,7 +406,7 @@ export default function SheetGrid({
               </tr>
             )}
             </Fragment>
-          ))}
+          )))}
         </tbody>
       </table>
       </div>

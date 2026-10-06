@@ -10,6 +10,7 @@ import BillingGateModal from '@/components/billing/BillingGateModal'
 import AssignedTemplatePicker from '@/components/listing/AssignedTemplatePicker'
 import TemplateHistoryPanel from '@/components/listing/TemplateHistoryPanel'
 import { resolveLinkedFill, buildPickerOptions } from '@/components/listing/linkedHeaders'
+import { rowMatchesSearch } from '@/components/listing/rowSearch'
 import { computeVisionTargets } from '@/lib/aiFillPrompt'
 import { useToast } from '@/components/admin/Toast'
 import { parseUploadedSheetRows } from '@/components/listing/parseUploadedSheet'
@@ -68,12 +69,13 @@ function ScopedBrandDetails({ templateId }) {
     [content]
   )
 
-  const filteredRows = useMemo(() => {
-    if (!sheet) return []
-    if (!search.trim()) return sheet.rows
-    const q = search.toLowerCase()
-    return sheet.rows.filter((r, i) => i === sheet.rows.length - 1 || Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').toLowerCase().includes(q)))
-  }, [sheet, search])
+  // Which rows the Search box hides. The grid always gets the WHOLE sheet plus
+  // this (SheetGrid's isRowVisible) — never a filtered copy: an edit saves the
+  // list the grid was given, so the hidden rows would be deleted from the
+  // sheet (see components/listing/rowSearch.js). The last row always shows,
+  // so there's somewhere to type the next entry.
+  const query = search.trim().toLowerCase()
+  const isRowVisible = (row, i) => !query || i === sheet.rows.length - 1 || rowMatchesSearch(row, query)
 
   // Row edits persist on a short 50ms idle debounce (header/formula edits below still save
   // immediately — those are template-structure changes, not per-listing row data).
@@ -209,7 +211,8 @@ function ScopedBrandDetails({ templateId }) {
         {sheet && (
           <SheetGrid
             headers={sheet.headers}
-            rows={filteredRows}
+            rows={sheet.rows}
+            isRowVisible={isRowVisible}
             onRowsChange={saveRows}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
             pickerOptions={buildPickerOptions(sheet.headers, sheetsByGroup)}
