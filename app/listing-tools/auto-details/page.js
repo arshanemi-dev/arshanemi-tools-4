@@ -5,6 +5,9 @@ import { Search, Download, UploadCloud, PlusCircle, Plus, Save, Sparkles, Monito
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
 import MergedRowFields from '@/components/listing/MergedRowFields'
+import SheetTabs from '@/components/listing/SheetTabs'
+import FillViewToggle from '@/components/listing/FillViewToggle'
+import useFillView from '@/components/listing/useFillView'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import useAiAutofillBulk from '@/components/listing/useAiAutofillBulk'
@@ -32,8 +35,10 @@ export default function AutoDetailsPage() {
 }
 
 // The Auto Listing fill/export workspace — every sheet (Product Details
-// included) visible and editable on one screen at once, each block with its
-// own independent group tab-strip. This page is a *fresh* entry form every
+// included) editable on one screen, in either of two layouts switched from
+// the toolbar (useFillView.js): input boxes under each Product Details row,
+// or an Excel-like grid per group behind a tab strip. Both edit the same
+// session rows. This page is a *fresh* entry form every
 // visit — it never displays rows already saved from a previous session
 // (that's what Product Details/Prefill Details are for). `content` is still
 // fetched in full and kept around, but only as: (a) the lookup source for
@@ -65,6 +70,10 @@ function ScopedAutoDetails({ templateId }) {
   const { addToast } = useToast()
   const [template, setTemplate] = useState(null)
   const [search, setSearch] = useState('')
+  // Input Box View / Excel View — and, for the Excel view, whichever group's
+  // tab was opened last.
+  const [view, setView] = useFillView()
+  const [excelGroup, setExcelGroup] = useState(ALL_GROUPS[0])
   const [content, setContent] = useState(null)
   const [sessionRows, setSessionRows] = useState({})
   const [uploading, setUploading] = useState(false)
@@ -136,6 +145,9 @@ function ScopedAutoDetails({ templateId }) {
     () => ALL_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0),
     [sheetsByGroup]
   )
+  // The Excel view's open tab — the first group this template really has
+  // when the one opened last has no columns here.
+  const openGroup = realGroups.includes(excelGroup) ? excelGroup : realGroups[0]
 
   // "History" matching/auto-fill (Rule A/B, see historyFill.js and
   // linkedHeaders.js) must only ever see the current viewer's own
@@ -561,6 +573,28 @@ function ScopedAutoDetails({ templateId }) {
     600
   )
 
+  // The onCellChange for any grid/box showing `group`, in either layout —
+  // one cell edit → what else changes in that same row (returned), plus
+  // everything it sets off in the other groups. `row` already has this edit
+  // applied (SheetGrid's resolveRow / MergedRowFields' updateCell); whatever
+  // Rule A just resolved is merged in too, so picking an *existing* record
+  // propagates its full row, not just the one field that was clicked.
+  // Typing into the Product Group cell (only ever a Product Details column)
+  // is also what triggers the group backfill.
+  function cellChangeFor(group) {
+    const groupHeaders = sheetsByGroup[group]?.headers || []
+    return (headerId, value, rowIndex, row) => {
+      const sameGroupExtra = resolveLinkedFill(groupHeaders, headerId, value, -1, ownSheetsByGroup)
+      const fullRow = { ...row, ...(sameGroupExtra || {}) }
+      const crossGroupUpdates = propagateFromGroup(group, fullRow, ownSheetsByGroup)
+      handleCellReconciliation(rowIndex, headerId, group, fullRow, crossGroupUpdates)
+      if (productGroupHeaderId && headerId === productGroupHeaderId) {
+        debouncedGroupAutoFill(value, rowIndex)
+      }
+      return sameGroupExtra
+    }
+  }
+
   // Clears every block back to a single blank row — a manual "start over"
   // for the next listing, independent of SheetGrid's own automatic
   // one-trailing-blank-row behavior. Since this session never autosaves
@@ -756,8 +790,8 @@ function ScopedAutoDetails({ templateId }) {
 
   return (
     <div className="min-h-[80vh] bg-surface px-6 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
           <input
             value={search}
@@ -766,7 +800,8 @@ function ScopedAutoDetails({ templateId }) {
             className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <FillViewToggle view={view} onChange={setView} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <PillButton variant="edit" icon={Plus} onClick={handleAddProduct} disabled={!content}>
             Add Product
           </PillButton>
@@ -822,11 +857,11 @@ function ScopedAutoDetails({ templateId }) {
 
       {!content && <p className="px-4 py-8 text-center text-[13px] text-subtle">Loading…</p>}
 
-      {/* No tab strip. Product Details is the scrolling SheetGrid table; each
-          of its rows is immediately followed by that same row's Compulsory +
-          Brand Details fields, injected as a sub-row (renderRowSubRow →
-          MergedRowFields). Every handler is scoped per group. */}
-      {content && realGroups.includes('design_system') && (() => {
+      {/* Input Box View — no tab strip. Product Details is the scrolling
+          SheetGrid table; each of its rows is immediately followed by that
+          same row's Compulsory + Brand Details fields, injected as a sub-row
+          (renderRowSubRow → MergedRowFields). Every handler is scoped per group. */}
+      {content && view === 'boxes' && realGroups.includes('design_system') && (() => {
         const g = 'design_system'
         const gsheet = sheetsByGroup[g]
         // Product Details table shows only the *core* Product Details columns —
@@ -837,16 +872,7 @@ function ScopedAutoDetails({ templateId }) {
 
         // Shared design_system edit handlers — reused by the bucket sub-sections
         // below, whose real group is still design_system.
-        const dsOnCellChange = (headerId, value, rowIndex, row) => {
-          const sameGroupExtra = resolveLinkedFill(gsheet.headers, headerId, value, -1, ownSheetsByGroup)
-          const fullRow = { ...row, ...(sameGroupExtra || {}) }
-          const crossGroupUpdates = propagateFromGroup(g, fullRow, ownSheetsByGroup)
-          handleCellReconciliation(rowIndex, headerId, g, fullRow, crossGroupUpdates)
-          if (productGroupHeaderId && headerId === productGroupHeaderId) {
-            debouncedGroupAutoFill(value, rowIndex)
-          }
-          return sameGroupExtra
-        }
+        const dsOnCellChange = cellChangeFor(g)
 
         const subGroups = realGroups.filter((x) => x !== 'design_system')
         const groupSections = subGroups.map((mg) => {
@@ -857,13 +883,7 @@ function ScopedAutoDetails({ templateId }) {
             headers: ms.headers,
             rows: filteredRowsFor(mg),
             onRowsChange: (nextRows) => handleRowsChange(mg, nextRows),
-            onCellChange: (headerId, value, rowIndex, row) => {
-              const sameGroupExtra = resolveLinkedFill(ms.headers, headerId, value, -1, ownSheetsByGroup)
-              const fullRow = { ...row, ...(sameGroupExtra || {}) }
-              const crossGroupUpdates = propagateFromGroup(mg, fullRow, ownSheetsByGroup)
-              handleCellReconciliation(rowIndex, headerId, mg, fullRow, crossGroupUpdates)
-              return sameGroupExtra
-            },
+            onCellChange: cellChangeFor(mg),
             onHeaderChange: (headerId, patch) => handleHeaderChange(mg, headerId, patch),
             onImageUploaded: (rowIndex, headerId, url) => handleImageUploaded(mg, rowIndex, headerId, url),
             pickerOptions: pickerOptionsFor(mg),
@@ -925,6 +945,37 @@ function ScopedAutoDetails({ templateId }) {
         )
       })()}
 
+      {/* Excel View — the tab-wise layout this page had before the input
+          boxes: one tab per group this template uses, and the open group's
+          every column (Big / Image Link ones included) across one grid row,
+          the way the sheet itself reads. Same session rows and the same
+          per-group handlers as the Input Box View, so nothing typed is lost
+          switching between the two. Typing in the last row opens the next
+          one, as a sheet would (SheetGrid's default autoAppendRow). */}
+      {content && view === 'excel' && openGroup && (
+        <div className="border border-divider rounded-lg overflow-hidden bg-card">
+          <SheetTabs
+            variant="dark"
+            active={openGroup}
+            onChange={(group) => { setExcelGroup(group); setSearch('') }}
+            sheets={content.sheets}
+          />
+          <SheetGrid
+            headerInfo
+            headers={sheetsByGroup[openGroup].headers}
+            rows={filteredRowsFor(openGroup)}
+            onRowsChange={(nextRows) => handleRowsChange(openGroup, nextRows)}
+            uploadUrl={`/api/listing-tools/${templateId}/images`}
+            pickerOptions={pickerOptionsFor(openGroup)}
+            loadingCells={loadingCells}
+            onCellChange={cellChangeFor(openGroup)}
+            onHeaderChange={(headerId, patch) => handleHeaderChange(openGroup, headerId, patch)}
+            onImageUploaded={(rowIndex, headerId, url) => handleImageUploaded(openGroup, rowIndex, headerId, url)}
+            onDeleteRow={(row) => handleDeleteRow(openGroup, row)}
+          />
+        </div>
+      )}
+
       <BillingGateModal gate={gate} onClose={closeGate} onRetry={handleDownload} />
       <BillingGateModal gate={saveGate} onClose={() => setSaveGate(null)} onRetry={handleSave} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />
@@ -943,7 +994,7 @@ function ScopedAutoDetails({ templateId }) {
             headers: sheetsByGroup[group]?.headers || [],
             rows: sessionRows[group] || [],
           }))}
-          defaultGroup={realGroups[0]}
+          defaultGroup={view === 'excel' ? openGroup : realGroups[0]}
           onRun={(selections) => { setShowAiFillUpModal(false); handleAiFillUp(selections) }}
         />
       )}

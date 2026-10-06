@@ -47,10 +47,17 @@ export default function useTemplateExport(templateId) {
       const exportSource = billResult.exportContent || billResult.content
       const effectiveTemplate = exportSource ? { ...template, sheets: exportSource.sheets } : template
 
-      if (format === 'excel') await downloadExcelSmart(effectiveTemplate, meta, { groups })
+      let outcome
+      if (format === 'excel') outcome = await downloadExcelSmart(effectiveTemplate, meta, { groups })
       else await downloadPdf(effectiveTemplate, { groups })
 
-      addToast('Export downloaded', 'success')
+      // The data still came out, just not inside the marketplace's own sheet —
+      // none of this template's fields is tied to a column in it.
+      if (outcome === 'plain-unlinked') {
+        addToast("Downloaded as a plain sheet — this template's fields aren't linked to the marketplace sheet's columns. Re-save it in Template Settings with the sheet attached.", 'info')
+      } else {
+        addToast('Export downloaded', 'success')
+      }
     } catch (err) {
       addToast(err.message || 'Export failed', 'error')
     } finally {

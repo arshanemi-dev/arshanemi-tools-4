@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, Bookmark } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/admin/Toast'
 import Modal from '@/components/admin/Modal'
-import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults, hasMarketplaceSheetRule } from '@/lib/listingSheetLayout'
+import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults, hasMarketplaceSheetRule, multiValueRuleFor } from '@/lib/listingSheetLayout'
 import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
 import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
@@ -23,6 +23,9 @@ import DropdownDebugPanel from './DropdownDebugPanel'
 import { readDataValidationLists } from '@/lib/sheetDataValidations'
 import { visibleSheetNames, hiddenSheets } from '@/lib/sheetVisibility'
 import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
+import { cleanLabel, splitHeaderCell } from '@/lib/sheetHeaderLabel'
+import { REAL_GROUPS, SHEET_LABELS, seedFromExistingContent, buildGroupedSheets } from './bulkTemplateSheets'
+import { findHeaderUsage } from './ourHeaderUsage'
 
 // Sidebar sections (keyed by title) toggled by their eye OR title. Accordion:
 // opening one closes every other; paired sections (Header Mapping + Mapping
@@ -49,52 +52,13 @@ const SECTION_LINKS = {
 // Everything starts closed except the first sidebar section, Ecommerce Brands.
 const DEFAULT_HIDDEN_SECTIONS = Object.fromEntries(SECTION_GROUPS.flat().map((k) => [k, k !== 'Ecommerce Brands']))
 
-const REAL_GROUPS = ['design_system', 'compulsory', 'prefill']
-const SHEET_LABELS = { design_system: 'Product details', compulsory: 'Compulsory', prefill: 'Brand Details' }
 // Same shape NewTemplateDesign.jsx's own SECTIONS constant uses — just
 // what NewDesignColumnModal needs to label each group in "Auto-Fill From".
 const MODAL_SECTIONS = REAL_GROUPS.map((id) => ({ id, title: SHEET_LABELS[id] }))
 const DEFAULT_CATEGORIES = { category1: '', category2: '', category3: '', category4: '', category5: '', category6: '' }
 
-function slugify(label) {
-  return String(label || 'col').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'col'
-}
 function yieldToPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()))
-}
-// Single-line cleanup only — collapses whitespace and trims. Used on its
-// own for simple values (the I section row's note text), and as the final
-// step inside splitHeaderCell below for the label/description it pulls
-// apart.
-function cleanLabel(raw) {
-  return String(raw ?? '').replace(/\s+/g, ' ').trim()
-}
-// Same idea as TemplateSettingsWizard.jsx's own splitHeaderCell (duplicated
-// for the same reason cleanLabel/isPlaceholderValue already are — that file
-// pulls in a lot of unrelated Kanban-era state) — a header cell often
-// carries a short title plus a longer instructional note, either on its own
-// line (Alt+Enter/wrap-text, which SheetJS preserves as a literal \n) or
-// with no line break at all, just run on after a "Please enter…"/"Note:"
-// lead-in ("Product Name Please enter the product name. Note: Please avoid
-// adding product features such as weight, dimension, price description
-// here."). Both resolve to a short `label` with the note captured
-// separately as `description` — feeds the SAME target as the I section
-// row's own note (see the extraction effect below), and wins over it when
-// both are present, since an in-cell note is more specific to this exact
-// column than a row shared across every column.
-const NOTE_LEAD_IN = /\s+(please\s+(?:enter|select|provide|choose|fill|add|note)\b|note\s*:|instructions?\s*:)/i
-function splitHeaderCell(raw) {
-  const normalized = String(raw ?? '').replace(/ /g, ' ').replace(/\r\n/g, '\n')
-  const lines = normalized.split('\n').map((l) => cleanLabel(l)).filter(Boolean)
-  if (lines.length > 1) {
-    return { label: lines[0], description: lines.slice(1).join(' ') }
-  }
-  const single = cleanLabel(normalized)
-  const match = single.match(NOTE_LEAD_IN)
-  if (match && match.index > 0) {
-    return { label: single.slice(0, match.index).trim(), description: single.slice(match.index).trim() }
-  }
-  return { label: single, description: '' }
 }
 function isPlaceholderLabel(label) {
   const v = label.trim()
@@ -252,11 +216,15 @@ function computeCommonHeaderInfo(sheets) {
 // rewritten mid-keystroke. `session.brand` picks the marketplace rule whose
 // Validations sheet/rows are the tie-winning hint once on auto.
 async function extractSessionSheet(XLSX, wb, session, onProgress) {
-  const empty = { rawHeaders: [], rawHeaderNotes: {}, rawHeaderGroupLabels: {}, dropdownColumns: {}, dropdownReport: null }
+  const empty = { rawHeaders: [], rawHeaderNotes: {}, rawHeaderGroupLabels: {}, dropdownColumns: {}, dropdownReport: null, sheetSource: null }
   if (!session.dataSheetName) return empty
   const ws = wb.Sheets[session.dataSheetName]
   if (!ws) return empty
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 })
+  // sheet_to_json counts rows/columns from the sheet's used range, which
+  // doesn't have to start at A1 — `origin` turns an index here back into the
+  // real Excel row/column for sheetSource below.
+  const origin = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s : { r: 0, c: 0 }
   const headerRowIdx = parseRowInput(session.dataHeaderRow, HEADER_ROW_INDEX)
   const sameConfiguredRow = String(session.dataHeaderRow ?? '').trim() !== ''
     && String(session.dataIsectionRow ?? '').trim() !== ''
@@ -280,6 +248,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
   const rawHeaderNotes = {}
   const rawHeaderGroupLabels = {}
   const headerCells = []
+  const sourceCols = {}
   for (let i = startColIdx; i < rawRow.length; i++) {
     if (onProgress) {
       onProgress('Extracting headers…', i + 1, rawRow.length)
@@ -292,6 +261,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     seen.add(key)
     rawHeaders.push(label)
     headerCells.push({ label, colIdx: i })
+    sourceCols[label] = origin.c + i
     // In-cell note (same cell, split by line/lead-in) wins over the I
     // section row's note when both exist.
     const isectionNote = cleanLabel(isectionRow[i])
@@ -320,10 +290,20 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     dataStartIdx,
     dataStartColIdx: startColIdx,
     validation,
+    // Flipkart: a list that's only on a reference sheet (Validations /
+    // Allowed Values), with no dropdown on the input sheet, is a field
+    // taking several values in one cell — those columns come back marked,
+    // and handleMap types them Multi Select.
+    multiValue: multiValueRuleFor(session.brand || ''),
   })
   const typed = options.sheetMode === 'pinned' && options.layoutMode === 'manual'
   return {
     rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns: columns, dropdownReport: report,
+    // Where these headers sit in the real sheet (0-based column, 1-based
+    // rows) — saved on each mapped header (bulkTemplateSheets.js) so the
+    // export writes values back into those exact columns, starting at the
+    // sheet's own first input row.
+    sheetSource: { cols: sourceCols, headerRow: origin.r + headerRowIdx + 1, dataStartRow: origin.r + dataStartIdx + 1 },
     ...(typed ? {} : layoutToInputs(validation)),
   }
 }
@@ -374,100 +354,6 @@ function extractBrandAndCategories(filename) {
   }
 
   return { brand, categories }
-}
-
-function seedFromExistingContent(content) {
-  const out = []
-  for (const sheet of content.sheets || []) {
-    for (const h of sheet.headers || []) {
-      out.push({
-        ourHeaderId: h.id,
-        ourHeaderLabel: h.label,
-        dataType: h.dataType || 'text',
-        isUniqueKeyPart: !!h.isUniqueKeyPart,
-        sheetHeaders: [h.label],
-        group: h.group || sheet.group,
-        position: h.order ?? 0,
-        existingId: h.id,
-        description: h.description || '',
-        // Carried through so re-saving without touching the Header Settings
-        // modal doesn't wipe what was already configured there (same
-        // "preserve on save" fix as description above).
-        dropdownValues: h.dropdownSource?.values ? [...h.dropdownSource.values] : [],
-        formula: h.formula || '',
-        disabled: !!h.disabled,
-        linkedGroup: h.linkedGroup || null,
-        linkedHeaderId: h.linkedHeaderId || null,
-        linkedHeaderIds: Array.isArray(h.linkedHeaderIds) ? h.linkedHeaderIds : [],
-        uiBucket: h.uiBucket || null,
-      })
-    }
-  }
-  return out
-}
-
-// `dropdownColumns` — this session's detected dropdown values (see
-// extractSessionSheet / lib/dropdownExtraction.js), keyed directly by the
-// raw sheetHeader label they belong to, so this is just a direct lookup
-// (any cross-sheet Validations-sheet matching already happened). A match
-// upgrades a plain 'text' dataType to 'dropdown'; an Our Header already
-// configured as dropdown/multiselect keeps its own dataType and just gets
-// the values. `rawHeaderNotes` — the I section row's text, keyed by raw
-// label (see the combined extraction effect), carried through as each
-// header's description.
-function buildGroupedSheets(mappedHeaders, dropdownColumns = {}, rawHeaderNotes = {}) {
-  const byGroup = { design_system: [], compulsory: [], prefill: [] }
-  for (const m of mappedHeaders) {
-    if (!m.group || m.sheetHeaders.length === 0) continue
-    byGroup[m.group]?.push(m)
-  }
-  return REAL_GROUPS.map((g, i) => {
-    const headers = byGroup[g]
-      .slice()
-      .sort((a, b) => a.position - b.position)
-      .map((m, idx) => {
-        // Auto-detected column (own-column dropdown scan) vs. whatever the
-        // Header Settings modal set by hand — manual dataType/dropdownValues
-        // win when present, same precedence /new's own save-time logic uses.
-        const autoCol = m.sheetHeaders.map((sh) => dropdownColumns[sh]).find(Boolean) || null
-        const dataType = m.dataType && m.dataType !== 'text' ? m.dataType : (autoCol ? 'dropdown' : 'text')
-        const manualValues = Array.isArray(m.dropdownValues) && m.dropdownValues.length ? m.dropdownValues : null
-        const note = m.sheetHeaders.map((sh) => rawHeaderNotes[sh]).find(Boolean) || m.description || ''
-        return {
-          id: m.existingId || `hdr_${slugify(m.ourHeaderLabel)}_${idx}_${Date.now()}`,
-          label: m.ourHeaderLabel,
-          description: note,
-          order: idx,
-          group: g,
-          dataType,
-          isUniqueKeyPart: !!m.isUniqueKeyPart,
-          sourceColIndex: undefined,
-          linkedGroup: m.linkedGroup || null,
-          linkedHeaderId: m.linkedHeaderId || null,
-          linkedHeaderIds: Array.isArray(m.linkedHeaderIds) ? m.linkedHeaderIds : [],
-          uiBucket: m.uiBucket || null,
-          formula: m.formula || '',
-          disabled: !!m.disabled,
-          source: 'upload',
-          dropdownSource: (dataType === 'dropdown' || dataType === 'multiselect')
-            ? { sheetName: autoCol?.sheetName || null, columnName: autoCol?.columnName || null, values: manualValues || autoCol?.values || [] }
-            : null,
-        }
-      })
-
-    const sampleRow = {}
-    headers.forEach((h) => {
-      sampleRow[h.label] = `${h.label} Sample`
-    })
-
-    return {
-      sheetName: SHEET_LABELS[g],
-      sheetIndex: i,
-      group: g,
-      headers,
-      rows: headers.length > 0 ? [sampleRow] : [],
-    }
-  })
 }
 
 // The bulk mapping flow — two different working sets share this same page:
@@ -576,6 +462,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [rawHeaderNotes, setRawHeaderNotes] = useState({}) // { [label]: noteText } — the I section row, column-aligned to rawHeaders, see the combined extraction effect below
   const [rawHeaderGroupLabels, setRawHeaderGroupLabels] = useState({}) // { [label]: groupLabelText } — the Group Row, forward-filled and column-aligned to rawHeaders, feeds autoPlaceHeaders
   const [dropdownColumns, setDropdownColumns] = useState({}) // { [label]: {sheetName, columnName, values, source} } — see extractSessionSheet / lib/dropdownExtraction.js
+  const [sheetSource, setSheetSource] = useState(null) // { cols: {[label]: colIndex}, headerRow, dataStartRow } — where the active file's raw headers sit in its fill sheet, see extractSessionSheet
 
   const [ourHeaders, setOurHeaders] = useState([])
   const [creatingHeader, setCreatingHeader] = useState(false)
@@ -629,7 +516,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       workbook, sheetMeta, dataSheetName,
       dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow, dataStartCol,
       dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownStartCol, dropdownSheetMode, dropdownLayoutMode,
-      rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns, dropdownReport, presetData, categoriesData, fileName, sourceFileUrl,
+      rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns, dropdownReport, sheetSource, presetData, categoriesData, fileName, sourceFileUrl,
     }
   }
   function applySnapshot(session) {
@@ -653,6 +540,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setRawHeaderGroupLabels(session.rawHeaderGroupLabels || {})
     setDropdownColumns(session.dropdownColumns || {})
     setDropdownReport(session.dropdownReport || null)
+    setSheetSource(session.sheetSource || null)
     setPresetData(session.presetData)
     setCategoriesData(session.categoriesData)
     setFileName(session.fileName)
@@ -798,6 +686,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setRawHeaderGroupLabels({})
       setDropdownColumns({})
       setDropdownReport(null)
+      setSheetSource(null)
     })()
     return () => { cancelled = true }
   }, [activeTemplateId, templatesData])
@@ -843,6 +732,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       rawHeaderGroupLabels: {},
       dropdownColumns: {},
       dropdownReport: null,
+      sheetSource: null,
       // A brand-new template's first save is always its version 1.
       presetData: { marketplaceName: effectiveBrand, exportVersion: '1', description: '' },
       categoriesData: {
@@ -1055,6 +945,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setRawHeaderGroupLabels({})
     setDropdownColumns({})
     setDropdownReport(null)
+    setSheetSource(null)
   }
 
   function confirmClearUpload() {
@@ -1176,6 +1067,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setRawHeaderGroupLabels(result.rawHeaderGroupLabels)
       setDropdownColumns(result.dropdownColumns)
       setDropdownReport(result.dropdownReport)
+      setSheetSource(result.sheetSource)
       if ('dropdownSheetName' in result) applyValidationInputs(result)
       setExtraction({ stage: 'Done', current: result.rawHeaders.length, total: result.rawHeaders.length })
       setTimeout(() => { if (!cancelled) setExtraction(null) }, 500)
@@ -1318,12 +1210,23 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       // reached the mapped header, so its Settings modal opened on Text
       // with nothing in the Dropdown tab to show.
       const defaults = ourHeaderDropdownDefaults[ourHeaderId]
-      const detected = allDropdownColumns[sheetHeader]?.values
-      const dropdownValues = defaults && defaults.length ? [...defaults] : (detected && detected.length ? [...detected] : [])
+      const detectedCol = allDropdownColumns[sheetHeader]
+      const usingDetected = !(defaults && defaults.length) && !!detectedCol?.values?.length
+      const dropdownValues = defaults && defaults.length ? [...defaults] : (usingDetected ? [...detectedCol.values] : [])
+      // A type the Our Header doesn't set itself comes off the sheet:
+      // Dropdown — or Multi Select when this is a column its marketplace
+      // fills with several values in one cell (the column's own
+      // multiSeparator, see extractSessionSheet). That separator stays on
+      // the mapping as multiValueSeparator: it's what tells a download to
+      // write the picks into that one cell, where a Multi Select someone
+      // set by hand still makes one row per pick.
+      const typedBySheet = !(oh.dataType && oh.dataType !== 'text') && dropdownValues.length > 0
+      const multiValueSeparator = typedBySheet && usingDetected ? detectedCol.multiSeparator || '' : ''
       return [...prev, {
         ourHeaderId,
         ourHeaderLabel: oh.label,
-        dataType: oh.dataType && oh.dataType !== 'text' ? oh.dataType : (dropdownValues.length ? 'dropdown' : oh.dataType),
+        dataType: typedBySheet ? (multiValueSeparator ? 'multiselect' : 'dropdown') : oh.dataType,
+        multiValueSeparator,
         isUniqueKeyPart: !!oh.isUniqueKeyPart,
         sheetHeaders: [sheetHeader],
         group: null,
@@ -1527,6 +1430,32 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setCreatingHeader(false)
     }
   }
+  // Asked by HeaderMappingSection right before an Our Header is deleted, so
+  // its confirm can warn when that header is already mapped: in this
+  // owner's saved templates (GET /api/listing-tools/header-usage), in saved
+  // Mapping / Place rules, or in this page's own not-yet-saved mapping (see
+  // ourHeaderUsage.js). Read fresh on every ask — deleting is rare, and a
+  // stale "not used" is the one answer this must never give. `complete` is
+  // false when a source couldn't be read, so the confirm can say it doesn't know.
+  async function checkHeaderUsage(ids) {
+    const getJson = (url) => fetch(url, { credentials: 'include' }).then((res) => (res.ok ? res.json() : null)).catch(() => null)
+    const [saved, mappingRules, placeRules] = await Promise.all([
+      getJson('/api/listing-tools/header-usage'),
+      getJson('/api/listing-tools/mapping/rules'),
+      getJson('/api/listing-tools/mapping/place-rules'),
+    ])
+    const sources = {
+      templates: saved?.templates || [],
+      rules: [...(mappingRules?.rules || []), ...(placeRules?.rules || [])],
+      mappedHeaders: activeMapped,
+    }
+    const usage = {}
+    for (const id of ids) {
+      const header = ourHeaders.find((h) => h.id === id)
+      if (header) usage[id] = findHeaderUsage(header, sources)
+    }
+    return { usage, complete: !!saved && !saved.unreadable && !!mappingRules && !!placeRules }
+  }
   async function handleDeleteHeader(id) {
     try {
       const res = await fetch(`/api/listing-tools/mapping/headers/${id}`, { method: 'DELETE' })
@@ -1699,7 +1628,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // every other upload session sitting in the batch.
   function resolveSessionFields(id) {
     if (id === activeTemplateId) {
-      return { presetData, categoriesData, rawHeaders, dropdownColumns, rawHeaderNotes, fileName, sourceFileUrl, dataSheetName }
+      return { presetData, categoriesData, rawHeaders, dropdownColumns, rawHeaderNotes, sheetSource, fileName, sourceFileUrl, dataSheetName }
     }
     const s = uploadSessions[id] || {}
     return {
@@ -1708,6 +1637,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       rawHeaders: s.rawHeaders || [],
       dropdownColumns: s.dropdownColumns || {},
       rawHeaderNotes: s.rawHeaderNotes || {},
+      sheetSource: s.sheetSource || null,
       fileName: s.fileName || '',
       sourceFileUrl: s.sourceFileUrl || '',
       dataSheetName: s.dataSheetName || '',
@@ -1753,7 +1683,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           },
         }
       }
-      const grouped = buildGroupedSheets(mappedHeaders)
+      // A sheet attached to this open template (handleSingleFile) takes
+      // over as its original file once it's stored and at least one placed
+      // header has a column in it: every header's columns are then re-read
+      // from it and the export fills that file from now on. Otherwise each
+      // header keeps the columns it was saved with.
+      const attached = !!(workbook && sourceFileUrl && dataSheetName && sheetSource)
+        && mappedHeaders.some((m) => m.group && m.sheetHeaders.some((sh) => sheetSource.cols[sh] != null))
+      const grouped = buildGroupedSheets(mappedHeaders, {}, {}, attached ? sheetSource : null)
       if (grouped.reduce((sum, g) => sum + g.headers.length, 0) === 0) return null
       return {
         isReal: true,
@@ -1767,6 +1704,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           category4: categoriesData.category4, category5: categoriesData.category5, category6: categoriesData.category6,
           exportVersion: presetData.exportVersion,
           sheets: grouped,
+          ...(attached ? { sourceFileName: fileName || null, sourceFileUrl, sourceSheetName: dataSheetName } : {}),
         },
       }
     }
@@ -1776,7 +1714,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     // rule the single-file save path already used.
     const session = resolveSessionFields(t.id)
     const scopedMapped = uploadMappedHeaders.filter((m) => m.sheetHeaders.some((sh) => session.rawHeaders.includes(sh)))
-    const grouped = buildGroupedSheets(scopedMapped, session.dropdownColumns, session.rawHeaderNotes)
+    const grouped = buildGroupedSheets(scopedMapped, session.dropdownColumns, session.rawHeaderNotes, session.sheetSource)
     if (grouped.reduce((sum, g) => sum + g.headers.length, 0) === 0) return null
     const templateName = composeAutoTemplateName(session.presetData, session.categoriesData).trim()
     if (!templateName) return null
@@ -2190,6 +2128,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 onRenameHeader={handleRenameHeader}
                 onDeleteHeader={handleDeleteHeader}
                 onDeleteAllHeaders={handleDeleteAllHeaders}
+                onCheckHeaderUsage={checkHeaderUsage}
                 onOpenHeaderSettings={setHeaderSettingsId}
                 unmappedRawHeaders={unmappedRawHeaders}
                 commonHeaderKeys={commonHeaderInfo.keys}

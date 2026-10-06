@@ -8,8 +8,21 @@ import { useToast } from '@/components/admin/Toast'
 import { DEFAULT_LIST_SORT, matchesQuery } from '@/lib/listSort'
 import ListSearchSort from './ListSearchSort'
 import HeaderMappingTable from './HeaderMappingTable'
+import { describeHeaderUsage, isHeaderUsed, listNames } from './ourHeaderUsage'
 
 const btn = 'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium'
+
+// What deleting an already-mapped Our Header really does, for the delete
+// confirms below: the fields saved templates got from it are copies and stay,
+// but nothing can map onto it any more — saved rules skip it, so every
+// template made from then on comes out without that field in Auto Listing.
+const mappedEffect = (many) => (many
+  ? "If you delete them, Auto Listing is affected: saved rules will skip them and new templates won't have these fields (templates already saved keep them). This can't be undone."
+  : "If you delete it, Auto Listing is affected: saved rules will skip it and new templates won't have this field (templates already saved keep it). This can't be undone.")
+// Shown ahead of the plain confirm when the check itself couldn't be completed.
+const uncheckedNote = (many) => (many
+  ? "Couldn't check whether any of them is already mapped — if one is, deleting it affects Auto Listing. "
+  : "Couldn't check whether it's already mapped — if it is, deleting it affects Auto Listing. ")
 
 // Add / Edit one Our Header's name in a popup (tools-5's HeaderEditModal
 // look). Type / dropdown defaults / unique key stay in the existing Header
@@ -74,9 +87,14 @@ function HeaderNameModal({ header, isDuplicate, saving, onClose, onSave, onOpenS
 //     search is the same text as the table's Our Header column filter).
 // `showMapping` false (sidebar's Header Mapping eye off) leaves just the
 // Our Headers list — no sheet columns, no Mapped button.
+//
+// Deleting asks `onCheckHeaderUsage(ids)` first (→ { usage: {[id]: {templates,
+// rules, mappedHere}}, complete }, see ourHeaderUsage.js): a header that's
+// already mapped — in a saved template, a saved rule, or the mapping on
+// screen — gets an "already mapped" warning instead of the plain confirm.
 export default function HeaderMappingSection({
   title, showMapping = true, ourHeaders, creating,
-  onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onOpenHeaderSettings,
+  onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onCheckHeaderUsage, onOpenHeaderSettings,
   unmappedRawHeaders, commonHeaderKeys, mappedHeaders, onMap, onUnmap, onOpenColumnSettings, onOpenRawHeaderSettings,
   categoryForOurHeaderId, categoryOrder,
 }) {
@@ -87,8 +105,10 @@ export default function HeaderMappingSection({
   const [savingName, setSavingName] = useState(false)
   const [deleteId, setDeleteId] = useState(null)
   const [deleteAllOpen, setDeleteAllOpen] = useState(false)
+  const [deleteCheck, setDeleteCheck] = useState(null) // onCheckHeaderUsage's answer for whichever delete confirm is open
   const [busyId, setBusyId] = useState(null)
   const [deletingAll, setDeletingAll] = useState(false)
+  const [checkingAll, setCheckingAll] = useState(false)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState(DEFAULT_LIST_SORT)
   const [selectLabel, setSelectLabel] = useState(null) // a just-added header to tick once it lands in ourHeaders
@@ -98,6 +118,10 @@ export default function HeaderMappingSection({
   const editTarget = modal?.mode === 'edit' ? ourHeaders.find((h) => h.id === modal.id) : null
   const isDuplicate = (label, exceptId) => ourHeaders.some((h) => h.id !== exceptId && h.label.trim().toLowerCase() === label.trim().toLowerCase())
   const liveChecked = [...checked].filter((h) => unmappedRawHeaders.includes(h))
+  // What the open delete confirm has to say, from the usage answer it opened with.
+  const deleteUsed = deleteTarget ? describeHeaderUsage(deleteCheck?.usage?.[deleteTarget.id]) : ''
+  const usedHeaders = deleteAllOpen ? ourHeaders.filter((h) => isHeaderUsed(deleteCheck?.usage?.[h.id])) : []
+  const unchecked = !!deleteCheck && !deleteCheck.complete
 
   // Tick the header just added (tools-5 behaviour) once the page's list has it.
   if (selectLabel) {
@@ -141,6 +165,36 @@ export default function HeaderMappingSection({
     } finally {
       setBusyId(null)
     }
+  }
+
+  // Where the given headers are in use, or null when the page gave no way to ask.
+  async function checkUsage(ids) {
+    if (!onCheckHeaderUsage) return null
+    try {
+      return await onCheckHeaderUsage(ids)
+    } catch {
+      return { usage: {}, complete: false }
+    }
+  }
+
+  // Every Delete goes through here: the check runs first (the row shows its
+  // spinner meanwhile), then the confirm opens already knowing what to say.
+  async function requestDelete(id) {
+    if (busyId) return
+    setBusyId(id)
+    const check = await checkUsage([id])
+    setBusyId(null)
+    setDeleteCheck(check)
+    setDeleteId(id)
+  }
+
+  async function requestDeleteAll() {
+    if (checkingAll) return
+    setCheckingAll(true)
+    const check = await checkUsage(ourHeaders.map((h) => h.id))
+    setCheckingAll(false)
+    setDeleteCheck(check)
+    setDeleteAllOpen(true)
   }
 
   async function confirmDelete() {
@@ -190,7 +244,7 @@ export default function HeaderMappingSection({
               <button type="button" onClick={() => onOpenHeaderSettings(active.id)} className={`${btn} border-divider-light text-foreground hover:bg-card-hover`}>
                 <Settings size={13} /> Settings
               </button>
-              <button type="button" onClick={() => setDeleteId(active.id)} className={`${btn} border-neg/40 text-neg hover:bg-neg/10`}>
+              <button type="button" onClick={() => requestDelete(active.id)} disabled={!!busyId} className={`${btn} border-neg/40 text-neg hover:bg-neg/10 disabled:opacity-40`}>
                 <Trash2 size={13} /> Delete
               </button>
               <span className="max-w-[14rem] truncate text-[12px] text-subtle" title={active.label}>· {active.label}</span>
@@ -215,12 +269,12 @@ export default function HeaderMappingSection({
           )}
           <button
             type="button"
-            onClick={() => setDeleteAllOpen(true)}
-            disabled={deletingAll || ourHeaders.length === 0}
+            onClick={requestDeleteAll}
+            disabled={deletingAll || checkingAll || ourHeaders.length === 0}
             title="Delete every header in Our Headers"
             className={`${btn} ml-auto border-neg/40 text-neg hover:bg-neg/10 disabled:opacity-40`}
           >
-            {deletingAll ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete All
+            {deletingAll || checkingAll ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete All
           </button>
         </div>
 
@@ -256,7 +310,7 @@ export default function HeaderMappingSection({
           onUnmap={onUnmap}
           onRename={rename}
           isDuplicate={isDuplicate}
-          onDelete={setDeleteId}
+          onDelete={requestDelete}
           busyId={busyId}
           onOpenHeaderSettings={onOpenHeaderSettings}
           onOpenColumnSettings={onOpenColumnSettings}
@@ -283,16 +337,21 @@ export default function HeaderMappingSection({
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title={`Delete header “${deleteTarget?.label || ''}”?`}
-        description="It's removed from Our Headers. This can't be undone."
+        title={deleteUsed ? `“${deleteTarget?.label || ''}” is already mapped` : `Delete header “${deleteTarget?.label || ''}”?`}
+        description={deleteUsed
+          ? `Used in ${deleteUsed}. ${mappedEffect(false)}`
+          : `${unchecked ? uncheckedNote(false) : ''}It's removed from Our Headers. This can't be undone.`}
+        confirmLabel={deleteUsed ? 'Delete anyway' : 'Delete'}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteId(null)}
       />
       <ConfirmDialog
         open={deleteAllOpen}
         title={`Delete all ${ourHeaders.length} header${ourHeaders.length === 1 ? '' : 's'}?`}
-        description="Every header in Our Headers is deleted. This can't be undone."
-        confirmLabel="Delete All"
+        description={usedHeaders.length
+          ? `${usedHeaders.length} of them ${usedHeaders.length === 1 ? 'is' : 'are'} already mapped (${listNames(usedHeaders.map((h) => h.label))}). ${mappedEffect(usedHeaders.length > 1)}`
+          : `${unchecked ? uncheckedNote(true) : ''}Every header in Our Headers is deleted. This can't be undone.`}
+        confirmLabel={usedHeaders.length ? 'Delete All anyway' : 'Delete All'}
         onConfirm={confirmDeleteAll}
         onCancel={() => setDeleteAllOpen(false)}
       />

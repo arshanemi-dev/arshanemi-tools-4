@@ -18,6 +18,31 @@
 // in-memory `groupId`) — this runs against `content.sheets` at fill time,
 // not against TemplateSettingsWizard's local `fields` state.
 
+// Every header a header auto-fills from ("Auto-Fill From" is multi-select) —
+// the `linkedHeaderIds` list, or just `linkedHeaderId` on a header saved
+// before the list existed. `linkedGroup`/`linkedHeaderId` stay the FIRST of
+// them: that one alone decides which group's key a header looks up
+// (resolveTarget, canonicalKeySource); the rest are extra places its value
+// can come from.
+function linkedIdsOf(header) {
+  if (Array.isArray(header.linkedHeaderIds) && header.linkedHeaderIds.length) return header.linkedHeaderIds
+  return header.linkedHeaderId ? [header.linkedHeaderId] : []
+}
+
+function isBlank(v) {
+  return v === undefined || v === null || String(v).trim() === ''
+}
+
+// The value `header` takes from `row` (a row of the group `sourceHeaderIds`
+// belongs to): its first linked header there that actually has something.
+// `undefined` when none of its links point into that group, or all are blank.
+function linkedValueFrom(header, row, sourceHeaderIds) {
+  for (const id of linkedIdsOf(header)) {
+    if (sourceHeaderIds.has(id) && !isBlank(row?.[id])) return row[id]
+  }
+  return undefined
+}
+
 function resolveTarget(header, sheetsByGroup) {
   if (header.linkedGroup && header.linkedHeaderId) {
     const targetSheet = sheetsByGroup[header.linkedGroup]
@@ -76,10 +101,17 @@ export function resolveLinkedFill(headers, changedHeaderId, changedValue, rowInd
       if (h.id in matchedRow) extra[h.id] = matchedRow[h.id]
     }
   } else {
+    const targetIds = new Set(target.sheet.headers.map((h) => h.id))
     for (const h of headers) {
       if (h.id === changedHeaderId || h.dataType === 'formula') continue
-      if (h.linkedGroup !== target.group || !h.linkedHeaderId) continue
-      if (h.linkedHeaderId in matchedRow) extra[h.id] = matchedRow[h.linkedHeaderId]
+      const linkedHere = linkedIdsOf(h).filter((id) => targetIds.has(id))
+      if (linkedHere.length === 0) continue
+      // First linked header with a value; when the matched record has none
+      // of them filled, its first link's own (blank) cell still comes
+      // through, same as a single link always did.
+      const value = linkedValueFrom(h, matchedRow, targetIds)
+      if (value !== undefined) extra[h.id] = value
+      else if (linkedHere[0] in matchedRow) extra[h.id] = matchedRow[linkedHere[0]]
     }
   }
   return Object.keys(extra).length ? extra : null
@@ -115,7 +147,9 @@ export function buildPickerOptions(headers, sheetsByGroup) {
 // An explicit link always wins over the implicit label fallback for a
 // given header; the fallback only ever looks at headers with no
 // `linkedGroup` set at all, so it can never silently override an
-// intentional connection to some *other* group.
+// intentional connection to some *other* group. A header linked to several
+// headers (linkedIdsOf) takes the first of those in the source group that
+// has a value.
 //
 // Takes `sourceRow`'s *current full state* directly — not a separate
 // lookup — and fans out whatever's already filled in it. This deliberately
@@ -135,6 +169,7 @@ export function propagateFromGroup(sourceGroup, sourceRow, sheetsByGroup) {
   const sourceByLabel = new Map(
     sourceHeaders.map((h) => [h.label?.trim().toLowerCase(), h]).filter(([label]) => label)
   )
+  const sourceIds = new Set(sourceHeaders.map((h) => h.id))
 
   const updates = {}
   for (const [group, sheet] of Object.entries(sheetsByGroup)) {
@@ -143,15 +178,14 @@ export function propagateFromGroup(sourceGroup, sourceRow, sheetsByGroup) {
       // Same reasoning as resolveLinkedFill above — a formula-type target recomputes its own
       // value from whatever lands in its OWN referenced fields, it's never a copy destination.
       if (h.dataType === 'formula') continue
-      let sourceHeaderId = null
-      if (h.linkedGroup === sourceGroup && h.linkedHeaderId) {
-        sourceHeaderId = h.linkedHeaderId
+      let value
+      if (linkedIdsOf(h).length > 0) {
+        value = linkedValueFrom(h, sourceRow, sourceIds)
       } else if (!h.linkedGroup) {
-        sourceHeaderId = sourceByLabel.get(h.label?.trim().toLowerCase())?.id || null
+        const sourceHeaderId = sourceByLabel.get(h.label?.trim().toLowerCase())?.id
+        value = sourceHeaderId ? sourceRow?.[sourceHeaderId] : undefined
       }
-      if (!sourceHeaderId) continue
-      const value = sourceRow?.[sourceHeaderId]
-      if (value === undefined || value === null || String(value).trim() === '') continue
+      if (isBlank(value)) continue
       updates[group] = updates[group] || {}
       updates[group][h.id] = value
     }

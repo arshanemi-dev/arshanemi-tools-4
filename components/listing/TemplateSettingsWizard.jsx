@@ -491,11 +491,21 @@ function fieldsFromContent(content) {
         // Undefined on templates saved before this existed — handled as
         // "not format-preservable" downstream, never crashes.
         sourceColIndex: h.sourceColIndex,
+        // The bulk mapping page's record of which marketplace columns this
+        // header fills (components/listing/bulkTemplateSheets.js) — nothing
+        // here edits it, it's only carried so a save from this wizard
+        // doesn't drop it.
+        sheetHeaders: h.sheetHeaders,
+        sourceColumns: h.sourceColumns,
+        sourceRows: h.sourceRows,
+        ourHeaderId: h.ourHeaderId,
+        multiValueSeparator: h.multiValueSeparator,
         linkedGroup: h.linkedGroup || null,
         linkedHeaderId: h.linkedHeaderId || null,
         // New Design's multi-select "Auto-Fill From" — array of source header
-        // ids. linkedHeaderId above stays the first one for the unchanged
-        // fill-time logic (linkedHeaders.js).
+        // ids, all of them read at fill time (linkedHeaders.js).
+        // linkedHeaderId above stays the first one, which alone decides the
+        // group this header's key lookup runs against.
         linkedHeaderIds: Array.isArray(h.linkedHeaderIds)
           ? h.linkedHeaderIds
           : h.linkedHeaderId
@@ -1004,6 +1014,11 @@ export default function TemplateSettingsWizard({ templateId }) {
         isUniqueKeyPart: f.isUniqueKeyPart,
         isProductGroupField: !!f.isProductGroupField,
         sourceColIndex: f.sourceColIndex,
+        sheetHeaders: f.sheetHeaders,
+        sourceColumns: f.sourceColumns,
+        sourceRows: f.sourceRows,
+        ourHeaderId: f.ourHeaderId,
+        multiValueSeparator: f.multiValueSeparator,
         linkedGroup: f.linkedGroup || null,
         linkedHeaderId: f.linkedHeaderId || null,
         linkedHeaderIds: Array.isArray(f.linkedHeaderIds) && f.linkedHeaderIds.length

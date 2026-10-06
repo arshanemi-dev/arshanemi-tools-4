@@ -5,6 +5,9 @@ import { Search,Download, UploadCloud, ArrowLeft, Plus } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import SheetGrid from '@/components/listing/SheetGrid'
 import MergedRowFields from '@/components/listing/MergedRowFields'
+import SheetTabs from '@/components/listing/SheetTabs'
+import FillViewToggle from '@/components/listing/FillViewToggle'
+import useFillView from '@/components/listing/useFillView'
 import useTemplateExport from '@/components/listing/useTemplateExport'
 import useAiFill from '@/components/listing/useAiFill'
 import BillingGateModal from '@/components/billing/BillingGateModal'
@@ -31,17 +34,21 @@ function stripTrailingEmpty(rows = []) {
   return rows.slice(0, Math.max(1, end))
 }
 
-// Product Details renders as its own scrolling table; every other group
-// (Compulsory + Brand Details) is shown per-row, injected directly under each
-// Product Details row as a sub-row (SheetGrid renderRowSubRow → MergedRowFields).
+// Two layouts, switched from the toolbar (useFillView.js), over the same saved rows:
+//  - Input Box View: Product Details renders as its own scrolling table; every
+//    other group (Compulsory + Brand Details) is shown per-row, injected directly
+//    under each Product Details row as a sub-row (SheetGrid renderRowSubRow →
+//    MergedRowFields).
+//  - Excel View: one tab per group, the open group's every column in one grid.
 const MERGE_GROUPS = ['compulsory', 'prefill']
+const TAB_GROUPS = ['design_system', ...MERGE_GROUPS]
 
 // Landing state is a picker over the user's assigned templates — same list
 // as the Auto Listing sidebar dropdown — nothing loads until one is
 // clicked. Clicking sets ?template= (same destination the sidebar's
 // per-template links already use) and switches into that template's own
-// scoped workspace — every group visible at once (no tab strip), headers/rows
-// belonging only to that template.
+// scoped workspace — every group at once as input boxes, or tab by tab as a
+// grid — headers/rows belonging only to that template.
 export default function ProductDetailsPage() {
   const searchParams = useSearchParams()
   const templateId = searchParams.get('template')
@@ -56,10 +63,15 @@ function ScopedProductDetails({ templateId }) {
   const [template, setTemplate] = useState(null)
   const [content, setContent] = useState(null)
   const [search, setSearch] = useState('')
-  // Which block "Download Final Sheet" targets. It used to be the selected
-  // tab; now it's whichever block you last interacted with (set on pointer
-  // down, see the block wrapper below). Defaults to the Product Details
-  // sheet, exactly as the first tab did.
+  // Input Box View / Excel View — and, for the Excel view, whichever group's
+  // tab was opened last.
+  const [view, setView] = useFillView()
+  const [excelGroup, setExcelGroup] = useState('design_system')
+  // Which block "Download Final Sheet" targets in the Input Box View. It used
+  // to be the selected tab; now it's whichever block you last interacted with
+  // (set on pointer down, see the block wrapper below). Defaults to the Product
+  // Details sheet, exactly as the first tab did. In the Excel View the open
+  // tab is the target instead — see downloadGroup below.
   const [activeGroup, setActiveGroup] = useState('design_system')
   // Per-column filter, kept per group: { [group]: { key, value } }. Only a
   // sheet's unique-key column offers the filter toggle.
@@ -94,7 +106,15 @@ function ScopedProductDetails({ templateId }) {
     [sheetsByGroup]
   )
 
-  const activeSheet = sheetsByGroup[activeGroup]
+  // The Excel view's open tab — the first group this template really has when
+  // the one opened last has no columns here (SheetTabs hides such a group).
+  const tabGroups = TAB_GROUPS.filter((g) => (sheetsByGroup[g]?.headers?.length ?? 0) > 0)
+  const openGroup = tabGroups.includes(excelGroup) ? excelGroup : tabGroups[0]
+
+  // What "Download Final Sheet" exports: the open tab in the Excel View (as
+  // the tab-wise page always did), the active block in the Input Box View.
+  const downloadGroup = view === 'excel' && openGroup ? openGroup : activeGroup
+  const activeSheet = sheetsByGroup[downloadGroup]
 
   // Download exports only the active block's own sheet — gate it on that
   // sheet having *more than one* real row (not the trailing empty row every
@@ -313,6 +333,7 @@ function ScopedProductDetails({ templateId }) {
         return
       }
       setActiveGroup(result.group)
+      setExcelGroup(result.group)
       setFilter((prev) => ({ ...prev, [result.group]: { key: null, value: '' } }))
       setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === result.group ? { ...s, rows: result.rows } : s)) }))
       await fetch(`/api/listing-tools/${templateId}/sheets/${result.group}`, {
@@ -328,8 +349,8 @@ function ScopedProductDetails({ templateId }) {
 
   return (
     <div className="min-h-[70vh] bg-surface px-6 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle" />
           <input
             value={search}
@@ -338,7 +359,8 @@ function ScopedProductDetails({ templateId }) {
             className="w-full pl-9 pr-3 py-2.5 text-[13.5px] bg-card-hover rounded-lg focus:outline-none focus:ring-1 focus:ring-accent-light"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <FillViewToggle view={view} onChange={setView} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <PillButton variant="edit" icon={Plus} onClick={handleAddProduct} disabled={!content}>
             Add Product
           </PillButton>
@@ -359,7 +381,7 @@ function ScopedProductDetails({ templateId }) {
             loading={exporting}
             disabled={!content || !hasAnyFilledRow}
             title={!content || hasAnyFilledRow ? undefined : 'Add more than 1 product row before downloading'}
-            onClick={() => runExport({ template: content, groups: [activeGroup], format: 'excel', meta: template })}
+            onClick={() => runExport({ template: content, groups: [downloadGroup], format: 'excel', meta: template })}
           >
             Download Final Sheet
           </PillButton>
@@ -372,10 +394,10 @@ function ScopedProductDetails({ templateId }) {
         </div>
       )}
 
-      {/* Product Details is the scrolling table; each of its rows is followed
-          by that row's Compulsory + Brand fields as a sub-row (renderRowSubRow
-          → MergedRowFields). */}
-      {content && (sheetsByGroup.design_system?.headers?.length ?? 0) > 0 && (() => {
+      {/* Input Box View — Product Details is the scrolling table; each of its
+          rows is followed by that row's Compulsory + Brand fields as a sub-row
+          (renderRowSubRow → MergedRowFields). */}
+      {content && view === 'boxes' && (sheetsByGroup.design_system?.headers?.length ?? 0) > 0 && (() => {
         const g = 'design_system'
         const gsheet = sheetsByGroup[g]
         const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
@@ -453,7 +475,42 @@ function ScopedProductDetails({ templateId }) {
         )
       })()}
 
-      <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: [activeGroup], format: 'excel', meta: template })} />
+      {/* Excel View — the tab-wise layout this page had before the input boxes:
+          one tab per group this template uses, the open group's every column
+          (Big / Image Link ones included) across one grid row, the way the
+          sheet itself reads. Same saved rows and the same per-group handlers
+          as the Input Box View. Typing in the last row opens the next one, as
+          a sheet would (SheetGrid's default autoAppendRow). */}
+      {content && view === 'excel' && openGroup && (() => {
+        const g = openGroup
+        const gsheet = sheetsByGroup[g]
+        const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
+        return (
+          <div className="border border-divider rounded-lg overflow-hidden bg-card">
+            <SheetTabs active={g} onChange={setExcelGroup} sheets={content.sheets} />
+            <SheetGrid
+              headerInfo
+              headers={gsheet.headers}
+              rows={filteredRowsFor(g)}
+              onRowsChange={(nextRows) => saveRows(g, nextRows)}
+              uploadUrl={`/api/listing-tools/${templateId}/images`}
+              activeFilterHeaderId={filter[g]?.key || null}
+              filterValue={filter[g]?.value || ''}
+              onFilterChange={gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined}
+              pickerOptions={buildPickerOptions(gsheet.headers, sheetsByGroup)}
+              onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(gsheet.headers, headerId, value, rowIndex, sheetsByGroup)}
+              onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}
+              onImageUploaded={(rowIndex, headerId, url) => handleImageUploaded(g, rowIndex, headerId, url)}
+              // A Product Details row goes the same way it does in the Input
+              // Box View (its Brand Details row with it) — the row's real
+              // position, not its place in a searched/filtered list.
+              onDeleteRow={(row) => (g === 'design_system' ? handleDeleteProductRow(row, gsheet.rows.indexOf(row)) : handleDeleteRow(g, row))}
+            />
+          </div>
+        )
+      })()}
+
+      <BillingGateModal gate={gate} onClose={closeGate} onRetry={() => runExport({ template: content, groups: [downloadGroup], format: 'excel', meta: template })} />
       <BillingGateModal gate={aiGate} onClose={closeAiGate} />
     </div>
   )

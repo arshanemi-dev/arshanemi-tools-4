@@ -60,7 +60,9 @@ function withColumnLetter(label, value) {
 // so the bulk mapping page uses the identical component instead of a
 // re-styled, simplified copy. `hideDropdownReference` hides the whole
 // right-hand column. Passing `setDropdownDataStartRow` adds the editable
-// "Dropdown Data Row" input (where the fill sheet's own input rows start)
+// "Dropdown Data Row" input (where the fill sheet's own input rows start —
+// also the row a download starts writing products at, see sheetSource in
+// BulkTemplateDesign.jsx)
 // next to Group/Header/I section. Passing `setDropdownOrientation` adds the
 // Vertical/Horizontal layout toggle to the reference sheet — in Horizontal
 // the two inputs become columns (headers down one column, values across

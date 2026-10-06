@@ -71,6 +71,15 @@ export const MARKETPLACE_SHEET_RULES = {
     dropdownHeaderRow: 2,
     dropdownValuesRow: 3,
     dropdownStartCol: 4,
+
+    // A field whose values are only listed on a reference sheet (the
+    // Validations sheet, or an "Allowed Values" block — where Flipkart keeps
+    // them, since an Excel dropdown can't pick more than one) and that has
+    // no dropdown of its own on the input sheet takes several values in one
+    // cell, written with this separator ("Cotton::Silk"). Such a column is
+    // read as Multi Select; see multiValueRuleFor below.
+    multiValueSources: ['validation', 'allowed'],
+    multiValueSeparator: '::',
   },
   amazon: {
     dataSheetNo: 5,
@@ -137,6 +146,16 @@ function pickSheet(sheetNames, sheetNo, keyword, { keywordFirst = false, exclude
 export function hasMarketplaceSheetRule(brandName = '') {
   const brandKey = String(brandName || '').trim().toLowerCase()
   return brandKey !== 'default' && Object.hasOwn(MARKETPLACE_SHEET_RULES, brandKey)
+}
+
+// Which dropdown sources (lib/dropdownExtraction.js's DROPDOWN_SOURCES) mean
+// "several values in one cell" for `brandName`, and the separator its sheet
+// wants between them. A column from one of those sources is typed Multi
+// Select automatically, and a download writes its picks into that one cell
+// instead of one row per pick. Empty for a brand without such a rule.
+export function multiValueRuleFor(brandName = '') {
+  const rule = hasMarketplaceSheetRule(brandName) ? MARKETPLACE_SHEET_RULES[String(brandName).trim().toLowerCase()] : null
+  return { sources: rule?.multiValueSources || [], separator: rule?.multiValueSeparator || '' }
 }
 
 export function detectMarketplaceSheetDefaults(sheetNames = [], brandName = '') {

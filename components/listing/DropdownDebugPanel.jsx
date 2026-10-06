@@ -67,6 +67,14 @@ function HeaderMeta({ h }) {
         <span className="rounded bg-card-hover px-1 py-0.5 font-mono text-[10px] text-subtle" title="Column on the fill sheet">{columnLetter(h.colIdx)}</span>
         <SourceBadge source={h.source} />
         {h.source && <span className="text-[10.5px] text-subtle">{h.values.length}</span>}
+        {h.multiSeparator && (
+          <span
+            title={`This marketplace takes several values in one cell here, joined by "${h.multiSeparator}" — mapped as Multi Select`}
+            className="rounded border border-divider bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-foreground"
+          >
+            Multi
+          </span>
+        )}
       </div>
       <SourceCounts counts={h.counts} winner={h.source} />
       {h.validationColumn && (
