@@ -4,12 +4,12 @@
 // page, BulkTemplateDesign.jsx). Every number is 1-based, exactly as Excel
 // counts sheets/rows/columns — same as the brand table this came from:
 //
-//              ─────────── INPUT SHEET ───────────   ──── VALIDATIONS SHEET ────
-//   BRAND      Sheet  Group  Header  I sec  Dropdown  Sheet  Type        Header  Value
-//   Meesho       2      2      3      3       5        4    Vertical      1      2
-//   Flipkart     3      0      1      4       5        2    Vertical      2      3
-//   Amazon       5      3      4      6       8        7    Horizontal    2      3
-//   Myntra       2      –      3      –       4        –
+//              ────────────── INPUT SHEET ──────────────   ─────── VALIDATIONS SHEET ───────
+//   BRAND      Sheet  Group  Header  I sec  Dropdown  Start   Sheet  Type        Header  Value  Start
+//   Meesho       2      2      3      3       5        4       4    Vertical      1      2      4
+//   Flipkart     3      0      1      4       5        4       2    Vertical      2      3      4
+//   Amazon       5      3      4      6       8        1       7    Horizontal    2      3      2
+//   Myntra       2      –      3      –       4        1       –
 //
 // - Group 0 / blank = the sheet has no group row; I sec blank = no I section
 //   row (both stored as null here, shown as an empty input).
@@ -17,6 +17,10 @@
 //   the very next one" — see extractSessionSheet.
 // - Dropdown = the first input row of the fill sheet (where the input-rows
 //   dropdown source starts reading).
+// - Start = the first column reading begins at; every column before it is
+//   skipped (Meesho/Flipkart: headers from column D). On the Validations
+//   sheet it's the first column when Vertical, the first ROW when
+//   Horizontal (Amazon: field names from row 2 down).
 // - Validations Header/Value are ROWS when Vertical, COLUMNS when
 //   Horizontal (Amazon: field names down column 2, values from column 3).
 //   Myntra has no Validations sheet.
@@ -46,11 +50,13 @@ export const MARKETPLACE_SHEET_RULES = {
     dataHeaderRow: 3,
     dataIsectionRow: 3,
     dropdownDataStartRow: 5,
+    dataStartCol: 4,
 
     validationSheetNo: 4,
     dropdownOrientation: 'vertical',
     dropdownHeaderRow: 1,
     dropdownValuesRow: 2,
+    dropdownStartCol: 4,
   },
   flipkart: {
     dataSheetNo: 3,
@@ -58,11 +64,13 @@ export const MARKETPLACE_SHEET_RULES = {
     dataHeaderRow: 1,
     dataIsectionRow: 4,
     dropdownDataStartRow: 5,
+    dataStartCol: 4,
 
     validationSheetNo: 2,
     dropdownOrientation: 'vertical',
     dropdownHeaderRow: 2,
     dropdownValuesRow: 3,
+    dropdownStartCol: 4,
   },
   amazon: {
     dataSheetNo: 5,
@@ -70,11 +78,13 @@ export const MARKETPLACE_SHEET_RULES = {
     dataHeaderRow: 4,
     dataIsectionRow: 6,
     dropdownDataStartRow: 8,
+    dataStartCol: 1,
 
     validationSheetNo: 7,
     dropdownOrientation: 'horizontal',
     dropdownHeaderRow: 2, // column B
     dropdownValuesRow: 3, // column C onwards
+    dropdownStartCol: 2, // row 2 onwards (Horizontal)
   },
   myntra: {
     dataSheetNo: 2,
@@ -82,11 +92,13 @@ export const MARKETPLACE_SHEET_RULES = {
     dataHeaderRow: 3,
     dataIsectionRow: null,
     dropdownDataStartRow: 4,
+    dataStartCol: 1,
 
     validationSheetNo: null, // no Validations sheet
     dropdownOrientation: 'vertical',
     dropdownHeaderRow: null,
     dropdownValuesRow: null,
+    dropdownStartCol: null,
   },
   // Any brand not listed above. Unlike the brand rules, a sheet NAMED like
   // a fill/validations sheet wins over the position here, since an unknown
@@ -98,11 +110,13 @@ export const MARKETPLACE_SHEET_RULES = {
     dataHeaderRow: 1,
     dataIsectionRow: 3,
     dropdownDataStartRow: DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW,
+    dataStartCol: 1,
 
     validationSheetNo: 2,
     dropdownOrientation: 'vertical',
     dropdownHeaderRow: 2,
     dropdownValuesRow: 3,
+    dropdownStartCol: 1,
   },
 }
 
@@ -147,9 +161,11 @@ export function detectMarketplaceSheetDefaults(sheetNames = [], brandName = '') 
     dataHeaderRow: asInput(rule.dataHeaderRow),
     dataIsectionRow: asInput(rule.dataIsectionRow),
     dropdownDataStartRow: asInput(rule.dropdownDataStartRow),
+    dataStartCol: asInput(rule.dataStartCol),
     dropdownSheetName,
     dropdownOrientation: rule.dropdownOrientation,
     dropdownHeaderRow: asInput(rule.dropdownHeaderRow),
     dropdownValuesRow: asInput(rule.dropdownValuesRow),
+    dropdownStartCol: asInput(rule.dropdownStartCol),
   }
 }

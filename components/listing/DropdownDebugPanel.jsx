@@ -224,12 +224,12 @@ export default function DropdownDebugPanel({ report, fileName }) {
         <div className="space-y-3 border-t border-divider px-3 pb-3 pt-3">
           <div className="space-y-0.5 text-[12.5px] text-muted">
             <p>
-              <span className="font-semibold text-foreground">Fill sheet:</span> {report.dataSheetName} · headers {lineText('vertical', report.headerRowIdx)} · input rows from {lineText('vertical', report.dataStartIdx)}
+              <span className="font-semibold text-foreground">Fill sheet:</span> {report.dataSheetName} · headers {lineText('vertical', report.headerRowIdx)}{report.dataStartColIdx ? ` from ${slotText('vertical', report.dataStartColIdx)}` : ''} · input rows from {lineText('vertical', report.dataStartIdx)}
             </p>
             <p>
               <span className="font-semibold text-foreground">Validations sheet:</span>{' '}
               {validation
-                ? `${validation.sheetName} · ${validation.orientation === 'horizontal' ? 'Horizontal' : 'Vertical'} · headers ${lineText(validation.orientation, validation.headerLine)} · values from ${lineText(validation.orientation, validation.valuesLine)} · ${validation.columnsFound} header${validation.columnsFound === 1 ? '' : 's'} found, ${validation.matched} matched`
+                ? `${validation.sheetName} · ${validation.orientation === 'horizontal' ? 'Horizontal' : 'Vertical'} · headers ${lineText(validation.orientation, validation.headerLine)}${validation.startSlot ? ` from ${slotText(validation.orientation, validation.startSlot)}` : ''} · values from ${lineText(validation.orientation, validation.valuesLine)} · ${validation.columnsFound} header${validation.columnsFound === 1 ? '' : 's'} found, ${validation.matched} matched`
                 : 'none selected'}
             </p>
           </div>

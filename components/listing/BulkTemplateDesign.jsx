@@ -122,6 +122,7 @@ function validationOptions(session) {
     orientation: session.dropdownOrientation === 'horizontal' ? 'horizontal' : 'vertical',
     headerLine,
     valuesLine: Math.max(headerLine + 1, parseRowInput(session.dropdownValuesRow, headerLine + 1)),
+    startSlot: parseRowInput(session.dropdownStartCol, 0),
   }
 }
 // The marketplace rule's Validations sheet + rows/columns (1-based there) as
@@ -134,7 +135,7 @@ function ruleValidationHint(rule) {
 // Group Row / I section: blank or 0 = the sheet has no such row (Flipkart
 // has no Group Row, Myntra has neither — constants/sheetDefaults.js).
 const hasRow = (raw) => Number(raw) >= 1
-const NO_VALIDATION_INPUTS = { dropdownSheetName: '', dropdownOrientation: 'vertical', dropdownHeaderRow: '', dropdownValuesRow: '' }
+const NO_VALIDATION_INPUTS = { dropdownSheetName: '', dropdownOrientation: 'vertical', dropdownHeaderRow: '', dropdownValuesRow: '', dropdownStartCol: '' }
 // 0-based resolved layout (or null) → the values the sheet picker, toggle
 // and row/column inputs display (1-based strings).
 function layoutToInputs(layout) {
@@ -144,6 +145,7 @@ function layoutToInputs(layout) {
     dropdownOrientation: layout.orientation,
     dropdownHeaderRow: String(layout.headerLine + 1),
     dropdownValuesRow: String(layout.valuesLine + 1),
+    dropdownStartCol: String((layout.startSlot || 0) + 1),
   }
 }
 // The brand whose marketplace rule applies: the first candidate with its own
@@ -168,6 +170,7 @@ function ruleValidationSession(rule) {
     dropdownOrientation: rule.dropdownOrientation,
     dropdownHeaderRow: String(rule.dropdownHeaderRow),
     dropdownValuesRow: String(rule.dropdownValuesRow),
+    dropdownStartCol: String(rule.dropdownStartCol || 1),
     dropdownSheetMode: 'pinned',
     dropdownLayoutMode: 'manual',
   }
@@ -260,6 +263,8 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     && Number(session.dataHeaderRow) === Number(session.dataIsectionRow)
   const isectionRowIdx = sameConfiguredRow ? headerRowIdx + 1 : parseRowInput(session.dataIsectionRow, headerRowIdx + 1)
   const rawRow = aoa[headerRowIdx] || []
+  // Start Column — every column before it is skipped (Meesho/Flipkart: D).
+  const startColIdx = parseRowInput(session.dataStartCol, 0)
   const isectionRow = hasRow(session.dataIsectionRow) ? aoa[isectionRowIdx] || [] : []
   // Group Row, forward-filled across merged cells — kept on each raw header
   // for session fidelity; autoPlaceHeaders no longer reads it.
@@ -275,7 +280,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
   const rawHeaderNotes = {}
   const rawHeaderGroupLabels = {}
   const headerCells = []
-  for (let i = 0; i < rawRow.length; i++) {
+  for (let i = startColIdx; i < rawRow.length; i++) {
     if (onProgress) {
       onProgress('Extracting headers…', i + 1, rawRow.length)
       if (i > 0 && i % 12 === 0) await yieldToPaint()
@@ -313,6 +318,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     headerRowIdx,
     dataRows: aoa.slice(dataStartIdx),
     dataStartIdx,
+    dataStartColIdx: startColIdx,
     validation,
   })
   const typed = options.sheetMode === 'pinned' && options.layoutMode === 'manual'
@@ -544,6 +550,10 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // own-column dropdown auto-detect — editable like every other row here,
   // defaults to the brand rule's dropdownDataStartRow (constants/sheetDefaults.js).
   const [dropdownDataStartRow, setDropdownDataStartRow] = useState('')
+  // Start Column on each sheet — where reading begins (a ROW on a Horizontal
+  // Validations sheet); defaults off the brand rule like the rows above.
+  const [dataStartCol, setDataStartCol] = useState('')
+  const [dropdownStartCol, setDropdownStartCol] = useState('')
   // The Validations sheet — a second dropdown source alongside the fill
   // sheet's own input rows (see lib/dropdownExtraction.js). Orientation is
   // the Vertical/Horizontal toggle; the two inputs mean rows when Vertical,
@@ -617,8 +627,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   function captureSnapshot() {
     return {
       workbook, sheetMeta, dataSheetName,
-      dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow,
-      dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownSheetMode, dropdownLayoutMode,
+      dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow, dataStartCol,
+      dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownStartCol, dropdownSheetMode, dropdownLayoutMode,
       rawHeaders, rawHeaderNotes, rawHeaderGroupLabels, dropdownColumns, dropdownReport, presetData, categoriesData, fileName, sourceFileUrl,
     }
   }
@@ -630,10 +640,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataHeaderRow(session.dataHeaderRow)
     setDataIsectionRow(session.dataIsectionRow)
     setDropdownDataStartRow(session.dropdownDataStartRow)
+    setDataStartCol(session.dataStartCol ?? '')
     setDropdownSheetName(session.dropdownSheetName || '')
     setDropdownOrientation(session.dropdownOrientation || 'vertical')
     setDropdownHeaderRow(session.dropdownHeaderRow || '')
     setDropdownValuesRow(session.dropdownValuesRow || '')
+    setDropdownStartCol(session.dropdownStartCol || '')
     setDropdownSheetMode(session.dropdownSheetMode || 'auto')
     setDropdownLayoutMode(session.dropdownLayoutMode || 'auto')
     setRawHeaders(session.rawHeaders)
@@ -772,10 +784,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setDataHeaderRow('')
       setDataIsectionRow('')
       setDropdownDataStartRow('')
+      setDataStartCol('')
       setDropdownSheetName('')
       setDropdownOrientation('vertical')
       setDropdownHeaderRow('')
       setDropdownValuesRow('')
+      setDropdownStartCol('')
       setDropdownSheetMode('auto')
       setDropdownLayoutMode('auto')
       setSourceFileUrl('')
@@ -822,6 +836,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       dataHeaderRow: nextDataSheetName ? rule.dataHeaderRow : '',
       dataIsectionRow: nextDataSheetName ? rule.dataIsectionRow : '',
       dropdownDataStartRow: nextDataSheetName ? rule.dropdownDataStartRow : '',
+      dataStartCol: nextDataSheetName ? rule.dataStartCol : '',
       ...ruleValidationSession(rule),
       rawHeaders: [],
       rawHeaderNotes: {},
@@ -1032,6 +1047,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataHeaderRow('')
     setDataIsectionRow('')
     setDropdownDataStartRow('')
+    setDataStartCol('')
     applyValidationInputs(NO_VALIDATION_INPUTS)
     redetectValidation()
     setRawHeaders([])
@@ -1063,6 +1079,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setDataHeaderRow('')
       setDataIsectionRow('')
       setDropdownDataStartRow('')
+      setDataStartCol('')
       return
     }
     const rule = detectMarketplaceSheetDefaults(visibleSheetNames(workbook), currentBrand())
@@ -1070,12 +1087,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setDataHeaderRow(rule.dataHeaderRow)
     setDataIsectionRow(rule.dataIsectionRow)
     setDropdownDataStartRow(rule.dropdownDataStartRow)
+    setDataStartCol(rule.dataStartCol)
   }
   function applyValidationInputs(inputs) {
     setDropdownSheetName(inputs.dropdownSheetName)
     setDropdownOrientation(inputs.dropdownOrientation)
     setDropdownHeaderRow(inputs.dropdownHeaderRow)
     setDropdownValuesRow(inputs.dropdownValuesRow)
+    setDropdownStartCol(inputs.dropdownStartCol)
   }
   // Validations sheet controls — each only records what the user overrode;
   // the extraction effect resolves everything else against the fill
@@ -1110,7 +1129,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     && (!dropdownSheetName || (dropdownLayoutMode === 'manual'
       && dropdownOrientation === brandDefaults.dropdownOrientation
       && String(dropdownHeaderRow) === brandDefaults.dropdownHeaderRow
-      && String(dropdownValuesRow) === brandDefaults.dropdownValuesRow))
+      && String(dropdownValuesRow) === brandDefaults.dropdownValuesRow
+      && String(dropdownStartCol) === brandDefaults.dropdownStartCol))
   // One line under the Validations sheet inputs: how the layout was arrived
   // at and how well it lines up with this fill sheet's headers.
   const validationNote = (() => {
@@ -1128,7 +1148,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     pinned ? dropdownSheetName : '',
     pinned ? dropdownLayoutMode : '',
     pinned && dropdownLayoutMode !== 'auto' ? dropdownOrientation : '',
-    pinned && dropdownLayoutMode === 'manual' ? `${dropdownHeaderRow}/${dropdownValuesRow}` : '',
+    pinned && dropdownLayoutMode === 'manual' ? `${dropdownHeaderRow}/${dropdownValuesRow}/${dropdownStartCol}` : '',
   ].join('|')
   // Re-reads the Product fill sheet's headers AND every dropdown source
   // together (extractSessionSheet), on ANY of Section 2's inputs changing —
@@ -1144,8 +1164,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         XLSX,
         workbook,
         {
-          dataSheetName, dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow,
-          dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownSheetMode, dropdownLayoutMode,
+          dataSheetName, dataGroupRow, dataHeaderRow, dataIsectionRow, dropdownDataStartRow, dataStartCol,
+          dropdownSheetName, dropdownOrientation, dropdownHeaderRow, dropdownValuesRow, dropdownStartCol, dropdownSheetMode, dropdownLayoutMode,
           brand: currentBrand(),
         },
         (stage, current, total) => { if (!cancelled) setExtraction({ stage, current, total }) },
@@ -1162,7 +1182,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Validations-sheet state enters through validationKey (only what the user controls in the current modes); depending on those values directly would re-run this on its own write-back. currentBrand() only picks a tie-break hint.
-  }, [workbook, dataSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownDataStartRow, validationKey])
+  }, [workbook, dataSheetName, dataHeaderRow, dataGroupRow, dataIsectionRow, dropdownDataStartRow, dataStartCol, validationKey])
 
   // Every uploaded file's own raw headers pooled into one set — Header
   // Mapping/Place work off the whole batch, not just whichever file happens
@@ -2106,6 +2126,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 setDataIsectionRow={setDataIsectionRow}
                 dropdownDataStartRow={dropdownDataStartRow}
                 setDropdownDataStartRow={setDropdownDataStartRow}
+                dataStartCol={dataStartCol}
+                setDataStartCol={setDataStartCol}
                 dropdownSheetTitle="Validations Sheet"
                 dropdownSheetName={dropdownSheetName}
                 onSelectDropdownSheet={selectDropdownSheet}
@@ -2115,6 +2137,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 setDropdownHeaderRow={typeDropdownLine(setDropdownHeaderRow)}
                 dropdownValuesRow={dropdownValuesRow}
                 setDropdownValuesRow={typeDropdownLine(setDropdownValuesRow)}
+                dropdownStartCol={dropdownStartCol}
+                setDropdownStartCol={typeDropdownLine(setDropdownStartCol)}
                 dropdownLayoutNote={validationNote}
                 onRedetectDropdown={pinned ? redetectValidation : null}
               />

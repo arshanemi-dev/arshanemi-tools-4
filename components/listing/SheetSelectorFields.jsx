@@ -65,7 +65,10 @@ function withColumnLetter(label, value) {
 // Vertical/Horizontal layout toggle to the reference sheet — in Horizontal
 // the two inputs become columns (headers down one column, values across
 // each row) and are labeled that way; `dropdownLayoutNote` (a status line)
-// and `onRedetectDropdown` (a "Re-detect" link) sit under it. The bulk
+// and `onRedetectDropdown` (a "Re-detect" link) sit under it. Passing
+// `setDataStartCol` / `setDropdownStartCol` adds a "Start Column" input to
+// each sheet (where reading begins — a Start Row on a Horizontal
+// Validations sheet). The bulk
 // mapping page uses all of these; /new uses none, so it keeps its
 // original behavior.
 export default function SheetSelectorFields({
@@ -79,6 +82,7 @@ export default function SheetSelectorFields({
   dropdownSheetTitle = 'Dropdowns Reference Sheet',
   dropdownOrientation = 'vertical', setDropdownOrientation,
   dropdownLayoutNote = '', onRedetectDropdown,
+  dataStartCol, setDataStartCol, dropdownStartCol, setDropdownStartCol,
   hiddenSheets = [],
 }) {
   const horizontal = !!setDropdownOrientation && dropdownOrientation === 'horizontal'
@@ -101,6 +105,9 @@ export default function SheetSelectorFields({
             <MiniInput label="I section" value={dataIsectionRow ?? '2'} onChange={setDataIsectionRow} />
             {setDropdownDataStartRow && (
               <MiniInput label="Dropdown Data Row" value={dropdownDataStartRow ?? '5'} onChange={setDropdownDataStartRow} />
+            )}
+            {setDataStartCol && (
+              <MiniInput label={withColumnLetter('Start Column', dataStartCol)} value={dataStartCol} onChange={setDataStartCol} />
             )}
           </div>
         </div>
@@ -138,6 +145,13 @@ export default function SheetSelectorFields({
                 value={dropdownValuesRow}
                 onChange={setDropdownValuesRow}
               />
+              {setDropdownStartCol && (
+                <MiniInput
+                  label={horizontal ? 'Start Row' : withColumnLetter('Start Column', dropdownStartCol)}
+                  value={dropdownStartCol}
+                  onChange={setDropdownStartCol}
+                />
+              )}
             </div>
             {setDropdownOrientation && (dropdownLayoutNote || onRedetectDropdown) && (
               <p className="mt-1.5 text-[12px] text-subtle">
