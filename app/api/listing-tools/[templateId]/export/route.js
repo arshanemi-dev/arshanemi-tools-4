@@ -5,6 +5,7 @@ import {
   assignSkusToRows, canAccessTemplate,
 } from '@/lib/listingStore'
 import { ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS } from '@/lib/listingTemplates'
+import { scopeContentTo } from '@/lib/listingRowScope'
 import { recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory, toLabelKeyedRow } from '@/lib/listingHistory'
 import { runServerBillingGate } from '@/lib/serverBilling'
 
@@ -133,7 +134,10 @@ export async function POST(req, { params }) {
       const sheetIndex = content.sheets.findIndex((s) => s.group === group)
       const existingSheet = content.sheets[sheetIndex]
       const effectiveHeaders = existingSheet?.headers || []
-      const incomingFilled = incoming.filter((r) => !isRowEmpty(r))
+      // Everything typed in this session is the caller's own, whatever `userId` a row arrived
+      // carrying: upsertRowsByOwner folds rows by (owner, key), so a row sent under someone
+      // else's id would replace THAT user's saved product of the same number.
+      const incomingFilled = incoming.filter((r) => !isRowEmpty(r)).map((r) => ({ ...r, userId: payload.userId }))
       sessionOnlyByGroup[group] = upsertRowsByOwner(payload.userId, effectiveHeaders, incomingFilled)
       const merged = [...(existingSheet?.rows || []).filter((r) => !isRowEmpty(r)), ...incomingFilled]
       const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, merged)
@@ -184,7 +188,10 @@ export async function POST(req, { params }) {
     await Promise.allSettled(historyJobs)
   }
 
-  const quantity = countBillableRows(content, groups) || 1
+  // Billed — and, below, handed back — on the caller's own rows only (plus ownerless ones, see
+  // lib/listingRowScope.js): a template other users fill too holds their products in the same
+  // sheets, and those are neither this caller's to download nor to pay for.
+  const quantity = countBillableRows(scopeContentTo(content, payload.userId), groups) || 1
 
   const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-export', quantity })
   if (gate.status === 'blocked') {
@@ -225,5 +232,5 @@ export async function POST(req, { params }) {
     ? { ...content, sheets: content.sheets.map((s) => ({ ...s, rows: sessionOnlyByGroup[s.group] || [] })) }
     : null
 
-  return NextResponse.json({ ok: true, quantity, content, exportContent, ...gate.data })
+  return NextResponse.json({ ok: true, quantity, content: scopeContentTo(content, payload.userId), exportContent, ...gate.data })
 }

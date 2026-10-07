@@ -9,6 +9,8 @@ import { generateListingFieldsWithFallback } from '@/lib/aiProvider'
 import { uploadImageForVision, deleteUploadedFile } from '@/lib/gemini'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { runServerBillingGate } from '@/lib/serverBilling'
+import { scopeContentTo, visibleRowIndexes } from '@/lib/listingRowScope'
+import { fetchRemoteImage } from '@/lib/safeRemoteImage'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -72,12 +74,12 @@ function planGroup(sheet, headerIds) {
   return plans
 }
 
+// The URL is whatever sits in the row's image cell — possibly typed by hand —
+// so it goes through fetchRemoteImage (public hosts only, images only,
+// size-capped), never a bare fetch().
 async function fetchImageBlob(url) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Could not fetch image (${res.status})`)
-  const mimeType = res.headers.get('content-type') || 'image/jpeg'
-  const buf = Buffer.from(await res.arrayBuffer())
-  return { blob: new Blob([buf], { type: mimeType }), base64: buf.toString('base64'), mimeType }
+  const { buffer, mimeType } = await fetchRemoteImage(url)
+  return { blob: new Blob([buffer], { type: mimeType }), base64: buffer.toString('base64'), mimeType }
 }
 
 // One AI call per row — general (text/dropdown) targets and vision
@@ -92,7 +94,7 @@ async function fetchImageBlob(url) {
 // endpoint that can't resolve a Gemini-internal fileUri) always gets. If the
 // upload itself fails, Gemini also falls back to the inline base64 rather
 // than skipping the image outright.
-async function processRow({ sheet, plan, aiRules, templateContent, group, companyId }) {
+async function processRow({ sheet, plan, aiRules, templateContent, group, companyId, userId }) {
   const { rowIndex, generalTargets, visionTargets, imageUrl } = plan
   const row = sheet.rows[rowIndex]
   const targetSpecs = [
@@ -102,7 +104,7 @@ async function processRow({ sheet, plan, aiRules, templateContent, group, compan
   if (targetSpecs.length === 0) return { rowIndex, fields: {} }
 
   const { matchLabels, matchValues } = keyLabelsAndValues(sheet.headers, row)
-  const [similarRows] = await Promise.all([findSimilarRows({ companyId, group, matchLabels, matchValues })])
+  const [similarRows] = await Promise.all([findSimilarRows({ companyId, userId, group, matchLabels, matchValues })])
   const crossGroupFacts = buildCrossGroupFacts({ templateContent, group, matchLabels, matchValues })
   const { systemInstruction, promptText } = buildPrompt({ aiRules, headers: sheet.headers, row, targets: targetSpecs, similarRows, crossGroupFacts })
 
@@ -156,9 +158,18 @@ async function processRow({ sheet, plan, aiRules, templateContent, group, compan
 // merge them into whatever local state it's keeping (Blob-backed content or
 // client-only session rows) — persistence and "where do the results go" are
 // independent concerns.
+//
+// Whose rows: a template other users fill too holds their rows in the same
+// stored sheets (lib/listingRowScope.js). When this route reads the stored
+// rows itself it only ever plans, fills and writes back the CALLER's own view
+// of them — `rowIndex` in and out is an index into that view, mapped to the
+// row's real stored position for the write. Rows a caller sent in the body
+// are its own session state: they're filled and returned, never persisted
+// from here (saving them is the sheet/export routes' job, which keep every
+// other user's rows) — so `persist` only applies to stored rows.
 export async function POST(req, { params }) {
   const { templateId } = await params
-  const { error, meta: initialMeta } = await authorizeForTemplate(req, templateId)
+  const { error, meta: initialMeta, payload } = await authorizeForTemplate(req, templateId)
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
@@ -167,6 +178,8 @@ export async function POST(req, { params }) {
   const persist = body.persist !== false
 
   const content = await getTemplateContent(templateId)
+  // What the caller may see of it — the "same product in the other groups" facts given to the AI.
+  const viewerContent = scopeContentTo(content, payload.userId)
   const companyId = initialMeta.companyId ?? null
 
   // Recompute plans for every selection up front — shared by dryRun and the
@@ -175,10 +188,12 @@ export async function POST(req, { params }) {
   for (const sel of selections) {
     const sheet = content.sheets.find((s) => s.group === sel.group)
     if (!sheet) continue
-    const sourceRows = Array.isArray(sel.rows) ? sel.rows : sheet.rows
+    // Stored rows: the caller's own view, each remembered by its real stored position.
+    const realIndexes = Array.isArray(sel.rows) ? null : visibleRowIndexes(sheet.rows, payload.userId)
+    const sourceRows = realIndexes ? realIndexes.map((i) => sheet.rows[i]) : sel.rows
     const effectiveSheet = { ...sheet, rows: sourceRows }
     const plans = planGroup(effectiveSheet, Array.isArray(sel.headerIds) ? sel.headerIds : null)
-    if (plans.length > 0) groupPlans.push({ group: sel.group, sheet: effectiveSheet, plans })
+    if (plans.length > 0) groupPlans.push({ group: sel.group, sheet: effectiveSheet, plans, realIndexes })
   }
 
   if (body.dryRun) {
@@ -206,7 +221,9 @@ console.log('---------',textFillRowCount,imageFillRowCount)
 
   let meta = initialMeta
   const results = []
-  for (const { group, sheet, plans } of groupPlans) {
+  for (const { group, sheet, plans, realIndexes } of groupPlans) {
+    // Only stored rows are ever written back from here — see this route's own comment.
+    const persistGroup = persist && !!realIndexes
     const nextRows = [...sheet.rows]
     let filledRows = 0
     let skippedRows = 0
@@ -214,7 +231,7 @@ console.log('---------',textFillRowCount,imageFillRowCount)
     const rowResults = []
 
     for (const plan of plans) {
-      const result = await processRow({ sheet, plan, aiRules: meta.aiRules, templateContent: content, group, companyId })
+      const result = await processRow({ sheet, plan, aiRules: meta.aiRules, templateContent: viewerContent, group, companyId, userId: payload.userId })
       if (result.error) { errors.push({ rowIndex: result.rowIndex, message: result.error }); skippedRows++; continue }
       if (Object.keys(result.fields).length === 0) { skippedRows++; continue }
       const row = nextRows[result.rowIndex]
@@ -226,26 +243,30 @@ console.log('---------',textFillRowCount,imageFillRowCount)
       const toApply = Object.fromEntries(Object.entries(result.fields).filter(([k]) => !String(row[k] ?? '').trim()))
       if (Object.keys(toApply).length === 0) { skippedRows++; continue }
       rowResults.push({ rowIndex: result.rowIndex, fields: toApply })
-      if (persist) {
+      if (persistGroup) {
         const nextAiFilled = Array.from(new Set([...(row.aiFilled || []), ...Object.keys(toApply)]))
         nextRows[result.rowIndex] = { ...row, ...toApply, aiFilled: nextAiFilled }
       }
       filledRows++
     }
 
-    if (persist && filledRows > 0) {
+    if (persistGroup && filledRows > 0) {
       const sheetIndex = content.sheets.findIndex((s) => s.group === group)
-      content.sheets[sheetIndex] = { ...content.sheets[sheetIndex], rows: nextRows }
+      // Each filled row goes back to its own real position; every row that isn't the caller's
+      // stays exactly as stored.
+      const storedRows = [...(content.sheets[sheetIndex].rows || [])]
+      realIndexes.forEach((realIndex, viewIndex) => { storedRows[realIndex] = nextRows[viewIndex] })
+      content.sheets[sheetIndex] = { ...content.sheets[sheetIndex], rows: storedRows }
       await saveTemplateContent(templateId, content)
       meta = await updateTemplateMeta(templateId, {
         version: (meta.version || 1) + 1,
-        rowCounts: { ...meta.rowCounts, [group]: countFilledRows(nextRows) },
+        rowCounts: { ...meta.rowCounts, [group]: countFilledRows(storedRows) },
       })
     }
     if (filledRows > 0) {
       await recordTemplateHistory(req, {
         templateId, templateName: meta.templateName, sheetGroup: group,
-        action: persist ? 'ai_autofill_bulk' : 'ai_autofill_bulk_preview',
+        action: persistGroup ? 'ai_autofill_bulk' : 'ai_autofill_bulk_preview',
         snapshotMeta: { filledRows, skippedRows, errorCount: errors.length },
       })
     }

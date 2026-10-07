@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import { updateOneTemplate } from '@/lib/listingTemplateOps'
+import { requestMayUseTemplateSettings, TEMPLATE_SETTINGS_DENIED } from '@/lib/listingTemplateAccess'
 
 // Body: { templates: [{ templateId, ... same shape the singular PATCH
 // /api/listing-tools/[templateId] takes }, ...] }. Every item is updated
@@ -14,6 +15,11 @@ export async function PATCH(req) {
   try {
     const payload = await getAuthPayload(req)
     if (!payload?.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // A Template Settings action — see lib/listingTemplateAccess.js. (Each
+    // item still gets its own canManageTemplate check in updateOneTemplate.)
+    if (!(await requestMayUseTemplateSettings(req, payload))) {
+      return NextResponse.json({ error: TEMPLATE_SETTINGS_DENIED }, { status: 403 })
+    }
 
     const body = await req.json().catch(() => null)
     const items = Array.isArray(body?.templates) ? body.templates : []

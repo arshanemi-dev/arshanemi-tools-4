@@ -56,7 +56,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
     if (!confirm(`Delete "${template.templateName}"? This can't be undone.`)) return
     const res = await fetch(`/api/listing-tools/${template.id}`, { method: 'DELETE' })
     if (res.ok) { addToast('Template deleted', 'success'); onDeleted() }
-    else if (res.status !== 401) addToast('Could not delete template', 'error')
+    else if (res.status !== 401) addToast((await res.json().catch(() => null))?.error || 'Could not delete template', 'error')
   }
 
   return (
@@ -92,7 +92,12 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
                   >
                     Download Sheet
                   </PillButton>
-                  <PillButton variant="delete" icon={Trash2} onClick={handleDelete}>Delete Brand</PillButton>
+                  {/* This deletes the whole template — only offered to someone the API
+                      lets do that (the list route's viewerCanManage), never to a user
+                      it's merely shared with. */}
+                  {template.viewerCanManage !== false && (
+                    <PillButton variant="delete" icon={Trash2} onClick={handleDelete}>Delete Brand</PillButton>
+                  )}
                 </div>
                 <SheetGrid
                   headers={prefillSheet.headers}

@@ -4,8 +4,13 @@ import { createItem, getSingleton } from '@/lib/db'
 import { buildApplicationEmail, sendEmail } from '@/lib/mailer'
 import { COMPANY_HR_EMAIL } from '@/data/company'
 import { env } from '@/lib/env'
+import { tooManyAttempts, MINUTES } from '@/lib/rateLimit'
 
 export async function POST(req) {
+  // No login here, and every accepted call stores a file and sends a mail.
+  const limited = tooManyAttempts(req, 'careers-apply', { limit: 5, windowMs: 10 * MINUTES })
+  if (limited) return limited
+
   try {
     const formData = await req.formData()
     const name = formData.get('name')?.trim()

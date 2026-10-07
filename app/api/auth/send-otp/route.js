@@ -3,13 +3,15 @@ import { getUserByEmail, getUserByMobile, createOTP } from '@/lib/db'
 import { sendOtpEmail } from '@/lib/mailer'
 import { sendSmsOtp } from '@/lib/sms'
 import { IS_CONNECT, proxyAuthCall } from '@/lib/connect'
-
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString()
-}
+import { generateOTP } from '@/lib/otp'
+import { tooManyAttempts, MINUTES } from '@/lib/rateLimit'
 
 export async function POST(req) {
   const { identifier, type } = await req.json()
+
+  // Each send is an email/SMS to someone — capped per caller and per recipient.
+  const limited = tooManyAttempts(req, 'send-otp', { limit: 15, windowMs: 10 * MINUTES, subject: identifier, subjectLimit: 5 })
+  if (limited) return limited
 
   if (IS_CONNECT) {
     const { status, data } = await proxyAuthCall('/api/auth/send-otp', { body: { identifier, type } })
@@ -39,7 +41,9 @@ export async function POST(req) {
       await sendSmsOtp({ to: identifier.trim(), otpCode })
     }
 
-    return NextResponse.json({ ok: true, message: 'OTP sent successfully.' })
+    // Same wording as the "no such account" answer above — the reply must
+    // not reveal whether an address has an account here.
+    return NextResponse.json({ ok: true, message: 'If an account exists, an OTP has been sent.' })
   } catch (err) {
     console.error('Send OTP error:', err)
     return NextResponse.json({ error: 'Failed to send OTP. Please try again.' }, { status: 500 })

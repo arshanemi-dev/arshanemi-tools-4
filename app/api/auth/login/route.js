@@ -4,10 +4,8 @@ import { signToken, signRefreshToken, makeAuthCookie, clearAuthCookie, ADMIN_COO
 import { getUserByEmail, getUserByMobile, createOTP, verifyOTP } from '@/lib/db'
 import { sendLoginOtpEmail } from '@/lib/mailer'
 import { IS_CONNECT, proxyAuthCall } from '@/lib/connect'
-
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString()
-}
+import { generateOTP } from '@/lib/otp'
+import { tooManyAttempts, MINUTES } from '@/lib/rateLimit'
 
 const OTP_DISABLED = process.env.NEXT_PUBLIC_IS_OTP_Verifications_Disable === 'true'
 
@@ -16,6 +14,10 @@ export async function POST(req) {
 
   // Support legacy admin login (username field) for backward compatibility
   const id = identifier || username
+
+  // Password / OTP guessing: capped per caller, and tighter per account.
+  const limited = tooManyAttempts(req, 'login', { limit: 30, windowMs: 5 * MINUTES, subject: id, subjectLimit: 10 })
+  if (limited) return limited
 
   if (!id || (!password && !otpCode)) {
     return NextResponse.json({ error: 'Identifier and password required' }, { status: 400 })

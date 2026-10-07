@@ -27,16 +27,16 @@ function latestOf(...isos) {
   return isos.filter(Boolean).reduce((a, b) => (new Date(b) > new Date(a) ? b : a), null)
 }
 
-function Switch({ on, busy, onClick, title }) {
+function Switch({ on, busy, onClick, title, locked = false }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={!!on}
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || locked}
       title={title}
-      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-80 ${
+      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-80 ${locked ? 'cursor-not-allowed opacity-50' : ''} ${
         on ? 'bg-emerald-500' : 'bg-divider-light'
       }`}
     >
@@ -82,6 +82,12 @@ export default function TemplateSettingsListRow({
   const [editNamesOpen, setEditNamesOpen] = useState(false)
 
   const isChild = !isHead
+  // Whether this viewer may change or delete the template at all — the list
+  // also shows templates that are only shared with them (a master admin's
+  // default one, say), and the API refuses every change to those. Sent by the
+  // list route as `viewerCanManage`; treated as allowed when absent.
+  const canManage = template.viewerCanManage !== false
+  const NOT_YOURS = "Only this template's owner or a master admin can change it"
   const source = isChild && version?.meta
     ? { ...template, ...version.meta, aiRules: version.meta.aiRules || template.aiRules }
     : template
@@ -170,7 +176,7 @@ export default function TemplateSettingsListRow({
     setDeleting(true)
     try {
       const res = await fetch(`/api/listing-tools/${template.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Could not delete template')
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Could not delete template')
       addToast('Template deleted', 'success')
       onDeleted(template.id)
     } catch (err) {
@@ -209,8 +215,9 @@ export default function TemplateSettingsListRow({
             <Switch
               on={template.isAllowedToShow}
               busy={togglingVisibility}
+              locked={!canManage}
               onClick={toggleVisibility}
-              title={template.isAllowedToShow ? 'Visible in Auto Listing / Choose Your Template' : 'Hidden from Auto Listing / Choose Your Template'}
+              title={!canManage ? NOT_YOURS : template.isAllowedToShow ? 'Visible in Auto Listing / Choose Your Template' : 'Hidden from Auto Listing / Choose Your Template'}
             />
           )}
         </td>
@@ -317,17 +324,24 @@ export default function TemplateSettingsListRow({
                 <Link href={detailsHref}>
                   <PillButton variant="view" icon={Eye}>View</PillButton>
                 </Link>
-                {/* Just this one template on the bulk page — its headers,
-                    mapping and placement, saved on its own. */}
-                <Link href={`/listing-tools/template-settings/new-bulk?templates=${template.id}`}>
-                  <PillButton variant="ghost" icon={Layers} title="Edit this template's headers, mapping and placement on its own">Edit Headers</PillButton>
-                </Link>
-                <PillButton variant="ghost" icon={Pencil} onClick={() => setEditNamesOpen(true)} title="Edit the Template Name and Template Final Name">
-                  Edit Name
-                </PillButton>
-                <PillButton variant="ghost" icon={Pencil} onClick={startEditRules}>Edit Rules</PillButton>
+                {/* Everything that changes the template is only offered to
+                    someone the API lets change it (canManage) — a template
+                    that's just shared with you is View / Copy Rules only. */}
+                {canManage && (
+                  <>
+                    {/* Just this one template on the bulk page — its headers,
+                        mapping and placement, saved on its own. */}
+                    <Link href={`/listing-tools/template-settings/new-bulk?templates=${template.id}`}>
+                      <PillButton variant="ghost" icon={Layers} title="Edit this template's headers, mapping and placement on its own">Edit Headers</PillButton>
+                    </Link>
+                    <PillButton variant="ghost" icon={Pencil} onClick={() => setEditNamesOpen(true)} title="Edit the Template Name and Template Final Name">
+                      Edit Name
+                    </PillButton>
+                    <PillButton variant="ghost" icon={Pencil} onClick={startEditRules}>Edit Rules</PillButton>
+                  </>
+                )}
                 <PillButton variant="ghost" icon={Copy} onClick={handleCopyRules}>Copy Rules</PillButton>
-                <PillButton variant="delete" icon={Trash2} onClick={() => setConfirmOpen(true)}>Delete</PillButton>
+                {canManage && <PillButton variant="delete" icon={Trash2} onClick={() => setConfirmOpen(true)}>Delete</PillButton>}
               </>
             )}
           </div>

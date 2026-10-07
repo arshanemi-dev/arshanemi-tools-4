@@ -1,5 +1,7 @@
+import { NextResponse } from 'next/server'
 import { proxyMapping } from '@/lib/listingMappingProxy'
-import { getTemplateMeta } from '@/lib/listingStore'
+import { getAuthPayload } from '@/lib/auth'
+import { getTemplateMeta, canManageTemplate } from '@/lib/listingStore'
 import { countHeaders } from '@/lib/templateLogDiff'
 
 // What a version captures beyond its header structure — the template's
@@ -25,8 +27,16 @@ export async function GET(req) {
 // list falls back to the template's current values — identical anyway for
 // a brand-new template's first version.
 export async function POST(req) {
+  const payload = await getAuthPayload(req)
+  if (!payload?.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const meta = body.templateId ? await getTemplateMeta(body.templateId).catch(() => null) : null
+  // The template's name, rules and categories get copied into the version
+  // below — only for a template the caller may change, or recording a version
+  // against someone else's template id would hand its settings over.
+  if (meta && !canManageTemplate(meta, payload)) {
+    return NextResponse.json({ error: "Only this template's owner or a master admin can save a version of it." }, { status: 403 })
+  }
   const captured = meta ? Object.fromEntries(SNAPSHOT_META_KEYS.map((k) => [k, meta[k] ?? null])) : {}
   const enriched = {
     ...body,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import { createOneTemplate } from '@/lib/listingTemplateOps'
+import { requestMayUseTemplateSettings, TEMPLATE_SETTINGS_DENIED } from '@/lib/listingTemplateAccess'
 
 // Body: { templates: [{ clientId, templateName, ... same shape the
 // singular POST /api/listing-tools takes }, ...] } — `clientId` is
@@ -13,6 +14,10 @@ export async function POST(req) {
   try {
     const payload = await getAuthPayload(req)
     if (!payload?.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // A Template Settings action — see lib/listingTemplateAccess.js.
+    if (!(await requestMayUseTemplateSettings(req, payload))) {
+      return NextResponse.json({ error: TEMPLATE_SETTINGS_DENIED }, { status: 403 })
+    }
 
     const body = await req.json().catch(() => null)
     const items = Array.isArray(body?.templates) ? body.templates : []

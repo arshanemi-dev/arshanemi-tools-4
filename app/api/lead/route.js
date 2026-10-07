@@ -3,8 +3,13 @@ import { buildLeadEmail, sendEmail } from '@/lib/mailer';
 import { getSingleton, createItem } from '@/lib/db';
 import { COMPANY_EMAIL } from '@/data/company';
 import { env } from '@/lib/env';
+import { tooManyAttempts, MINUTES } from '@/lib/rateLimit';
 
 export async function POST(req) {
+  // No login here, and every accepted call sends a mail to the company inbox.
+  const limited = tooManyAttempts(req, 'lead', { limit: 5, windowMs: 10 * MINUTES });
+  if (limited) return limited;
+
   try {
     const { name, email, phone, interest } = await req.json();
 

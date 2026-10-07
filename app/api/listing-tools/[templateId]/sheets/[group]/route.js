@@ -4,6 +4,7 @@ import {
   getTemplateMeta, getTemplateContent, saveTemplateContent, updateTemplateMeta, canAccessTemplate,
 } from '@/lib/listingStore'
 import { ensureTrailingEmptyRow, upsertRowsByOwner, GROUPS } from '@/lib/listingTemplates'
+import { mergeSubmittedRows, ownSubmittedRows, scopeSheetTo } from '@/lib/listingRowScope'
 import {
   recordTemplateHistory, syncProductDetailsHistory, syncPrefillDetailsHistory,
   deleteProductDetailsHistory, deletePrefillDetailsHistory, toLabelKeyedRow,
@@ -37,6 +38,25 @@ function countFilledRows(rows) {
   return rows.filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
 }
 
+// The one thing about a group's headers a fill page is allowed to change
+// through this route: the formula text of a header that already is a Formula
+// (edited right in the grid — SheetGrid's header formula box). `submitted` is
+// whatever header list the page happened to load, possibly long ago, so it is
+// never taken as the group's headers: doing that let anyone who can fill a
+// shared template rewrite its structure, and let a page left open from before
+// a template was re-saved wipe what that save added (a header's mapped
+// columns, for one). A template's structure changes in Template Settings
+// only — PATCH /api/listing-tools/[templateId], which checks canManageTemplate.
+function withSubmittedFormulas(storedHeaders, submitted) {
+  if (!Array.isArray(submitted)) return storedHeaders
+  const formulaById = new Map(submitted.filter((h) => h && typeof h.formula === 'string').map((h) => [h.id, h.formula]))
+  return storedHeaders.map((h) => (
+    h.dataType === 'formula' && formulaById.has(h.id) && formulaById.get(h.id) !== (h.formula || '')
+      ? { ...h, formula: formulaById.get(h.id) }
+      : h
+  ))
+}
+
 // Debounced autosave target — one PATCH per sheet group (design_system /
 // compulsory / prefill / optional). Body: { headers, rows }. Bulk upserts by
 // whichever header is flagged isUniqueKeyPart in that group (Product Number
@@ -44,6 +64,11 @@ function countFilledRows(rows) {
 // an already-saved row **owned by the same user** updates that row in
 // place; anything else is created new — never rejected with a 409. See
 // upsertRowsByOwner's own comment for the per-user scoping rules.
+//
+// `rows` is the caller's whole view of the group — its own rows plus the
+// ownerless ones (that is all GET ever hands out, see
+// lib/listingRowScope.js). Every other user's rows are kept from what's
+// stored, never taken from, or lost because of, what the browser sent.
 export async function PATCH(req, { params }) {
   const { templateId, group } = await params
   if (!GROUPS.includes(group)) {
@@ -59,7 +84,7 @@ export async function PATCH(req, { params }) {
 
   const content = await getTemplateContent(templateId)
   const existing = content.sheets.find((s) => s.group === group)
-  const effectiveHeaders = headers || existing?.headers || []
+  const effectiveHeaders = withSubmittedFormulas(existing?.headers || [], headers)
 
   // Snapshotted before the write below overwrites `existing` — only for the two groups the hub
   // mirrors to Postgres (design_system/prefill). Compared against the same user's key values
@@ -72,8 +97,8 @@ export async function PATCH(req, { params }) {
     : null
   const beforeOwnKeys = historyKeyHeader ? ownKeyValues(existing?.rows || [], payload.userId, historyKeyHeader.id) : null
 
-  const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, rows)
-  const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, upserted)
+  const upserted = upsertRowsByOwner(payload.userId, effectiveHeaders, ownSubmittedRows(rows, payload.userId))
+  const normalizedRows = ensureTrailingEmptyRow(effectiveHeaders, mergeSubmittedRows(existing?.rows, upserted, payload.userId))
   const sheetIndex = content.sheets.findIndex((s) => s.group === group)
   const nextSheet = { ...(existing || {}), sheetName: existing?.sheetName, group, headers: effectiveHeaders, rows: normalizedRows }
   if (sheetIndex === -1) content.sheets.push(nextSheet)
@@ -125,5 +150,5 @@ export async function PATCH(req, { params }) {
     }
   }
 
-  return NextResponse.json({ sheet: nextSheet, template: updatedMeta })
+  return NextResponse.json({ sheet: scopeSheetTo(nextSheet, payload.userId), template: updatedMeta })
 }

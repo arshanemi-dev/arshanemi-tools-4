@@ -3,8 +3,7 @@ import { nanoid } from 'nanoid'
 import { getAuthPayload } from '@/lib/auth'
 import { uploadFile } from '@/lib/storage/dropbox'
 import { getTemplateMeta, canAccessTemplate } from '@/lib/listingStore'
-
-const MAX_MB = 5
+import { imageUploadError, imageContentType } from '@/lib/imageUploadRules'
 
 // Image upload backing ImageCell.jsx (one file per request) and
 // BulkImageDropZone.jsx (one file per request, called sequentially by
@@ -32,13 +31,17 @@ export async function POST(req, { params }) {
 
   const results = []
   for (const file of files) {
-    if (file.size > MAX_MB * 1024 * 1024) {
-      results.push({ filename: file.name, error: `File exceeds ${MAX_MB}MB` })
+    // Images only, by extension (never the type the browser claims), and
+    // within the size cap — same rule as /api/upload (lib/upload.js). This
+    // is a product-image upload; anything else has no business in that folder.
+    const problem = imageUploadError(file)
+    if (problem) {
+      results.push({ filename: file.name, error: problem })
       continue
     }
     const ext = file.name.split('.').pop().toLowerCase()
     const buffer = Buffer.from(await file.arrayBuffer())
-    const uploaded = await uploadFile(folderPath, `${nanoid()}.${ext}`, buffer, file.type)
+    const uploaded = await uploadFile(folderPath, `${nanoid()}.${ext}`, buffer, imageContentType(file.name))
     results.push({ filename: file.name, url: uploaded.url })
   }
 

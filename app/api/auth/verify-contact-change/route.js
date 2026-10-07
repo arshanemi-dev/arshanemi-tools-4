@@ -3,10 +3,14 @@ import { getUserFromRequest } from '@/lib/auth'
 import { verifyOTP, updateUser, getCompanyById, getUserByEmail, getUserByMobile } from '@/lib/db'
 import { serializeProfile } from '@/lib/profile'
 import { IS_CONNECT, proxyAuthCall, authHeaderFrom } from '@/lib/connect'
+import { tooManyAttempts, MINUTES } from '@/lib/rateLimit'
 
 // Verifies the OTP sent by /api/auth/send-contact-otp for a NEW email/mobile,
 // then applies it to the logged-in user's own account.
 export async function POST(req) {
+  const limited = tooManyAttempts(req, 'verify-contact-change', { limit: 20, windowMs: 10 * MINUTES })
+  if (limited) return limited
+
   if (IS_CONNECT) {
     const body = await req.json()
     const { status, data } = await proxyAuthCall('/api/auth/verify-contact-change', { body, authHeader: authHeaderFrom(req) })

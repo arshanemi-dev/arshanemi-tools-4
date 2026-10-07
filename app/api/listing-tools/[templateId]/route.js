@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { getTemplateMeta, getTemplateContent, deleteTemplate, canAccessTemplate } from '@/lib/listingStore'
+import { getTemplateMeta, getTemplateContent, deleteTemplate, canAccessTemplate, canManageTemplate } from '@/lib/listingStore'
 import { templateBadgeFor } from '@/lib/listingTemplates'
+import { scopeContentTo } from '@/lib/listingRowScope'
+import { requestMayUseTemplateSettings, TEMPLATE_SETTINGS_DENIED } from '@/lib/listingTemplateAccess'
 import { recordTemplateHistory, recordTemplateLog } from '@/lib/listingHistory'
 import { proxyAdminCall, authHeaderFrom } from '@/lib/connect'
 import { updateOneTemplate } from '@/lib/listingTemplateOps'
@@ -16,13 +18,24 @@ async function authorizeForTemplate(req, templateId) {
   return { payload, meta }
 }
 
+// Being able to open and fill a template is not being allowed to change or
+// delete it — see canManageTemplate. Every user can open a master admin's
+// shared template; none of them may rename, restructure or remove it.
+const NOT_MANAGER = "Only this template's owner or a master admin can change or delete it."
+
+// The viewer only ever gets its own rows (plus ownerless ones) out of a
+// template other users fill too — see lib/listingRowScope.js.
+// `viewerCanManage` tells the UI whether to offer edit/delete at all.
 export async function GET(req, { params }) {
   try {
     const { templateId } = await params
     const { error, meta, payload } = await authorizeForTemplate(req, templateId)
     if (error) return error
-    const content = await getTemplateContent(templateId)
-    return NextResponse.json({ template: { ...meta, viewerBadge: templateBadgeFor(meta, payload), viewerUserId: payload.userId }, content })
+    const content = scopeContentTo(await getTemplateContent(templateId), payload.userId)
+    return NextResponse.json({
+      template: { ...meta, viewerBadge: templateBadgeFor(meta, payload), viewerUserId: payload.userId, viewerCanManage: canManageTemplate(meta, payload) },
+      content,
+    })
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to load template' }, { status: 500 })
   }
@@ -38,8 +51,14 @@ export async function GET(req, { params }) {
 export async function PATCH(req, { params }) {
   try {
     const { templateId } = await params
-    const { error, payload } = await authorizeForTemplate(req, templateId)
+    const { error, payload, meta } = await authorizeForTemplate(req, templateId)
     if (error) return error
+    if (!canManageTemplate(meta, payload)) return NextResponse.json({ error: NOT_MANAGER }, { status: 403 })
+    // Editing a template (name, rules, visibility, headers) is a Template
+    // Settings action — the section's page gate never stopped a direct call.
+    if (!(await requestMayUseTemplateSettings(req, payload))) {
+      return NextResponse.json({ error: TEMPLATE_SETTINGS_DENIED }, { status: 403 })
+    }
 
     const body = await req.json().catch(() => ({}))
     const { template, content } = await updateOneTemplate(req, payload, templateId, body)
@@ -52,8 +71,9 @@ export async function PATCH(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const { templateId } = await params
-    const { error, meta } = await authorizeForTemplate(req, templateId)
+    const { error, meta, payload } = await authorizeForTemplate(req, templateId)
     if (error) return error
+    if (!canManageTemplate(meta, payload)) return NextResponse.json({ error: NOT_MANAGER }, { status: 403 })
 
     await deleteTemplate(templateId)
 

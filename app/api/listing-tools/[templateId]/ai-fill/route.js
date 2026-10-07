@@ -7,6 +7,8 @@ import {
 } from '@/lib/aiFillPrompt'
 import { generateListingFieldsWithFallback } from '@/lib/aiProvider'
 import { recordTemplateHistory } from '@/lib/listingHistory'
+import { scopeContentTo } from '@/lib/listingRowScope'
+import { fetchRemoteImage } from '@/lib/safeRemoteImage'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -19,13 +21,12 @@ async function authorizeForTemplate(req, templateId) {
 
 // Re-fetches the row's already-hosted image URL server-side and
 // base64-encodes it — no raw image bytes cross through client JS beyond the
-// existing upload flow (plan §8).
+// existing upload flow (plan §8). The URL is whatever sits in the cell —
+// possibly typed by hand — so it goes through fetchRemoteImage (public hosts
+// only, images only, size-capped), never a bare fetch().
 async function fetchImageAsBase64(url) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Could not fetch image (${res.status})`)
-  const mimeType = res.headers.get('content-type') || 'image/jpeg'
-  const buf = Buffer.from(await res.arrayBuffer())
-  return { base64: buf.toString('base64'), mimeType }
+  const { buffer, mimeType } = await fetchRemoteImage(url)
+  return { base64: buffer.toString('base64'), mimeType }
 }
 
 // POST body: { group, rowIndex, imageHeaderId? }. `imageHeaderId` present
@@ -38,7 +39,7 @@ async function fetchImageAsBase64(url) {
 // Decision #6 — this route never checks or decides coin cost itself).
 export async function POST(req, { params }) {
   const { templateId } = await params
-  const { error, meta } = await authorizeForTemplate(req, templateId)
+  const { error, meta, payload } = await authorizeForTemplate(req, templateId)
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
@@ -47,7 +48,11 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: 'group and rowIndex are required' }, { status: 400 })
   }
 
-  const content = await getTemplateContent(templateId)
+  // The caller's own view of the template (lib/listingRowScope.js) — the same
+  // rows its page was given, so `rowIndex` means the same row here, and nothing
+  // read below (the row itself, the "same product in other groups" facts) can
+  // be another user's.
+  const content = scopeContentTo(await getTemplateContent(templateId), payload.userId)
   const sheet = content.sheets.find((s) => s.group === group)
   if (!sheet) return NextResponse.json({ error: 'Unknown sheet group' }, { status: 400 })
   const row = sheet.rows[rowIndex]
@@ -75,7 +80,7 @@ export async function POST(req, { params }) {
 
   const targetSpecs = targets.map((h) => toTargetSpec(h, { vision: !!imageHeaderId }))
   const { matchLabels, matchValues } = keyLabelsAndValues(sheet.headers, row)
-  const similarRows = await findSimilarRows({ companyId: meta.companyId ?? null, group, matchLabels, matchValues })
+  const similarRows = await findSimilarRows({ companyId: meta.companyId ?? null, userId: payload.userId, group, matchLabels, matchValues })
   const crossGroupFacts = buildCrossGroupFacts({ templateContent: content, group, matchLabels, matchValues })
 
   const { systemInstruction, promptText } = buildPrompt({

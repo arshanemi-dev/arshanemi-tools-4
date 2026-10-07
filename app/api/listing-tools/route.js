@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
-import { listTemplates, listVisibleTemplatesForViewer } from '@/lib/listingStore'
+import { listTemplates, listVisibleTemplatesForViewer, canManageTemplate } from '@/lib/listingStore'
 import { templateBadgeFor } from '@/lib/listingTemplates'
 import { createOneTemplate } from '@/lib/listingTemplateOps'
+import { requestMayUseTemplateSettings, TEMPLATE_SETTINGS_DENIED } from '@/lib/listingTemplateAccess'
 
 async function authorize(req) {
   const payload = await getAuthPayload(req)
@@ -16,7 +17,10 @@ async function authorize(req) {
 // for a plain 'user' — their own admin's isAllowedToShow templates. Peer
 // 'user' templates under the same admin are never shared laterally. See
 // listVisibleTemplatesForViewer for the exact rule. Every row also gets a
-// viewerBadge (self/default/admin/null) for the UI to label who made it.
+// viewerBadge (self/default/admin/null) for the UI to label who made it, and
+// viewerCanManage — whether this viewer may change or delete it (seeing a
+// shared template isn't that, see canManageTemplate), so lists only offer
+// edit/delete where the API will actually allow it.
 export async function GET(req) {
   try {
     const { payload, error } = await authorize(req)
@@ -24,7 +28,7 @@ export async function GET(req) {
     const templates = payload.role === 'master_admin'
       ? await listTemplates({})
       : await listVisibleTemplatesForViewer({ userId: payload.userId, role: payload.role, companyId: payload.companyId })
-    const badged = templates.map((t) => ({ ...t, viewerBadge: templateBadgeFor(t, payload) }))
+    const badged = templates.map((t) => ({ ...t, viewerBadge: templateBadgeFor(t, payload), viewerCanManage: canManageTemplate(t, payload) }))
     return NextResponse.json({ templates: badged })
   } catch (err) {
     // Any unhandled throw here (e.g. a Blob storage/env issue) previously
@@ -42,6 +46,11 @@ export async function POST(req) {
   try {
     const { payload, error } = await authorize(req)
     if (error) return error
+    // Creating a template is a Template Settings action — the section's own
+    // page gate never stopped a direct call to this route.
+    if (!(await requestMayUseTemplateSettings(req, payload))) {
+      return NextResponse.json({ error: TEMPLATE_SETTINGS_DENIED }, { status: 403 })
+    }
 
     const body = await req.json().catch(() => null)
     const { template, content } = await createOneTemplate(req, payload, body)

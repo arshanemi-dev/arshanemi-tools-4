@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/auth'
 import { getTemplateMeta, getTemplateContent, saveTemplateContent, assignSkusToRows, canAccessTemplate } from '@/lib/listingStore'
+import { scopeSheetTo } from '@/lib/listingRowScope'
 
 function guessKeyHeaderIds(headers) {
   const find = (re) => headers.find((h) => re.test(h.label || ''))?.id
@@ -36,5 +37,6 @@ export async function POST(req, { params }) {
     await saveTemplateContent(templateId, content)
   }
 
-  return NextResponse.json({ sheet })
+  // The caller's own rows only — see lib/listingRowScope.js.
+  return NextResponse.json({ sheet: scopeSheetTo(sheet, payload.userId) })
 }
