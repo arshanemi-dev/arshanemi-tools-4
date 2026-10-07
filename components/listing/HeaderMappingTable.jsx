@@ -6,6 +6,7 @@ import Popover from './Popover'
 import { DEFAULT_LIST_SORT, sortItems, matchesQuery } from '@/lib/listSort'
 
 const OUR_COL = '__our__'
+const NO_SHEETS = []
 const norm = (s) => String(s ?? '').trim().toLowerCase()
 
 // Where a mapped header is placed (Header Place) — same colours as the
@@ -20,7 +21,8 @@ const PLACE_GROUP = {
 function ColumnHead({ label, sub, filter, onFilter }) {
   return (
     <div className="flex items-center gap-1 whitespace-nowrap">
-      <span className="font-normal">{label}</span>
+      {/* A sheet column is headed by its file name, which can be long. */}
+      <span className="max-w-[16rem] truncate font-normal" title={label}>{label}</span>
       {sub && <span className="text-[10.5px] font-normal text-subtle">· {sub}</span>}
       <Popover
         panelClass="min-w-[13rem] p-2"
@@ -72,14 +74,22 @@ function Check({ checked, onChange, label, disabled }) {
 // header has its own checkbox (multi-select). The section's Mapped button
 // maps the ticked sheet headers onto the ticked Our Header.
 //
-// Raw columns: "Common Headers" (in every uploaded sheet, only once 2+ are
-// uploaded) and "Sheet Headers" (the rest) — the same split the old 4-column
-// grid made. Rows are "merged first": each mapped Our Header is one row with
-// its mapped sheet headers as boxes (× unmaps); below, the Unmapped block
-// lists each column's leftovers independently. With `showMapping` off (the
-// sidebar's Header Mapping eye) only the Our Header column shows.
+// Raw columns, sheet-wise: "Common Sheet Headers" first (in every uploaded
+// sheet, only once 2+ are uploaded), then ONE COLUMN PER UPLOADED SHEET
+// (`sheets`, headed by its file name) with the rest of that sheet's own
+// headers in the sheet's own order — so between them every header of every
+// sheet shows. A name two sheets share (but not all of them) is in both
+// their columns; mapping is by name, so ticking / mapping / unmapping it in
+// one does the same in the other. "Other Sheet Headers" only appears for a
+// name that's in no sheet open right now (a mapping kept after its sheet was
+// removed) — nothing mapped is ever hidden. With no `sheets` to split by
+// (editing a saved template) it's the one pooled "Sheet Headers" column.
+// Rows are "merged first": each mapped Our Header is one row with its mapped
+// sheet headers as boxes (× unmaps); below, the Unmapped block lists each
+// column's leftovers independently. With `showMapping` off (the sidebar's
+// Header Mapping eye) only the Our Header column shows.
 export default function HeaderMappingTable({
-  ourHeaders, mappedHeaders, unmappedRawHeaders, commonHeaderKeys, showMapping = true,
+  ourHeaders, mappedHeaders, unmappedRawHeaders, commonHeaderKeys, sheets = NO_SHEETS, showMapping = true,
   activeId, onSelect, checked, onToggleCheck, onUnmap, onRename, isDuplicate, onDelete, busyId,
   onOpenHeaderSettings, onOpenColumnSettings, onOpenRawHeaderSettings,
   categoryForOurHeaderId, categoryOrder, ourQuery, onOurQuery, ourSort = DEFAULT_LIST_SORT,
@@ -109,11 +119,32 @@ export default function HeaderMappingTable({
     return [...sorted].sort((a, b) => rank(a) - rank(b))
   }, [ourHeaders, mappedById, ourSort, grouping, categoryForOurHeaderId, categoryOrder])
 
-  const isCommon = (h) => !!commonHeaderKeys?.has(norm(h))
-  const columns = !showMapping ? [] : [
-    ...(commonHeaderKeys && commonHeaderKeys.size ? [{ id: 'common', name: 'Common Headers', pick: isCommon }] : []),
-    { id: 'sheet', name: 'Sheet Headers', pick: (h) => !isCommon(h) },
-  ].map((c) => ({ ...c, unmapped: unmappedRawHeaders.filter(c.pick) }))
+  // Each column: `pick` says which sheet-header names belong in it, `unmapped`
+  // is its leftover list, `total` (when known) every name it stands for.
+  const columns = useMemo(() => {
+    if (!showMapping) return []
+    const common = (h) => !!commonHeaderKeys?.has(norm(h))
+    const unmapped = new Set(unmappedRawHeaders)
+    const pooled = (pick) => unmappedRawHeaders.filter(pick)
+    const out = []
+    if (commonHeaderKeys?.size) {
+      const all = new Set(sheets.flatMap((s) => s.headers).filter(common))
+      out.push({ id: 'common', name: 'Common Sheet Headers', pick: common, unmapped: pooled(common), total: all.size || null })
+    }
+    if (!sheets.length) {
+      const rest = (h) => !common(h)
+      return [...out, { id: 'sheet', name: 'Sheet Headers', pick: rest, unmapped: pooled(rest), total: null }]
+    }
+    const owned = sheets.map((s) => new Set(s.headers))
+    sheets.forEach((s, i) => {
+      const own = s.headers.filter((h) => !common(h))
+      out.push({ id: `sheet:${s.id}`, name: s.name, pick: (h) => !common(h) && owned[i].has(h), unmapped: own.filter((h) => unmapped.has(h)), total: own.length })
+    })
+    const other = (h) => !common(h) && !owned.some((set) => set.has(h))
+    const otherUsed = unmappedRawHeaders.some(other) || mappedHeaders.some((m) => m.sheetHeaders.some(other))
+    if (otherUsed) out.push({ id: 'other', name: 'Other Sheet Headers', pick: other, unmapped: pooled(other), total: null })
+    return out
+  }, [showMapping, commonHeaderKeys, unmappedRawHeaders, sheets, mappedHeaders])
 
   const mappedFor = (h, c) => (mappedById.get(h.id)?.sheetHeaders || []).filter(c.pick)
   const mergedRows = !showMapping ? [] : rows.filter((h) => mappedById.has(h.id)
@@ -248,7 +279,7 @@ export default function HeaderMappingTable({
             </th>
             {columns.map((c) => (
               <th key={c.id} className="min-w-[12rem] border border-divider px-2 py-1.5">
-                <ColumnHead label={c.name} sub={`${c.unmapped.length} unmapped`} filter={filters[c.id]} onFilter={setFilter(c.id)} />
+                <ColumnHead label={c.name} sub={`${c.unmapped.length}${c.total == null ? '' : ` of ${c.total}`} unmapped`} filter={filters[c.id]} onFilter={setFilter(c.id)} />
               </th>
             ))}
           </tr>

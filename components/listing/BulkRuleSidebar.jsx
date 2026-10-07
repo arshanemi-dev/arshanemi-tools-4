@@ -571,22 +571,27 @@ const DEFAULT_MARKETPLACES = [
   'Tata CLiQ',
 ]
 
+// The brands a user added under Ecommerce Brands (everything beyond
+// DEFAULT_MARKETPLACES) — kept in this browser's localStorage. Also read by
+// the page when an upload's file name is checked for a leading marketplace.
+export function readCustomMarketplaces() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('custom_marketplaces') || '[]')
+    return Array.isArray(parsed) ? parsed.filter((m) => typeof m === 'string' && m.trim()) : []
+  } catch {
+    return []
+  }
+}
+
 function MarketplaceTabsSection({ selectedMarketplace, onSelectMarketplace, hidden, onToggleHidden }) {
   const [marketplaces, setMarketplaces] = useState(DEFAULT_MARKETPLACES)
   const [adding, setAdding] = useState(false)
   const [addDraft, setAddDraft] = useState('')
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('custom_marketplaces')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length) {
-          // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is readable only after hydration
-          setMarketplaces((prev) => [...new Set([...prev, ...parsed])])
-        }
-      }
-    } catch { /* ignore */ }
+    const saved = readCustomMarketplaces()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is readable only after hydration
+    if (saved.length) setMarketplaces((prev) => [...new Set([...prev, ...saved])])
   }, [])
 
   function addMarketplace(name) {

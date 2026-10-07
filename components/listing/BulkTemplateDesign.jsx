@@ -9,7 +9,7 @@ import { HEADER_ROW_INDEX, DEFAULT_SHEET_ROWS, detectMarketplaceSheetDefaults, h
 import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from './TemplateNamingFields'
 import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
-import BulkRuleSidebar from './BulkRuleSidebar'
+import BulkRuleSidebar, { readCustomMarketplaces } from './BulkRuleSidebar'
 import HeaderMappingSection from './HeaderMappingSection'
 import BulkPlaceGrid, { moveHeaderInList } from './BulkPlaceGrid'
 import HeaderBucketPreview from './HeaderBucketPreview'
@@ -23,7 +23,8 @@ import DropdownDebugPanel from './DropdownDebugPanel'
 import { readDataValidationLists } from '@/lib/sheetDataValidations'
 import { visibleSheetNames, hiddenSheets, isColumnHidden } from '@/lib/sheetVisibility'
 import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
-import { cleanLabel, splitHeaderCell } from '@/lib/sheetHeaderLabel'
+import { cleanLabel, splitHeaderCell, numberRepeatedLabels } from '@/lib/sheetHeaderLabel'
+import { KNOWN_MARKETPLACES, extractBrandAndCategories } from '@/lib/uploadFileName'
 import { REAL_GROUPS, SHEET_LABELS, seedFromExistingContent, buildGroupedSheets } from './bulkTemplateSheets'
 import { findHeaderUsage } from './ourHeaderUsage'
 
@@ -243,7 +244,6 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     headerRowIdx + 1,
     parseRowInput(session.dropdownDataStartRow, DEFAULT_SHEET_ROWS.DROPDOWN_DATA_START_ROW - 1),
   )
-  const seen = new Set()
   const rawHeaders = []
   const rawHeaderNotes = {}
   const rawHeaderGroupLabels = {}
@@ -252,6 +252,9 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
   // Headers sitting in columns Excel hides — never considered (same rule as
   // hidden sheets, lib/sheetVisibility.js), only named in the debug panel.
   const hiddenHeaders = []
+  // Every real header cell Excel shows, in sheet order — one per COLUMN, so
+  // a name the sheet uses on several columns is in here once per column.
+  const shown = []
   for (let i = startColIdx; i < rawRow.length; i++) {
     if (onProgress) {
       onProgress('Extracting headers…', i + 1, rawRow.length)
@@ -259,14 +262,19 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     }
     const { label, description: cellNote } = splitHeaderCell(rawRow[i])
     if (!label || isPlaceholderLabel(label)) continue
-    // Before the `seen` check, so a hidden column never claims a label a
-    // visible column further along also carries.
     if (isColumnHidden(ws, origin.c + i)) { hiddenHeaders.push({ label, colIdx: i }); continue }
-    const key = label.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
+    shown.push({ i, sheetLabel: label, cellNote })
+  }
+  // Each column is its own header: a repeated name is numbered, not dropped
+  // (Amazon's "Other Image URL", "Other Image URL 2", … — see
+  // numberRepeatedLabels). Hidden columns are already out, so they never use
+  // up a number. `sheetLabel` keeps the name as the sheet writes it, for
+  // whatever is looked up by that name (lib/dropdownExtraction.js).
+  const names = numberRepeatedLabels(shown.map((c) => c.sheetLabel))
+  shown.forEach(({ i, sheetLabel, cellNote }, k) => {
+    const label = names[k]
     rawHeaders.push(label)
-    headerCells.push({ label, colIdx: i })
+    headerCells.push({ label, sheetLabel, colIdx: i })
     sourceCols[label] = origin.c + i
     // In-cell note (same cell, split by line/lead-in) wins over the I
     // section row's note when both exist.
@@ -274,7 +282,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     const note = cellNote || (isectionNote && !isPlaceholderLabel(isectionNote) ? isectionNote : '')
     if (note) rawHeaderNotes[label] = note
     if (groupRowFilled[i]) rawHeaderGroupLabels[label] = groupRowFilled[i]
-  }
+  })
   if (onProgress) {
     onProgress('Reading dropdown values…', rawHeaders.length, rawHeaders.length)
     await yieldToPaint()
@@ -313,54 +321,6 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     sheetSource: { cols: sourceCols, headerRow: origin.r + headerRowIdx + 1, dataStartRow: origin.r + dataStartIdx + 1 },
     ...(typed ? {} : layoutToInputs(validation)),
   }
-}
-
-// A freshly-uploaded file's own name is usually the best hint for this
-// template's marketplace + categories (e.g. "Meesho_Blouse_Cotton_Women.xlsx")
-// — fixed positional convention: the FIRST token is always the marketplace
-// name, the LAST (non-stopword) token is always Category 6, whatever sits
-// between fills Category 1-5 in order. Only ever fills currently-EMPTY
-// category slots (see handleFile), never overwrites something the user
-// already typed.
-const CATEGORY_STOPWORDS = new Set([
-  'file', 'files', 'sheet', 'sheets', 'template', 'templates', 'final', 'draft', 'copy',
-  'xlsx', 'xls', 'csv', 'fill', 'this', 'data', 'master', 'new', 'old', 'updated',
-  'list', 'listing', 'upload', 'uploaded', 'export', 'import', 'v1', 'v2', 'v3',
-])
-const KNOWN_MARKETPLACES = [
-  'Meesho', 'Amazon', 'Flipkart', 'Myntra', 'Ajio', 'Nykaa', 'Tata CLiQ', 'Jiomart', 'eBay', 'Shopify'
-]
-
-// Returns { brand, categories } where categories is a fixed 6-slot array
-// (category1..category6, '' for an unused slot) — categories[5] (Category 6)
-// is always the filename's last token, never wherever it happens to fall in
-// sequence, so a 2-token name ("Meesho_Women.xlsx") puts "Women" in
-// Category 6, not Category 1.
-function extractBrandAndCategories(filename) {
-  const base = String(filename || '').replace(/\.[a-z0-9]+$/i, '')
-  const tokens = base.split(/[_\-\s]+/).map((t) => t.trim()).filter(Boolean)
-  if (tokens.length === 0) return { brand: '', categories: new Array(6).fill('') }
-
-  const rawBrand = tokens[0]
-  const brandLower = rawBrand.toLowerCase()
-  const known = KNOWN_MARKETPLACES.find((m) => m.toLowerCase() === brandLower)
-  const brand = known || (rawBrand.charAt(0).toUpperCase() + rawBrand.slice(1))
-
-  // Lowercased — a filename token carries whatever case its seller typed
-  // (often ALL CAPS), and that used to bleed straight into the composed
-  // Template Name / Save Final Name; category text is lowercase everywhere
-  // now, same idea as a URL slug.
-  const catTokens = tokens.slice(1)
-    .filter((t) => !CATEGORY_STOPWORDS.has(t.toLowerCase()) && !/^\d+$/.test(t))
-    .map((t) => t.toLowerCase())
-
-  const categories = new Array(6).fill('')
-  if (catTokens.length > 0) {
-    categories[5] = catTokens[catTokens.length - 1]
-    catTokens.slice(0, -1).slice(0, 5).forEach((t, i) => { categories[i] = t })
-  }
-
-  return { brand, categories }
 }
 
 // The bulk mapping flow — two different working sets share this same page:
@@ -709,20 +669,30 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     return () => { cancelled = true }
   }, [refreshToken])
 
+  // Every name that counts as a marketplace at the start of a file name
+  // (lib/uploadFileName.js): the built-in list, the brands added in the
+  // sidebar's Ecommerce Brands, and the one selected / on the open template.
+  function knownMarketplaces() {
+    return [...new Set([...KNOWN_MARKETPLACES, ...readCustomMarketplaces(), selectedMarketplace, presetData.marketplaceName].filter(Boolean))]
+  }
+
   // Builds a fresh upload session's starting state off one parsed workbook
-  // — marketplace/categories straight from the filename (fixed positional
-  // convention, see extractBrandAndCategories) and sheet/row selections
-  // from the brand's marketplace rule (constants/sheetDefaults.js). A brand
+  // — marketplace/categories straight from the filename (see
+  // extractBrandAndCategories) and sheet/row selections from the brand's
+  // marketplace rule (constants/sheetDefaults.js). A file name that doesn't
+  // start with a marketplace ("KURTA.xlsx" — Amazon names its sheets by
+  // category alone) takes `batchBrand` (the one the other files of its batch
+  // name), else the open template's / the selected brand. A brand
   // new session never has anything to "not overwrite", so this sets
   // presetData/categoriesData directly rather than going through the
   // only-fill-empty-slots helpers above (those are for topping up an
   // already-in-progress session from header-derived hints instead). The
   // Validations sheet comes off the same rule row (ruleValidationSession).
-  function buildUploadSession(file, wb, meta) {
-    const { brand, categories } = extractBrandAndCategories(file.name)
-    const effectiveBrand = brand || presetData.marketplaceName || selectedMarketplace
+  function buildUploadSession(file, wb, meta, batchBrand = '') {
+    const { brand, categories } = extractBrandAndCategories(file.name, knownMarketplaces())
+    const effectiveBrand = brand || batchBrand || presetData.marketplaceName || selectedMarketplace
     // Sheet No counts the tabs Excel actually shows — hidden sheets skipped.
-    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), ruleBrandOf(brand, presetData.marketplaceName, selectedMarketplace))
+    const rule = detectMarketplaceSheetDefaults(visibleSheetNames(wb), ruleBrandOf(brand, batchBrand, presetData.marketplaceName, selectedMarketplace))
     const nextDataSheetName = rule.dataSheetName || visibleSheetNames(wb)[0] || ''
     return {
       workbook: wb,
@@ -807,12 +777,15 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // rule (the row numbers are common, not tuned per file).
   //
   // A batch is assumed to be one marketplace's sheets (that's what makes
-  // "common" row rules valid across the whole batch) — checked off each
-  // file's own first-token brand (extractBrandAndCategories), lower-cased
-  // so "Meesho"/"meesho" don't count as a mismatch. Mixed marketplaces in
-  // one upload is almost always a mistake, so this rejects before touching
-  // any existing session state, rather than silently applying one file's
-  // rule to another's sheet.
+  // "common" row rules valid across the whole batch) — checked off the
+  // marketplace each file's own name STARTS with (extractBrandAndCategories;
+  // matched ignoring case, so "Meesho"/"meesho" don't count as a mismatch).
+  // Two different ones in one upload is almost always a mistake, so this
+  // rejects before touching any existing session state, rather than
+  // silently applying one file's rule to another's sheet. A name that starts
+  // with no marketplace at all ("KURTA.xlsx", "SAREE.xlsx" — how Amazon
+  // names its sheets) is never a mismatch: it's a category, and the file
+  // takes the batch's marketplace (buildUploadSession's batchBrand).
   //
   // Each file becomes its own independent upload session (buildUploadSession)
   // rather than one pooled/shared header list — selectable and individually
@@ -827,15 +800,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       setExtraction(null)
       return
     }
-    const brands = files.map((f) => extractBrandAndCategories(f.name).brand)
-    const firstBrandLower = (brands.find(Boolean) || '').toLowerCase()
-    const mismatched = firstBrandLower && brands.some((b) => b && b.toLowerCase() !== firstBrandLower)
-    if (mismatched) {
-      const found = [...new Set(brands.filter(Boolean))].join(', ')
-      addToast(`These files aren't all the same marketplace (found: ${found}) — upload one marketplace's sheets per batch.`, 'error')
+    const marketplaces = knownMarketplaces()
+    const named = [...new Set(files.map((f) => extractBrandAndCategories(f.name, marketplaces).brand).filter(Boolean))]
+    if (named.length > 1) {
+      addToast(`These files aren't all the same marketplace (found: ${named.join(', ')}) — upload one marketplace's sheets per batch.`, 'error')
       setExtraction(null)
       return
     }
+    const batchBrand = named[0] || ''
     const XLSX = await import('xlsx')
     const fileInfos = []
     const sessions = {}
@@ -859,7 +831,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
         })
         fileInfos.push({ name: file.name, sheets: sheetNames })
         const fileId = `file_${Date.now()}_${fi}`
-        const baseSession = buildUploadSession(file, wb, meta)
+        const baseSession = buildUploadSession(file, wb, meta, batchBrand)
         // Extracted eagerly for every file here (not just whichever one
         // ends up active below) — that's what lets Header Mapping show the
         // whole batch's headers immediately instead of only after clicking
@@ -876,6 +848,11 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setUploadSessions((prev) => ({ ...prev, ...sessions }))
     setUploadedFiles((prev) => [...prev, ...fileInfos])
     setTemplatesList((prev) => [...prev, ...entries])
+    // Nothing in the names said which marketplace — say which one was used,
+    // since its rule picked every file's sheet and rows.
+    if (!batchBrand && entries.length) {
+      addToast(`No marketplace in the file names — read as ${sessions[entries[0].id].presetData.marketplaceName} sheets.`)
+    }
     const firstId = entries[0]?.id
     if (firstId) {
       // The open template has unsaved edits — the new files are in the
@@ -2141,6 +2118,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 onOpenHeaderSettings={setHeaderSettingsId}
                 unmappedRawHeaders={unmappedRawHeaders}
                 commonHeaderKeys={commonHeaderInfo.keys}
+                sheets={sheetsIndex}
                 mappedHeaders={activeMapped}
                 onMap={handleMap}
                 onUnmap={handleUnmap}

@@ -87,6 +87,8 @@ function HeaderNameModal({ header, isDuplicate, saving, onClose, onSave, onOpenS
 //     search is the same text as the table's Our Header column filter).
 // `showMapping` false (sidebar's Header Mapping eye off) leaves just the
 // Our Headers list — no sheet columns, no Mapped button.
+// `sheets` — every uploaded sheet with its own headers ([{ id, name,
+// headers }], the page's sheetsIndex): the table shows one column per sheet.
 //
 // Deleting asks `onCheckHeaderUsage(ids)` first (→ { usage: {[id]: {templates,
 // rules, mappedHere}}, complete }, see ourHeaderUsage.js): a header that's
@@ -95,7 +97,7 @@ function HeaderNameModal({ header, isDuplicate, saving, onClose, onSave, onOpenS
 export default function HeaderMappingSection({
   title, showMapping = true, ourHeaders, creating,
   onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onCheckHeaderUsage, onOpenHeaderSettings,
-  unmappedRawHeaders, commonHeaderKeys, mappedHeaders, onMap, onUnmap, onOpenColumnSettings, onOpenRawHeaderSettings,
+  unmappedRawHeaders, commonHeaderKeys, sheets, mappedHeaders, onMap, onUnmap, onOpenColumnSettings, onOpenRawHeaderSettings,
   categoryForOurHeaderId, categoryOrder,
 }) {
   const { addToast } = useToast()
@@ -302,6 +304,7 @@ export default function HeaderMappingSection({
           mappedHeaders={mappedHeaders}
           unmappedRawHeaders={unmappedRawHeaders}
           commonHeaderKeys={commonHeaderKeys}
+          sheets={sheets}
           showMapping={showMapping}
           activeId={activeId}
           onSelect={setActiveId}
