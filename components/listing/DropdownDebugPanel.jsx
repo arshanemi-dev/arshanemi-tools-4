@@ -2,17 +2,21 @@
 import { useState } from 'react'
 import { Bug, ChevronDown, ChevronRight, Columns3, Rows3, Search, Copy, Check, AlertTriangle, Link2 } from 'lucide-react'
 import { DROPDOWN_SOURCES, DROPDOWN_SOURCE_META, columnLetter } from '@/lib/dropdownExtraction'
+import DebugHeaderList from './DebugHeaderList'
 
 // Bottom-of-page debug view for the bulk mapping page's dropdown extraction
-// (lib/dropdownExtraction.js's `report`, for whichever file is active) —
-// every fill-sheet header as a table COLUMN with its extracted values listed
-// down it, the same shape a Validations sheet itself has. Each column head
-// says which source won (Excel dropdown / Validations sheet / Allowed values
-// / Input rows), what every other source had for comparison, which
-// Validations-sheet header it was matched to and how (exact / normalized /
-// fuzzy), and whether any filled input value falls outside the list.
-// Validations-sheet columns that matched no header get their own table
-// underneath. Read-only — nothing here changes what gets saved.
+// (lib/dropdownExtraction.js's `report`, for whichever file is active), in
+// two tabs.
+// Dropdown values — every fill-sheet header as a table COLUMN with its
+// extracted values listed down it, the same shape a Validations sheet itself
+// has. Each column head says which source won (Excel dropdown / Validations
+// sheet / Allowed values / Input rows), what every other source had for
+// comparison, which Validations-sheet header it was matched to and how
+// (exact / normalized / fuzzy), and whether any filled input value falls
+// outside the list. Validations-sheet columns that matched no header get
+// their own table underneath.
+// Headers — just the header names as one copyable list (DebugHeaderList.jsx).
+// Read-only — nothing here changes what gets saved.
 
 const SOURCE_STYLES = {
   excel: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
@@ -185,6 +189,7 @@ const chipCls = (active) =>
 
 export default function DropdownDebugPanel({ report, fileName }) {
   const [open, setOpen] = useState(true)
+  const [tab, setTab] = useState('values') // 'values' | 'headers'
   const [filter, setFilter] = useState('dropdowns') // 'dropdowns' | 'all' | 'none' | a DROPDOWN_SOURCES id
   const [query, setQuery] = useState('')
   const [view, setView] = useState('columns')
@@ -193,7 +198,9 @@ export default function DropdownDebugPanel({ report, fileName }) {
   const [copied, setCopied] = useState(false)
 
   if (!report) return null
-  const { headers, validation, unmatchedValidation } = report
+  // hiddenHeaders — headers in columns Excel hides, already left out of
+  // `headers` by the extraction; only the Headers tab names them.
+  const { headers, hiddenHeaders = [], validation, unmatchedValidation } = report
 
   const count = (pred) => headers.filter(pred).length
   const filters = [
@@ -201,6 +208,10 @@ export default function DropdownDebugPanel({ report, fileName }) {
     { id: 'all', label: 'All headers', n: headers.length },
     ...DROPDOWN_SOURCES.map((s) => ({ id: s, label: DROPDOWN_SOURCE_META[s].label, n: count((h) => h.source === s) })),
     { id: 'none', label: 'No values', n: count((h) => !h.source) },
+  ]
+  const tabs = [
+    { id: 'values', label: 'Dropdown values', n: filters[0].n },
+    { id: 'headers', label: 'Headers', n: headers.length },
   ]
   const q = query.trim().toLowerCase()
   const visible = headers
@@ -232,7 +243,7 @@ export default function DropdownDebugPanel({ report, fileName }) {
         <div className="space-y-3 border-t border-divider px-3 pb-3 pt-3">
           <div className="space-y-0.5 text-[12.5px] text-muted">
             <p>
-              <span className="font-semibold text-foreground">Fill sheet:</span> {report.dataSheetName} · headers {lineText('vertical', report.headerRowIdx)}{report.dataStartColIdx ? ` from ${slotText('vertical', report.dataStartColIdx)}` : ''} · input rows from {lineText('vertical', report.dataStartIdx)}
+              <span className="font-semibold text-foreground">Fill sheet:</span> {report.dataSheetName} · headers {lineText('vertical', report.headerRowIdx)}{report.dataStartColIdx ? ` from ${slotText('vertical', report.dataStartColIdx)}` : ''} · input rows from {lineText('vertical', report.dataStartIdx)}{hiddenHeaders.length ? ` · ${hiddenHeaders.length} header${hiddenHeaders.length === 1 ? '' : 's'} in hidden columns skipped` : ''}
             </p>
             <p>
               <span className="font-semibold text-foreground">Validations sheet:</span>{' '}
@@ -242,92 +253,114 @@ export default function DropdownDebugPanel({ report, fileName }) {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            {filters.map((f) => (
-              <button key={f.id} type="button" onClick={() => setFilter(f.id)} className={chipCls(filter === f.id)}>
-                {f.label} ({f.n})
+          <div role="tablist" aria-label="Debug view" className="flex gap-1 border-b border-divider">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-[13px] font-medium ${tab === t.id ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground'}`}
+              >
+                {t.label}
+                <span className="rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-subtle">{t.n}</span>
               </button>
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex h-[32px] min-w-0 flex-[1_1_220px] items-center gap-2 rounded-md border border-divider bg-background px-2.5">
-              <Search className="h-3.5 w-3.5 flex-shrink-0 text-subtle" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search headers or values…"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle"
-              />
-            </label>
-            <div role="radiogroup" aria-label="Table layout" className="inline-flex h-[32px] rounded-md border border-divider bg-background p-0.5">
-              {[['columns', 'Columns', Columns3], ['rows', 'Rows', Rows3]].map(([id, label, Icon]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="radio"
-                  aria-checked={view === id}
-                  onClick={() => setView(id)}
-                  className={`flex items-center gap-1.5 rounded px-2.5 text-[12.5px] font-medium ${view === id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={copyTsv}
-              disabled={visible.length === 0}
-              title="Copy the visible headers and values as a tab-separated table (pastes into Excel column-wise)"
-              className="flex h-[32px] items-center gap-1.5 rounded-md border border-divider bg-background px-2.5 text-[12.5px] font-medium text-muted hover:text-foreground disabled:opacity-50"
-            >
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? 'Copied' : 'Copy TSV'}
-            </button>
-          </div>
-
-          {visible.length === 0 ? (
-            <p className="rounded-md border border-dashed border-divider px-3 py-6 text-center text-[12.5px] text-subtle">No headers match this filter.</p>
-          ) : view === 'columns' ? (
-            <ColumnsTable columns={visible.map((h) => ({ key: h.label, head: <HeaderMeta h={h} />, values: h.values }))} rowLimit={rowLimit} />
+          {tab === 'headers' ? (
+            <DebugHeaderList headers={headers} hiddenHeaders={hiddenHeaders} />
           ) : (
-            <RowsTable headers={visible} rowLimit={rowLimit} />
-          )}
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {filters.map((f) => (
+                  <button key={f.id} type="button" onClick={() => setFilter(f.id)} className={chipCls(filter === f.id)}>
+                    {f.label} ({f.n})
+                  </button>
+                ))}
+              </div>
 
-          {maxLen > rowLimit && (
-            <div className="flex items-center justify-center gap-2 text-[12.5px]">
-              <span className="text-subtle">Showing {rowLimit} of {maxLen} values</span>
-              <button type="button" onClick={() => setRowLimit((n) => n + ROW_STEP * 4)} className="font-medium text-accent hover:underline">Show more</button>
-              <button type="button" onClick={() => setRowLimit(maxLen)} className="font-medium text-accent hover:underline">Show all</button>
-            </div>
-          )}
-
-          {unmatchedValidation.length > 0 && (
-            <div className="rounded-md border border-divider">
-              <button type="button" onClick={() => setShowUnmatched((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left">
-                {showUnmatched ? <ChevronDown className="h-3.5 w-3.5 text-subtle" /> : <ChevronRight className="h-3.5 w-3.5 text-subtle" />}
-                <span className="text-[13px] font-medium text-foreground">Validations sheet headers with no matching fill-sheet header</span>
-                <span className="rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-subtle">{unmatchedValidation.length}</span>
-              </button>
-              {showUnmatched && (
-                <div className="px-2.5 pb-2.5">
-                  <ColumnsTable
-                    rowLimit={rowLimit}
-                    columns={unmatchedValidation.map((c) => ({
-                      key: `${c.line}:${c.name}`,
-                      values: c.values,
-                      head: (
-                        <div className="space-y-1">
-                          <div className="truncate text-[12.5px] font-semibold text-foreground" title={c.name}>{c.name}</div>
-                          <div className="text-[10.5px] text-subtle">{slotText(validation?.orientation, c.line)} · {c.values.length} values</div>
-                        </div>
-                      ),
-                    }))}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex h-[32px] min-w-0 flex-[1_1_220px] items-center gap-2 rounded-md border border-divider bg-background px-2.5">
+                  <Search className="h-3.5 w-3.5 flex-shrink-0 text-subtle" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search headers or values…"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-subtle"
                   />
+                </label>
+                <div role="radiogroup" aria-label="Table layout" className="inline-flex h-[32px] rounded-md border border-divider bg-background p-0.5">
+                  {[['columns', 'Columns', Columns3], ['rows', 'Rows', Rows3]].map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={view === id}
+                      onClick={() => setView(id)}
+                      className={`flex items-center gap-1.5 rounded px-2.5 text-[12.5px] font-medium ${view === id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={copyTsv}
+                  disabled={visible.length === 0}
+                  title="Copy the visible headers and values as a tab-separated table (pastes into Excel column-wise)"
+                  className="flex h-[32px] items-center gap-1.5 rounded-md border border-divider bg-background px-2.5 text-[12.5px] font-medium text-muted hover:text-foreground disabled:opacity-50"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? 'Copied' : 'Copy TSV'}
+                </button>
+              </div>
+
+              {visible.length === 0 ? (
+                <p className="rounded-md border border-dashed border-divider px-3 py-6 text-center text-[12.5px] text-subtle">No headers match this filter.</p>
+              ) : view === 'columns' ? (
+                <ColumnsTable columns={visible.map((h) => ({ key: h.label, head: <HeaderMeta h={h} />, values: h.values }))} rowLimit={rowLimit} />
+              ) : (
+                <RowsTable headers={visible} rowLimit={rowLimit} />
+              )}
+
+              {maxLen > rowLimit && (
+                <div className="flex items-center justify-center gap-2 text-[12.5px]">
+                  <span className="text-subtle">Showing {rowLimit} of {maxLen} values</span>
+                  <button type="button" onClick={() => setRowLimit((n) => n + ROW_STEP * 4)} className="font-medium text-accent hover:underline">Show more</button>
+                  <button type="button" onClick={() => setRowLimit(maxLen)} className="font-medium text-accent hover:underline">Show all</button>
                 </div>
               )}
-            </div>
+
+              {unmatchedValidation.length > 0 && (
+                <div className="rounded-md border border-divider">
+                  <button type="button" onClick={() => setShowUnmatched((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left">
+                    {showUnmatched ? <ChevronDown className="h-3.5 w-3.5 text-subtle" /> : <ChevronRight className="h-3.5 w-3.5 text-subtle" />}
+                    <span className="text-[13px] font-medium text-foreground">Validations sheet headers with no matching fill-sheet header</span>
+                    <span className="rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-subtle">{unmatchedValidation.length}</span>
+                  </button>
+                  {showUnmatched && (
+                    <div className="px-2.5 pb-2.5">
+                      <ColumnsTable
+                        rowLimit={rowLimit}
+                        columns={unmatchedValidation.map((c) => ({
+                          key: `${c.line}:${c.name}`,
+                          values: c.values,
+                          head: (
+                            <div className="space-y-1">
+                              <div className="truncate text-[12.5px] font-semibold text-foreground" title={c.name}>{c.name}</div>
+                              <div className="text-[10.5px] text-subtle">{slotText(validation?.orientation, c.line)} · {c.values.length} values</div>
+                            </div>
+                          ),
+                        }))}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

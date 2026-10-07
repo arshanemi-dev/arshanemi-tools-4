@@ -21,7 +21,7 @@ import RulePreviewPanel from './RulePreviewPanel'
 import DropdownValuesForm from './DropdownValuesForm'
 import DropdownDebugPanel from './DropdownDebugPanel'
 import { readDataValidationLists } from '@/lib/sheetDataValidations'
-import { visibleSheetNames, hiddenSheets } from '@/lib/sheetVisibility'
+import { visibleSheetNames, hiddenSheets, isColumnHidden } from '@/lib/sheetVisibility'
 import { extractDropdownColumns, resolveValidationLayout } from '@/lib/dropdownExtraction'
 import { cleanLabel, splitHeaderCell } from '@/lib/sheetHeaderLabel'
 import { REAL_GROUPS, SHEET_LABELS, seedFromExistingContent, buildGroupedSheets } from './bulkTemplateSheets'
@@ -249,6 +249,9 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
   const rawHeaderGroupLabels = {}
   const headerCells = []
   const sourceCols = {}
+  // Headers sitting in columns Excel hides — never considered (same rule as
+  // hidden sheets, lib/sheetVisibility.js), only named in the debug panel.
+  const hiddenHeaders = []
   for (let i = startColIdx; i < rawRow.length; i++) {
     if (onProgress) {
       onProgress('Extracting headers…', i + 1, rawRow.length)
@@ -256,6 +259,9 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
     }
     const { label, description: cellNote } = splitHeaderCell(rawRow[i])
     if (!label || isPlaceholderLabel(label)) continue
+    // Before the `seen` check, so a hidden column never claims a label a
+    // visible column further along also carries.
+    if (isColumnHidden(ws, origin.c + i)) { hiddenHeaders.push({ label, colIdx: i }); continue }
     const key = label.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
@@ -285,6 +291,7 @@ async function extractSessionSheet(XLSX, wb, session, onProgress) {
   const { columns, report } = extractDropdownColumns(XLSX, wb, {
     dataSheetName: session.dataSheetName,
     headerCells,
+    hiddenHeaders,
     headerRowIdx,
     dataRows: aoa.slice(dataStartIdx),
     dataStartIdx,
@@ -756,7 +763,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     const buf = await file.arrayBuffer()
     setExtraction({ stage: 'Parsing workbook…', current: 0, total: 0 })
     await yieldToPaint()
-    const wb = XLSX.read(buf, { type: 'array' })
+    // cellStyles — the only way SheetJS loads which columns Excel hides
+    // (ws['!cols']); extractSessionSheet skips those headers (isColumnHidden).
+    const wb = XLSX.read(buf, { type: 'array', cellStyles: true })
     // Real Excel list dropdowns — SheetJS CE drops these, see sheetDataValidations.js
     wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
     // Only the sheets Excel shows — hidden lookup/list sheets stay out of the pickers.
@@ -837,7 +846,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       await yieldToPaint()
       try {
         const buf = await file.arrayBuffer()
-        const wb = XLSX.read(buf, { type: 'array' })
+        const wb = XLSX.read(buf, { type: 'array', cellStyles: true }) // cellStyles: hidden columns, see handleSingleFile
         wb.dataValidationLists = readDataValidationLists(XLSX, buf, wb)
         const sheetNames = visibleSheetNames(wb) // hidden sheets stay out of the pickers
         const meta = sheetNames.map((name) => {
