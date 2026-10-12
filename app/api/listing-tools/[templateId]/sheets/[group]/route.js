@@ -23,6 +23,9 @@ function ownKeyValues(rowsToScan, userId, keyHeaderId) {
   )
 }
 
+// How many of a save's stale hub history records are removed at once.
+const HISTORY_DELETES_AT_ONCE = 5
+
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
   if (!payload?.userId) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
@@ -74,6 +77,13 @@ export async function PATCH(req, { params }) {
   if (!GROUPS.includes(group)) {
     return NextResponse.json({ error: 'Unknown sheet group' }, { status: 400 })
   }
+  // No storage read for a caller who isn't signed in at all.
+  if (!(await getAuthPayload(req))?.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // The stored content is fetched while the template's own access check runs
+  // rather than after it — two storage reads, one wait. Straight from storage
+  // (never the cached copy): what is saved below is built on it.
+  const loading = getTemplateContent(templateId)
+  loading.catch(() => {}) // looked at below, and only if the check passes
   const { error, meta, payload } = await authorizeForTemplate(req, templateId)
   if (error) return error
 
@@ -82,7 +92,7 @@ export async function PATCH(req, { params }) {
   const rows = Array.isArray(body.rows) ? body.rows : null
   if (!rows) return NextResponse.json({ error: 'rows[] is required' }, { status: 400 })
 
-  const content = await getTemplateContent(templateId)
+  const content = await loading
   const existing = content.sheets.find((s) => s.group === group)
   const effectiveHeaders = withSubmittedFormulas(existing?.headers || [], headers)
 
@@ -110,10 +120,17 @@ export async function PATCH(req, { params }) {
     rowCounts: { ...meta.rowCounts, [group]: countFilledRows(normalizedRows) },
   })
 
-  await recordTemplateHistory(req, {
-    templateId, templateName: meta.templateName, sheetGroup: group, action: 'save',
-    snapshotMeta: { rowCount: countFilledRows(normalizedRows) },
-  })
+  // Everything from here to the response is bookkeeping on the hub — the
+  // save itself has landed. Each call is its own request to the hub, touches
+  // its own record and never fails the save (lib/listingHistory.js), so they
+  // go out together instead of one after another: this is the debounced
+  // autosave, and it answers when the slowest of them has, not their sum.
+  const bookkeeping = [
+    recordTemplateHistory(req, {
+      templateId, templateName: meta.templateName, sheetGroup: group, action: 'save',
+      snapshotMeta: { rowCount: countFilledRows(normalizedRows) },
+    }),
+  ]
 
   // Mirror this request's own rows into the hub's real Product Details /
   // Prefill Details history tables (see lib/listingHistory.js) — only for
@@ -124,31 +141,39 @@ export async function PATCH(req, { params }) {
     const ownRows = normalizedRows.filter((r) => r.userId === payload.userId && String(r[historyKeyHeader.id] ?? '').trim())
     if (group === 'design_system') {
       const groupHeader = effectiveHeaders.find((h) => h.isProductGroupField)
-      await syncProductDetailsHistory(req, {
+      bookkeeping.push(syncProductDetailsHistory(req, {
         templateId, templateName: meta.templateName,
         rows: ownRows.map((r) => ({
           productNumber: r[historyKeyHeader.id],
           rowData: toLabelKeyedRow(effectiveHeaders, r),
           groupName: groupHeader ? r[groupHeader.id] : undefined,
         })),
-      })
+      }))
     } else {
-      await syncPrefillDetailsHistory(req, {
+      bookkeeping.push(syncPrefillDetailsHistory(req, {
         templateId, templateName: meta.templateName,
         rows: ownRows.map((r) => ({ brand: r[historyKeyHeader.id], rowData: r })),
-      })
+      }))
     }
 
     // Any key this user had before this write but doesn't anymore — deleted outright, or renamed
     // via its own key field — needs its stale hub history record removed, not just left behind
-    // (see beforeOwnKeys' own comment above for why upsert alone can't cover this).
+    // (see beforeOwnKeys' own comment above for why upsert alone can't cover this). Never a key
+    // the sync above just sent, so the two can't cross. One request per key, a few at a time.
     const afterOwnKeys = ownKeyValues(normalizedRows, payload.userId, historyKeyHeader.id)
     const removedKeys = [...beforeOwnKeys].filter((k) => !afterOwnKeys.has(k))
-    for (const key of removedKeys) {
-      if (group === 'design_system') await deleteProductDetailsHistory(req, { templateId, productNumber: key })
-      else await deletePrefillDetailsHistory(req, { templateId, brand: key })
+    let nextRemoved = 0
+    const removeNext = async () => {
+      while (nextRemoved < removedKeys.length) {
+        const key = removedKeys[nextRemoved++]
+        if (group === 'design_system') await deleteProductDetailsHistory(req, { templateId, productNumber: key })
+        else await deletePrefillDetailsHistory(req, { templateId, brand: key })
+      }
     }
+    for (let i = 0; i < Math.min(HISTORY_DELETES_AT_ONCE, removedKeys.length); i += 1) bookkeeping.push(removeNext())
   }
+
+  await Promise.all(bookkeeping)
 
   return NextResponse.json({ sheet: scopeSheetTo(nextSheet, payload.userId), template: updatedMeta })
 }

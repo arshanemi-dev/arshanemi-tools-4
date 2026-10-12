@@ -29,9 +29,17 @@ const NOT_MANAGER = "Only this template's owner or a master admin can change or 
 export async function GET(req, { params }) {
   try {
     const { templateId } = await params
+    // No storage read for a caller who isn't signed in at all.
+    if (!(await getAuthPayload(req))?.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // The content is fetched while the template's own access check runs
+    // rather than after it — two storage reads, one wait. Nothing is done
+    // with it unless the check passes; it is only shown here, never saved, so
+    // it may be the cached copy (lib/listingTemplates.js getTemplateContent).
+    const loading = getTemplateContent(templateId, { readOnly: true })
+    loading.catch(() => {}) // looked at below, and only if the check passes
     const { error, meta, payload } = await authorizeForTemplate(req, templateId)
     if (error) return error
-    const content = scopeContentTo(await getTemplateContent(templateId), payload.userId)
+    const content = scopeContentTo(await loading, payload.userId)
     return NextResponse.json({
       template: { ...meta, viewerBadge: templateBadgeFor(meta, payload), viewerUserId: payload.userId, viewerCanManage: canManageTemplate(meta, payload) },
       content,

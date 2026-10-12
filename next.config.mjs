@@ -33,6 +33,8 @@ const nextConfig = {
   // node_modules/lockfile tree, which otherwise makes Next infer the wrong
   // workspace root and warn on every run.
   outputFileTracingRoot: __dirname,
+  // The Redis client (lib/cache.js) is loaded by Node as it is, not bundled.
+  serverExternalPackages: ['ioredis'],
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }];
   },

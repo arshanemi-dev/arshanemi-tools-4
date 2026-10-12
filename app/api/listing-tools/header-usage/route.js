@@ -41,7 +41,7 @@ export async function GET(req) {
     let unreadable = 0
     const read = await mapLimit(metas, READS_AT_ONCE, async (meta) => {
       try {
-        const content = await getTemplateContent(meta.id)
+        const content = await getTemplateContent(meta.id, { readOnly: true }) // only its header names are read
         const headers = (content.sheets || []).flatMap((s) => (s.headers || []).map((h) => ({ label: h.label, ourHeaderId: h.ourHeaderId || null })))
         return { id: meta.id, templateName: meta.templateName, headers }
       } catch {
