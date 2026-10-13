@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { COMING_SOON, COMING_SOON_PATH } from '@/lib/comingSoon'
 
 const SECRET = new TextEncoder().encode(process.env.JWT_SECRET)
 const PUBLIC_PATHS = ['/api/auth/login']
@@ -42,6 +43,15 @@ export async function proxy(req) {
     const res = new NextResponse(null, { status: 204 })
     setCorsHeaders(res, origin)
     return res
+  }
+
+  // Coming Soon gate (lib/comingSoon.js) — while it is on, every page shows
+  // the Coming Soon screen in place, on whatever URL was asked for. /api/* is
+  // left exactly as it was: the hub and the other tool apps call those routes
+  // directly, and the screen itself reads /api/admin/theme.
+  if (COMING_SOON && !pathname.startsWith('/api/')) {
+    if (pathname === COMING_SOON_PATH) return NextResponse.next()
+    return NextResponse.rewrite(new URL(COMING_SOON_PATH, req.url))
   }
 
   const isAdminPath = pathname.startsWith('/api/admin')
@@ -159,5 +169,16 @@ export async function proxy(req) {
 }
 
 export const config = {
-  matcher: ['/listing-tools/:path*', '/api/:path*', '/login', '/forgot-password', '/reset-password'],
+  matcher: [
+    '/listing-tools/:path*',
+    '/api/:path*',
+    '/login',
+    '/forgot-password',
+    '/reset-password',
+    // Every other page (/, /profile, an unknown URL) — matched only so the
+    // Coming Soon gate above covers them too; with the gate off they pass
+    // straight through. Skips Next's own files and anything with a file
+    // extension (public/ images, icons, robots.txt, sitemap.xml).
+    '/((?!api/|_next/|.*\\..*).*)',
+  ],
 }

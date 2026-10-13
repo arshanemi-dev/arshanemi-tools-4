@@ -5,6 +5,8 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import SplashScreen from '@/components/ui/SplashScreen';
 import SessionManager from '@/components/admin/SessionManager';
 import AuthGateProvider from '@/components/auth/AuthGateProvider';
+import { COMING_SOON } from '@/lib/comingSoon';
+import ComingSoon from '@/components/coming-soon/ComingSoon';
 
 const SITE_URL = 'https://tools.barmeto.com';
 const SITE_NAME = 'Barmeto Tools';
@@ -41,7 +43,9 @@ export default async function RootLayout({ children }) {
   const pathname = headersList.get('x-pathname') || ''
   // The Listing Tools shell manages its own fixed-viewport scroll region —
   // every other route needs normal document scrolling.
-  const isAdmin = pathname.startsWith('/listing-tools')
+  // …except while the Coming Soon gate is on (lib/comingSoon.js): every URL,
+  // /listing-tools included, is then the Coming Soon screen, which scrolls.
+  const isAdmin = !COMING_SOON && pathname.startsWith('/listing-tools')
 
   return (
     <html lang="en-IN" data-scroll-behavior="smooth" suppressHydrationWarning>
@@ -53,9 +57,15 @@ export default async function RootLayout({ children }) {
       </head>
       <body className={`antialiased bg-background text-foreground ${isAdmin ? 'overflow-hidden' : 'min-h-screen'}`}>
         <ThemeProvider>
-          <SplashScreen />
-          <SessionManager />
-          <AuthGateProvider>{children}</AuthGateProvider>
+          {/* The Coming Soon screen has no session and nothing to sign in to —
+              it keeps the theme and drops the rest. */}
+          {COMING_SOON ? <ComingSoon /> : (
+            <>
+              <SplashScreen />
+              <SessionManager />
+              <AuthGateProvider>{children}</AuthGateProvider>
+            </>
+          )}
         </ThemeProvider>
       </body>
     </html>
