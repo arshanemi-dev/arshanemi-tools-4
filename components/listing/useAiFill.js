@@ -19,7 +19,7 @@ export default function useAiFill(templateId) {
     if (pendingKey) return
     setPendingKey(key)
     try {
-      const gateResult = await runBillingGate({ toolSlug: 'listing-tools', featureApiIdentifier, quantity: 1 })
+      const gateResult = await runBillingGate({ toolSlug: 'ai-product-listing-generator', featureApiIdentifier, quantity: 1 })
       if (gateResult.status === 'blocked') { setGate(gateResult); return }
 
       const res = await fetch(`/api/listing-tools/${templateId}/ai-fill`, {

@@ -210,12 +210,12 @@ export async function POST(req, { params }) {
   // same "never a partial run" guarantee the old client pre-flight had.
   const { textFillRowCount, imageFillRowCount } = countFillRows(groupPlans)
   if (textFillRowCount > 0) {
-    const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-ai-fill', quantity: textFillRowCount })
+    const gate = await runServerBillingGate(req, { toolSlug: 'ai-product-listing-generator', featureApiIdentifier: 'listing-ai-fill', quantity: textFillRowCount })
     if (gate.status === 'blocked') return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
   }
 console.log('---------',textFillRowCount,imageFillRowCount)
   if (imageFillRowCount > 0) {
-    const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-image-fill', quantity: imageFillRowCount })
+    const gate = await runServerBillingGate(req, { toolSlug: 'ai-product-listing-generator', featureApiIdentifier: 'listing-image-fill', quantity: imageFillRowCount })
     if (gate.status === 'blocked') return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
   }
 

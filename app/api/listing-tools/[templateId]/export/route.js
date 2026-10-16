@@ -193,7 +193,7 @@ export async function POST(req, { params }) {
   // sheets, and those are neither this caller's to download nor to pay for.
   const quantity = countBillableRows(scopeContentTo(content, payload.userId), groups) || 1
 
-  const gate = await runServerBillingGate(req, { toolSlug: 'listing-tools', featureApiIdentifier: 'listing-export', quantity })
+  const gate = await runServerBillingGate(req, { toolSlug: 'ai-product-listing-generator', featureApiIdentifier: 'listing-export', quantity })
   if (gate.status === 'blocked') {
     return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
   }
