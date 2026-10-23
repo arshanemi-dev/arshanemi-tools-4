@@ -9,6 +9,7 @@ import { generateListingFieldsWithFallback } from '@/lib/aiProvider'
 import { recordTemplateHistory } from '@/lib/listingHistory'
 import { scopeContentTo } from '@/lib/listingRowScope'
 import { fetchRemoteImage } from '@/lib/safeRemoteImage'
+import { runServerBillingGate } from '@/lib/serverBilling'
 
 async function authorizeForTemplate(req, templateId) {
   const payload = await getAuthPayload(req)
@@ -34,9 +35,11 @@ async function fetchImageAsBase64(url) {
 // narrowed to Brand/Highlights specifically, never "any empty text header".
 // Returns { fields }. Does NOT persist — the client merges the result into
 // row state and the existing debounced sheets/[group] PATCH saves it, same
-// as any other cell edit (plan §4). Billing is the caller's responsibility
-// (useAiFill.js fires runBillingGate before this ever gets called, per
-// Decision #6 — this route never checks or decides coin cost itself).
+// as any other cell edit (plan §4). Billed here, server-side, right before
+// the model is called — same as ai-fill-bulk: a charge the browser made
+// first was skipped by anyone calling this route directly. Nothing is
+// charged when there is nothing to fill or the image can't be read; a
+// blocked charge comes back as { blocked, reason, data } (402).
 export async function POST(req, { params }) {
   const { templateId } = await params
   const { error, meta, payload } = await authorizeForTemplate(req, templateId)
@@ -86,6 +89,13 @@ export async function POST(req, { params }) {
   const { systemInstruction, promptText } = buildPrompt({
     aiRules: meta.aiRules, headers: sheet.headers, row, targets: targetSpecs, similarRows, crossGroupFacts,
   })
+
+  const gate = await runServerBillingGate(req, {
+    toolSlug: 'ai-product-listing-generator',
+    featureApiIdentifier: imageHeaderId ? 'listing-image-fill' : 'listing-ai-fill',
+    quantity: 1,
+  })
+  if (gate.status === 'blocked') return NextResponse.json({ blocked: true, reason: gate.reason, data: gate.data }, { status: 402 })
 
   let raw
   try {

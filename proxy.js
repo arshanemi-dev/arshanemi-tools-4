@@ -54,6 +54,20 @@ export async function proxy(req) {
     return NextResponse.rewrite(new URL(COMING_SOON_PATH, req.url))
   }
 
+  // Hub signed out (lt_out=1 — see lib/tokenHandoff.js): drop this app's own
+  // session cookies too, or this render and every API call after it keep
+  // authenticating as whoever was signed in last. Deleted from the request as
+  // well as the response, so this very render already sees no session. Pages
+  // only — returning early for /api/* would skip the 401 gate below.
+  if (!pathname.startsWith('/api/') && req.nextUrl.searchParams.has('lt_out')) {
+    req.cookies.delete([COOKIE_NAME, ADMIN_COOKIE])
+    const res = NextResponse.next({ request: { headers: new Headers(req.headers) } })
+    res.cookies.set({ ...authCookie(''), maxAge: 0 })
+    res.cookies.set({ ...authCookie(''), name: ADMIN_COOKIE, maxAge: 0 })
+    res.headers.set('x-pathname', pathname)
+    return res
+  }
+
   const isAdminPath = pathname.startsWith('/api/admin')
   // Listing Tools pages themselves are NOT login-gated (see
   // app/listing-tools/layout.js and lib/authGate.js) — "requires auth" here
