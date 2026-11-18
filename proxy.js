@@ -155,7 +155,10 @@ export async function proxy(req) {
   }
 
   try {
-    const { payload } = await jwtVerify(token, SECRET)
+    const { payload } = await jwtVerify(token, SECRET, { algorithms: ['HS256'] })
+    // A purpose token (e.g. the hub's 5-minute password-reset token, same
+    // secret) is not a login session.
+    if (payload.purpose) throw new Error('not a session token')
     const res = NextResponse.next()
     res.headers.set('X-Admin-User', payload.name ?? '')
     res.headers.set('x-pathname', pathname)
