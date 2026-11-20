@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useToast } from '@/components/admin/Toast'
+import { track } from '@/lib/embedBridge'
 
 // "AI Autofill Up" bulk entry point (plan §10/§11/§13) — distinct from the
 // per-row useAiFill hook, not a replacement for it. Billing is now a
@@ -58,7 +59,8 @@ export default function useAiAutofillBulk(templateId) {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        if (data.blocked) { setGate({ reason: data.reason, data: data.data }); return }
+        if (data.blocked) { track('tool_limit_reached', { feature: 'ai_fill_bulk', reason: data.reason }); setGate({ reason: data.reason, data: data.data }); return }
+        if (res.status !== 401) track('tool_error', { feature: 'ai_fill_bulk', error_message: data.error || `HTTP ${res.status}` })
         // A 401 already triggered the shared login-required modal (see
         // lib/authGate.js) — don't also show a generic error toast for it.
         if (res.status !== 401) addToast(data.error || 'AI Autofill failed', 'error')
@@ -67,9 +69,11 @@ export default function useAiAutofillBulk(templateId) {
 
       setLastSummary(data.results || [])
       const filled = (data.results || []).reduce((sum, r) => sum + (r.filledRows || 0), 0)
+      track('tool_used', { feature: 'ai_fill_bulk', filled_rows: filled })
       addToast(filled > 0 ? `AI Autofill filled ${filled} row(s)` : 'AI Autofill finished — nothing new to fill')
       onDone?.(data.results || [])
     } catch (err) {
+      track('tool_error', { feature: 'ai_fill_bulk', error_message: err.message || 'network' })
       addToast(err.message || 'AI Autofill failed', 'error')
     } finally {
       setSubmitting(false)

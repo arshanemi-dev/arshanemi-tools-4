@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useToast } from '@/components/admin/Toast'
+import { track } from '@/lib/embedBridge'
 
 // Per-row "Fill by AI" (plan §5) + image auto-read (plan §6). Billing is a
 // SERVER-SIDE gate inside the ai-fill route itself (Decision #3: AI actions
@@ -20,6 +21,7 @@ export default function useAiFill(templateId) {
     const key = `${group}:${rowIndex}`
     if (pendingKey) return
     setPendingKey(key)
+    track('tool_used', { feature: imageHeaderId ? 'ai_fill_image' : 'ai_fill' })
     try {
       const res = await fetch(`/api/listing-tools/${templateId}/ai-fill`, {
         method: 'POST',
@@ -28,10 +30,10 @@ export default function useAiFill(templateId) {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        if (data.blocked) { setGate({ reason: data.reason, data: data.data }); return }
+        if (data.blocked) { track('tool_limit_reached', { feature: 'ai_fill', reason: data.reason }); setGate({ reason: data.reason, data: data.data }); return }
         // A 401 already triggered the shared login-required modal (see
         // lib/authGate.js) — don't also show a generic error toast for it.
-        if (res.status !== 401) addToast(data.error || 'AI fill failed', 'error')
+        if (res.status !== 401) { track('tool_error', { feature: 'ai_fill', error_message: data.error || `HTTP ${res.status}` }); addToast(data.error || 'AI fill failed', 'error') }
         return
       }
 
@@ -43,6 +45,7 @@ export default function useAiFill(templateId) {
       onFillRow(rowIndex, fields)
       addToast(imageHeaderId ? 'Filled from image' : 'Filled by AI')
     } catch (err) {
+      track('tool_error', { feature: 'ai_fill', error_message: err.message || 'network' })
       addToast(err.message || 'AI fill failed', 'error')
     } finally {
       setPendingKey(null)

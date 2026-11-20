@@ -521,3 +521,13 @@ html[data-theme="light"] .wp-content .wp-block-info {
 }
 
 
+
+/* Boot spinner safety net: SplashScreen disappears on hydration; if the JS
+   never hydrates (old browser, blocked chunk, slow network inside the hub's
+   iframe) it would cover the tool forever — hide it at 5s with CSS alone. */
+@keyframes tool-splash-failsafe-hide {
+  to { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+.tool-splash-failsafe {
+  animation: tool-splash-failsafe-hide 0.3s ease 5s forwards;
+}

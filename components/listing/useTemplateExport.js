@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { downloadExcelSmart, downloadPdf } from '@/lib/exports/listingExport'
 import { useToast } from '@/components/admin/Toast'
+import { track } from '@/lib/embedBridge'
 
 // Shared export flow for every Download Sheet / Download Final Sheet button —
 // exactly one request to this template's own /export route (see
@@ -35,7 +36,7 @@ export default function useTemplateExport(templateId) {
         // — the shared login-required modal already surfaced for it (see
         // lib/authGate.js). Either way, don't fall through to generating a
         // file from stale/incomplete client state.
-        if (billResult.blocked) setGate({ reason: billResult.reason, data: billResult.data })
+        if (billResult.blocked) { track('tool_limit_reached', { feature: 'export', reason: billResult.reason }); setGate({ reason: billResult.reason, data: billResult.data }) }
         return
       }
 
@@ -47,6 +48,7 @@ export default function useTemplateExport(templateId) {
       const exportSource = billResult.exportContent || billResult.content
       const effectiveTemplate = exportSource ? { ...template, sheets: exportSource.sheets } : template
 
+      track('tool_used', { feature: 'export', format })
       let outcome
       if (format === 'excel') outcome = await downloadExcelSmart(effectiveTemplate, meta, { groups })
       else await downloadPdf(effectiveTemplate, { groups })
@@ -59,6 +61,7 @@ export default function useTemplateExport(templateId) {
         addToast('Export downloaded', 'success')
       }
     } catch (err) {
+      track('tool_error', { feature: 'export', error_message: err.message || 'export_failed' })
       addToast(err.message || 'Export failed', 'error')
     } finally {
       setExporting(false)

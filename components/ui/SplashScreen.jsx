@@ -17,7 +17,7 @@ export default function SplashScreen() {
   if (hydrated) return null;
 
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background">
+    <div className="tool-splash-failsafe fixed inset-0 z-[999] flex items-center justify-center bg-background">
       <Loader2 className="w-6 h-6 text-accent animate-spin" />
     </div>
   );
