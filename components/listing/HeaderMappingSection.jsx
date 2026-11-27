@@ -85,25 +85,46 @@ function HeaderNameModal({ header, isDuplicate, saving, onClose, onSave, onOpenS
 //     own Settings / inline rename / Delete.
 //   - Search + Name / Created sort first on the toolbar row: the search looks
 //     in every column, the sort orders the Our Header rows.
-//   - Full Screen (tools-5's Full Page): the section covers the whole screen
-//     for room to work; Exit or Esc goes back.
+//   - Full Screen (tools-5's Full Page): `full` / `onFullChange` — the page
+//     owns it, since its title line (the section's title, Save buttons and
+//     the FullScreenButton) sits in the page's own top row beside "Create
+//     Bulk Listing". In Full Screen the section covers the whole screen,
+//     that top row included, so it shows the same line itself: `title`,
+//     `actions` (the page's Save buttons) and Exit Full Screen. Exit or Esc
+//     goes back.
 // `showMapping` false (sidebar's Header Mapping eye off) leaves just the
 // Our Headers list — no sheet columns, no Mapped button.
 // `sheets` — every uploaded sheet with its own headers ([{ id, name,
 // headers }], the page's sheetsIndex): the table shows one column per sheet.
-// `footer` — the page's save buttons, on the title line before Full Screen (in view
-// in Full Screen too). `popupOpen` — a popup the page opened from here (Header /
-// column settings) is up, so Esc closes that first, not the Full Screen.
+// `popupOpen` — a popup the page opened from here (Header / column
+// settings) is up, so Esc closes that first, not the Full Screen.
 //
 // Deleting asks `onCheckHeaderUsage(ids)` first (→ { usage: {[id]: {templates,
 // rules, mappedHere}}, complete }, see ourHeaderUsage.js): a header that's
 // already mapped — in a saved template, a saved rule, or the mapping on
 // screen — gets an "already mapped" warning instead of the plain confirm.
+// The Full Screen / Exit Full Screen button — in the page's top row, and on
+// the section's own title line while it covers the screen.
+export function FullScreenButton({ full, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!full)}
+      title={full ? 'Back to the normal page (Esc)' : 'Cover the whole screen with Header Mapping — hides the top bar and the sidebar'}
+      className="inline-flex items-center gap-1.5 rounded-full border border-divider-light px-4 py-2 text-[14px] font-medium text-foreground hover:bg-card-hover"
+    >
+      {full ? <><Minimize2 size={14} /> Exit Full Screen</> : <><Maximize2 size={14} /> Full Screen</>}
+    </button>
+  )
+}
+
 export default function HeaderMappingSection({
   title, showMapping = true, ourHeaders, creating,
   onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onCheckHeaderUsage, onOpenHeaderSettings,
   unmappedRawHeaders, commonHeaderKeys, sheets, mappedHeaders, onMap, onUnmap, onOpenColumnSettings, onOpenRawHeaderSettings,
-  categoryForOurHeaderId, categoryOrder, footer = null, popupOpen = false,
+  categoryForOurHeaderId, categoryOrder, actions = null, popupOpen = false, full = false, onFullChange = () => {},
+  // Shown after Mapped (Header Mapping only) — the page's Save As Rule.
+  ruleActions = null,
 }) {
   const { addToast } = useToast()
   const [activeId, setActiveId] = useState(null)
@@ -127,7 +148,6 @@ export default function HeaderMappingSection({
   // Full Screen — tools-5's Full Page: the section covers the whole screen
   // (over the top bar and the sidebar); Exit Full Screen or Esc goes back.
   // Esc first closes an open popup / filter menu, only then the full screen.
-  const [full, setFull] = useState(false)
   const anyPopup = popupOpen || !!modal || !!deleteId || deleteAllOpen
   useEffect(() => {
     if (!full) return undefined
@@ -135,14 +155,14 @@ export default function HeaderMappingSection({
     document.body.style.overflow = 'hidden'
     const onKey = (e) => {
       if (e.key !== 'Escape' || anyPopup || document.querySelector('#section-header-mapping .dropdown-panel-in')) return
-      setFull(false)
+      onFullChange(false)
     }
     document.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
       document.removeEventListener('keydown', onKey)
     }
-  }, [full, anyPopup])
+  }, [full, anyPopup, onFullChange])
   const isDuplicate = (label, exceptId) => ourHeaders.some((h) => h.id !== exceptId && h.label.trim().toLowerCase() === label.trim().toLowerCase())
   const liveChecked = [...checked].filter((h) => unmappedRawHeaders.includes(h))
   // What the open delete confirm has to say, from the usage answer it opened with.
@@ -255,22 +275,18 @@ export default function HeaderMappingSection({
 
   return (
     <div id="section-header-mapping" className={full ? 'fixed inset-0 z-[60] flex flex-col bg-background p-3 sm:p-4' : ''}>
-      {/* Top line: the title, then the page's Save buttons and Full Screen
-          on the right (in view in Full Screen too — outside the scroll). */}
-      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-foreground">{title}</h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {footer}
-          <button
-            type="button"
-            onClick={() => setFull((v) => !v)}
-            title={full ? 'Back to the normal page (Esc)' : 'Cover the whole screen — hides the top bar and the sidebar'}
-            className="inline-flex items-center gap-1.5 rounded-full border border-divider-light px-4 py-2 text-[14px] font-medium text-foreground hover:bg-card-hover"
-          >
-            {full ? <><Minimize2 size={14} /> Exit Full Screen</> : <><Maximize2 size={14} /> Full Screen</>}
-          </button>
+      {/* Normally this title line lives in the page's top row; while the
+          section covers the screen (that row included) it shows here —
+          outside the scroll, so Save All and Exit stay in view. */}
+      {full && (
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-foreground">{title}</h2>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {actions}
+            <FullScreenButton full onChange={onFullChange} />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className={`space-y-4 rounded-xl border border-divider bg-background py-4 ${full ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
         {/* Toolbar — Search + sort first; then Add always; Edit / Settings /
@@ -318,6 +334,8 @@ export default function HeaderMappingSection({
               {liveChecked.length > 0 && (
                 <button type="button" onClick={() => setChecked(new Set())} className="rounded-full px-2 py-1 text-[12px] text-subtle hover:text-foreground">Clear ticks</button>
               )}
+              {/* The page's Save As Rule — the mapping on screen as a new rule. */}
+              {ruleActions}
             </>
           )}
           <button

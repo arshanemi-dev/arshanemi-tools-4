@@ -26,8 +26,10 @@ const outlinePillCls = `${pillCls} border border-divider bg-card text-foreground
 // Edit → edits a local draft (mapping: re-point or remove an entry; place:
 // drag exactly like live placement, dropping into Others removes it), then
 // Save (overwrite this rule, `onSave(entries)`) or Save As (name input →
-// NEW rule, `onSaveAs(name, entries)`). Both resolve true on success. The
-// parent keys this panel by rule id, so switching rules resets the draft.
+// NEW rule, `onSaveAs(name, entries)`). Save As is also right there without
+// Edit — it copies the rule as it is under a new name. Both resolve true on
+// success. The parent keys this panel by rule id, so switching rules resets
+// the draft.
 export default function RulePreviewPanel({ type, rule, ourHeaders, onApply, applying, onClose, onSave, onSaveAs, ruleNamePrefix }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState([])
@@ -61,10 +63,12 @@ export default function RulePreviewPanel({ type, rule, ourHeaders, onApply, appl
     setSaveAsOpen(false)
     setDraft([])
   }
+  // The entries to save — the edited draft, or (Save As without Edit) the rule as it is.
   function cleanEntries() {
+    const source = editing ? draft : (rule.entries || []).map((e, idx) => ({ ...e, position: e.position ?? idx }))
     return type === 'mapping'
-      ? draft.filter((e) => e.sheetHeader && e.ourHeaderId).map((e) => ({ sheetHeader: e.sheetHeader, ourHeaderId: e.ourHeaderId, matchType: e.matchType || 'exact' }))
-      : draft.filter((e) => e.group).map((e) => ({ ourHeaderId: e.ourHeaderId, group: e.group, position: e.position ?? 0, uiBucket: e.uiBucket || null }))
+      ? source.filter((e) => e.sheetHeader && e.ourHeaderId).map((e) => ({ sheetHeader: e.sheetHeader, ourHeaderId: e.ourHeaderId, matchType: e.matchType || 'exact' }))
+      : source.filter((e) => e.group).map((e) => ({ ourHeaderId: e.ourHeaderId, group: e.group, position: e.position ?? 0, uiBucket: e.uiBucket || null }))
   }
   async function handleSave() {
     setBusy('save')
@@ -124,6 +128,12 @@ export default function RulePreviewPanel({ type, rule, ourHeaders, onApply, appl
                   Edit
                 </button>
               )}
+              {onSaveAs && (
+                <button type="button" onClick={openSaveAs} disabled={!!busy} title="Save a copy of this rule under a new name" className={outlinePillCls}>
+                  <CopyPlus className="h-3 w-3" />
+                  Save As
+                </button>
+              )}
               <button type="button" onClick={onClose} title="Close preview" className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-subtle hover:bg-card-hover">
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -132,7 +142,7 @@ export default function RulePreviewPanel({ type, rule, ourHeaders, onApply, appl
         </div>
       </div>
 
-      {editing && saveAsOpen && (
+      {saveAsOpen && (
         <div className="mb-2 flex items-center gap-1.5">
           <input
             value={saveAsName}

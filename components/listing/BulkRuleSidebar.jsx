@@ -194,7 +194,10 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
   // Inline "add new" row — replaces the old window.prompt() flow. Always
   // starts pre-filled with the fixed "Marketplace_" prefix (only the rest
   // is actually typed), matching how every saved template's own name works.
+  // The row lives in the section's body, so a closed section opens first —
+  // otherwise the + would do nothing you can see.
   function startAdd() {
+    if (hidden) onToggleHidden?.()
     setAddDraft(prefix)
     setAdding(true)
   }
@@ -235,7 +238,7 @@ function RuleSection({ title, apiBase, kind, onApply, onSaveNew, refreshToken, s
               Apply Rules
             </button>
           )}
-          <button type="button" onClick={startAdd} title={`Save the current arrangement as a new ${title}`} className={addBtnCls}>
+          <button type="button" onClick={startAdd} title={`Create — save the current ${apiBase.includes('place') ? 'placement' : 'mapping'} as a new ${title}`} className={addBtnCls}>
             <Plus className="h-3.5 w-3.5" />
           </button>
           <button type="button" onClick={handleDeleteAll} disabled={deletingAll} title={`Delete every saved ${title}`} className={deleteBtnCls}>

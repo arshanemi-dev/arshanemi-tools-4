@@ -10,7 +10,8 @@ import TemplateNamingFields, { composeFinalName, composeAutoTemplateName } from 
 import SourceFileUploadControl from './SourceFileUploadControl'
 import SheetSelectorFields from './SheetSelectorFields'
 import BulkRuleSidebar, { readCustomMarketplaces } from './BulkRuleSidebar'
-import HeaderMappingSection from './HeaderMappingSection'
+import HeaderMappingSection, { FullScreenButton } from './HeaderMappingSection'
+import SaveAsRuleButton from './SaveAsRuleButton'
 import BulkPlaceGrid, { moveHeaderInList } from './BulkPlaceGrid'
 import HeaderBucketPreview from './HeaderBucketPreview'
 import ExtractionProgressModal from './ExtractionProgressModal'
@@ -459,6 +460,9 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   const [previewApplying, setPreviewApplying] = useState(false)
   const [hiddenSections, setHiddenSections] = useState(DEFAULT_HIDDEN_SECTIONS) // { [sidebar section title]: true } — see SECTION_LINKS
   const isLinkHidden = (link) => SECTION_LINKS[link].every((k) => hiddenSections[k])
+  // The Header Mapping section covers the whole screen (its Full Screen
+  // button sits in the page's top row) — see HeaderMappingSection.
+  const [mappingFull, setMappingFull] = useState(false)
   function toggleSection(key) {
     setHiddenSections((prev) => {
       const group = SECTION_GROUPS.find((g) => g.includes(key)) || [key]
@@ -1477,26 +1481,58 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       addToast(err.message, 'error')
     }
   }
+  // A Place Rule places EVERY mapped header it has an entry for — already-
+  // placed ones too (Auto-place, a drag, an earlier rule, a saved template
+  // opened for editing): applying a rule is asking for its layout, so the
+  // rule wins. Headers the rule doesn't mention stay where they are. (It
+  // used to send only the not-yet-placed headers, so on a page where most
+  // headers already had a place the rule moved few or none of them.)
+  // The hub matches by Our Header id, so the toast says why anything didn't
+  // place — instead of a silent "Placed 0".
   async function applyPlaceItem(item) {
-    const candidates = mappedOnly.filter((m) => !m.group).map((m) => m.ourHeaderId)
-    if (candidates.length === 0) { addToast('No mapped-but-unplaced headers to apply this to.', 'error'); return }
+    const mappedIds = mappedOnly.map((m) => m.ourHeaderId)
+    if (mappedIds.length === 0) { addToast('Map some headers first — a Place Rule places mapped headers.', 'error'); return }
     try {
       const res = await fetch(`/api/listing-tools/mapping/place-rules/${item.id}/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ourHeaderIds: candidates }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ourHeaderIds: mappedIds }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Apply failed')
       // The hub's apply only returns group/position — Big/Images (uiBucket)
       // come straight off the rule's own saved entries when it has them.
-      const savedById = new Map((item.entries || []).map((e) => [e.ourHeaderId, e]))
+      const entries = item.entries || []
+      const savedById = new Map(entries.map((e) => [e.ourHeaderId, e]))
+      const placedById = new Map(data.placed.map((p) => [p.ourHeaderId, p]))
       setActiveMapped((prev) => prev.map((m) => {
-        const hit = data.placed.find((p) => p.ourHeaderId === m.ourHeaderId)
+        const hit = placedById.get(m.ourHeaderId)
         if (!hit) return m
         const saved = savedById.get(m.ourHeaderId)
         const uiBucket = saved && 'uiBucket' in saved ? saved.uiBucket || null : m.uiBucket
         return { ...m, group: hit.group, position: hit.position, uiBucket }
       }))
-      addToast(`Placed ${data.placed.length} header(s).`, 'success')
+
+      // Why the rest didn't place.
+      const known = new Set(ourHeaders.map((h) => h.id))
+      const mapped = new Set(mappedIds)
+      const gone = entries.filter((e) => !known.has(e.ourHeaderId)).length // its Our Header was deleted / re-created since
+      const notMappedHere = entries.filter((e) => known.has(e.ourHeaderId) && !mapped.has(e.ourHeaderId)).length
+      const notInRule = mappedIds.length - data.placed.length
+      const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+      if (data.placed.length === 0) {
+        const why = !entries.length
+          ? 'it has no saved entries'
+          : gone === entries.length
+            ? `none of its ${plural(entries.length, 'header')} exist in Our Headers any more (deleted or re-created since the rule was saved, so they have new ids) — save the rule again from this placement`
+            : `none of its ${plural(entries.length, 'header')} are mapped on this page${gone ? ` (${gone} no longer exist in Our Headers)` : ''}`
+        addToast(`"${item.name}" placed nothing — ${why}.`, 'error')
+        return
+      }
+      const notes = [
+        notInRule && `${plural(notInRule, 'mapped header')} not in this rule stayed where they were`,
+        notMappedHere && `${notMappedHere} of its headers aren't mapped here`,
+        gone && `${gone} of its headers no longer exist in Our Headers`,
+      ].filter(Boolean)
+      addToast(`Placed ${plural(data.placed.length, 'header')} with "${item.name}"${notes.length ? ` — ${notes.join('; ')}` : ''}.`, 'success')
     } catch (err) {
       addToast(err.message, 'error')
     }
@@ -1574,11 +1610,13 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
   // name already works (composeAutoTemplateName). The sidebar's own inline
   // add-row builds and validates that prefixed name now (no more
   // window.prompt) and passes it straight through here.
+  // Both resolve true once saved, false otherwise — the Save As Rule boxes
+  // (SaveAsRuleButton) stay open on a failure so the name isn't lost.
   async function saveMappingAs(kind, name) {
     const label = kind === 'preset' ? 'Header Mapping' : 'Mapping Rule'
-    if (!name) return
+    if (!name) return false
     const entries = mappedOnly.flatMap((m) => m.sheetHeaders.map((sh) => ({ sheetHeader: sh, ourHeaderId: m.ourHeaderId, matchType: 'exact' })))
-    if (entries.length === 0) { addToast('Map at least one header first.', 'error'); return }
+    if (entries.length === 0) { addToast('Map at least one header first.', 'error'); return false }
     try {
       const res = await fetch('/api/listing-tools/mapping/rules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1586,16 +1624,18 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       })
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Save failed')
       setRefreshToken((t) => t + 1)
-      addToast(`${label} saved.`, 'success')
+      addToast(`${label} "${name.trim()}" saved.`, 'success')
+      return true
     } catch (err) {
       addToast(err.message, 'error')
+      return false
     }
   }
   async function savePlaceAs(kind, name) {
     const label = kind === 'preset' ? 'Header Place' : 'Place Rule'
-    if (!name) return
+    if (!name) return false
     const entries = mappedOnly.filter((m) => m.group).map((m) => ({ ourHeaderId: m.ourHeaderId, group: m.group, position: m.position, uiBucket: m.uiBucket || null }))
-    if (entries.length === 0) { addToast('Place at least one header first.', 'error'); return }
+    if (entries.length === 0) { addToast('Place at least one header first.', 'error'); return false }
     try {
       const res = await fetch('/api/listing-tools/mapping/place-rules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1603,9 +1643,11 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       })
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Save failed')
       setRefreshToken((t) => t + 1)
-      addToast(`${label} saved.`, 'success')
+      addToast(`${label} "${name.trim()}" saved.`, 'success')
+      return true
     } catch (err) {
       addToast(err.message, 'error')
+      return false
     }
   }
 
@@ -1938,10 +1980,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     )
   }
 
-  // The save buttons — at the end of the Header Mapping section (still in
-  // view there in its Full Screen); up top only while the sidebar hides that
-  // section, so saving is always one click away.
+  // The page's top row, beside "Create Bulk Listing": the Header Mapping /
+  // Our Headers section's title line — its title, the Save buttons and Full
+  // Screen. In Full Screen the section covers this row, so it shows the same
+  // line itself (HeaderMappingSection `actions`). With the section hidden by
+  // the sidebar, just the Save buttons — saving is always one click away.
   const mappingShown = !isLinkHidden('ourHeaders') || !isLinkHidden('mapping')
+  const mappingTitle = isLinkHidden('mapping') ? 'Our Headers' : 'Header Mapping'
+  const isMappingFull = mappingFull && mappingShown
   const saveButtons = (
     <>
       {activeIsDirty && (
@@ -1985,19 +2031,26 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           <Link href="/listing-tools/template-settings" className="inline-flex items-center border rounded p-2 gap-1.5 text-[12.5px] font-medium text-foreground hover:text-foreground">
         <ArrowLeft className="w-3.5 h-3.5" /> 
       </Link>
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <h1 className="text-lg font-bold text-foreground">{isEditMode ? 'Edit Bulk Listing' : 'Create Bulk Listing'}</h1>
+          {mappingShown && (
+            <>
+              <span aria-hidden className="h-5 w-px bg-divider-light" />
+              <h2 className="text-lg font-bold text-foreground">{mappingTitle}</h2>
+            </>
+          )}
           <p className="text-[13px] text-subtle mt-0.5 hidden">
             Upload a sheet, map its headers onto your global header dictionary (by hand or with a saved rule), place them into a group, then save.
           </p>
         </div>
         </div>
-      
+
         <div className="flex flex-wrap items-center gap-2">
           {!isLinkHidden('templates') && (
             <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
           )}
-          {!mappingShown && saveButtons}
+          {saveButtons}
+          {mappingShown && <FullScreenButton full={false} onChange={setMappingFull} />}
         </div>
       </div>
 
@@ -2109,7 +2162,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 />
               )}
               <HeaderMappingSection
-                title={isLinkHidden('mapping') ? 'Our Headers' : 'Header Mapping'}
+                title={mappingTitle}
                 showMapping={!isLinkHidden('mapping')}
                 ourHeaders={ourHeaders}
                 creating={creatingHeader}
@@ -2129,7 +2182,18 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 onOpenRawHeaderSettings={openSettingsForRawHeader}
                 categoryForOurHeaderId={categoryForOurHeaderId}
                 categoryOrder={categoryOrder}
-                footer={saveButtons}
+                actions={saveButtons}
+                ruleActions={(
+                  <SaveAsRuleButton
+                    prefix={ruleNamePrefix}
+                    onSave={(name) => saveMappingAs('rule', name)}
+                    disabled={!mappedOnly.length}
+                    disabledTitle="Map at least one header first"
+                    title="Save the mapping on screen as a new Mapping Rule (it shows in the sidebar's Mapping Rule list)"
+                  />
+                )}
+                full={isMappingFull}
+                onFullChange={setMappingFull}
                 popupOpen={!!modalId || !!headerSettingsId}
               />
             </div>
@@ -2139,14 +2203,24 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h2 className="text-[15px] font-semibold text-foreground">Header Place</h2>
-                <button
-                  type="button"
-                  onClick={autoPlaceHeaders}
-                  title="Place every mapped-but-unplaced header by default: Image → Images; same name as its raw sheet column → Compulsory; a canonical name you curated yourself → Product Details"
-                  className="rounded-full border border-divider bg-card px-3 py-1 text-[12px] font-medium text-foreground hover:bg-card-hover"
-                >
-                  Auto-place
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={autoPlaceHeaders}
+                    title="Place every mapped-but-unplaced header by default: Image → Images; same name as its raw sheet column → Compulsory; a canonical name you curated yourself → Product Details"
+                    className="rounded-full border border-divider bg-card px-3 py-1 text-[12px] font-medium text-foreground hover:bg-card-hover"
+                  >
+                    Auto-place
+                  </button>
+                  <SaveAsRuleButton
+                    prefix={ruleNamePrefix}
+                    onSave={(name) => savePlaceAs('rule', name)}
+                    disabled={!mappedOnly.some((m) => m.group)}
+                    disabledTitle="Place at least one header first"
+                    title="Save the placement on screen as a new Place Rule (it shows in the sidebar's Place Rule list)"
+                    small
+                  />
+                </div>
               </div>
               {previewRule?.type === 'place' && (
                 <RulePreviewPanel
