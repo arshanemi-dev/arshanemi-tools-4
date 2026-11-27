@@ -1089,6 +1089,14 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     [isEditMode, dropdownColumns, uploadSessions],
   )
   const unmappedRawHeaders = allRawHeaders.filter((h) => !activeMapped.some((m) => m.sheetHeaders.includes(h)))
+  // Every sheet header mapped right now — re-read from activeMapped after
+  // each change, and added to straight away by applyMappingItem as a rule
+  // maps, so the next rule of an "Apply Rules" run sees it before the page
+  // has re-rendered.
+  const mappedSheetRef = useRef(new Set())
+  useEffect(() => {
+    mappedSheetRef.current = new Set(activeMapped.flatMap((m) => m.sheetHeaders))
+  }, [activeMapped])
   const mappedOnly = activeMapped.filter((m) => m.sheetHeaders.length > 0)
   const previewHeaders = mappedOnly.map((m) => ({ id: m.ourHeaderId, label: m.ourHeaderLabel, group: m.group }))
 
@@ -1185,6 +1193,12 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     const oh = ourHeaders.find((h) => h.id === ourHeaderId)
     if (!oh) return
     setActiveMapped((prev) => {
+      // One sheet header maps to ONE Our Header. Every caller means "map an
+      // unmapped header", but some read a list that can be a step behind
+      // (Apply Rules runs several rules in a row; the auto-match pass) —
+      // checked here against the newest state, one already mapped
+      // elsewhere is left where it is instead of being mapped twice.
+      if (prev.some((m) => m.ourHeaderId !== ourHeaderId && m.sheetHeaders.includes(sheetHeader))) return prev
       const existing = prev.find((m) => m.ourHeaderId === ourHeaderId)
       if (existing) {
         return prev.map((m) => (m.ourHeaderId === ourHeaderId
@@ -1467,15 +1481,25 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     setOurHeaders([])
   }
 
+  // Sends only the sheet headers still unmapped RIGHT NOW: "Apply Rules"
+  // calls this once per rule in a row, before the page re-renders, so
+  // `unmappedRawHeaders` alone would still list what the rule before just
+  // mapped — mappedSheetRef is kept current as each rule maps, and the
+  // next rule only gets what's left (and its "Mapped N" is true).
   async function applyMappingItem(item) {
-    if (unmappedRawHeaders.length === 0) { addToast('No unmapped headers to apply this to.', 'error'); return }
+    const taken = mappedSheetRef.current
+    const candidates = unmappedRawHeaders.filter((h) => !taken.has(h))
+    if (candidates.length === 0) { addToast('No unmapped headers to apply this to.', 'error'); return }
     try {
       const res = await fetch(`/api/listing-tools/mapping/rules/${item.id}/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sheetHeaders: unmappedRawHeaders }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sheetHeaders: candidates }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || 'Apply failed')
-      for (const m of data.mapped) handleMap(m.sheetHeader, m.ourHeaderId)
+      for (const m of data.mapped) {
+        handleMap(m.sheetHeader, m.ourHeaderId)
+        taken.add(m.sheetHeader)
+      }
       addToast(`Mapped ${data.mapped.length} header(s)${data.unmatched.length ? `, ${data.unmatched.length} left unmatched` : ''}.`, 'success')
     } catch (err) {
       addToast(err.message, 'error')
