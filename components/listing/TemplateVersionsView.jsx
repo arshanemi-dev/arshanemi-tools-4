@@ -2,7 +2,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Search, Pencil, Trash2 } from 'lucide-react'
 import { useToast } from '@/components/admin/Toast'
+import DataTable, { TH } from './DataTable'
+import useTableView from './useTableView'
 import { actionMeta, fmtDate, fmtDateTime, fmtTime } from '@/lib/templateLogActions'
+
+const time = (iso) => (iso ? new Date(iso).getTime() : null)
+const NO_ROWS = []
+
+// Both tables in tools-5's table (DataTable): every column sorts and filters
+// from its header, on what the cell shows; dates sort by the real time.
+const VERSION_COLUMNS = [
+  { key: 'label', label: 'Version Number', text: (v) => v.label || `V${v.versionNumber}`, sortValue: (v) => v.versionNumber ?? null },
+  { key: 'created', label: 'Create date', text: (v) => (v.createdAt ? fmtDate(v.createdAt) : ''), sortValue: (v) => time(v.createdAt) },
+  { key: 'updated', label: 'Updated date', text: (v) => (v.updatedAt ? fmtDate(v.updatedAt) : ''), sortValue: (v) => time(v.updatedAt) },
+  { key: 'liveAt', label: 'Live date', text: (v) => (v.liveAt ? fmtDate(v.liveAt) : ''), sortValue: (v) => time(v.liveAt) },
+  { key: 'live', label: 'Live', text: (v) => (v.isLive ? 'Live' : 'Off') },
+]
 
 // The Version Page + Log tab — a version row per save (the hub's
 // createListingTemplateVersion, called from the bulk mapping page's Save
@@ -42,14 +57,28 @@ export default function TemplateVersionsView({ templateId, templateName, marketp
     return map
   }, [versions])
 
-  const filteredVersions = (versions || []).filter((v) => (v.label || '').toLowerCase().includes(versionSearch.toLowerCase()))
-  const filteredLogs = (logs || []).filter((l) => {
+  const filteredVersions = useMemo(
+    () => (versions || NO_ROWS).filter((v) => (v.label || '').toLowerCase().includes(versionSearch.toLowerCase())),
+    [versions, versionSearch],
+  )
+  const filteredLogs = useMemo(() => (logs || NO_ROWS).filter((l) => {
     if (!logSearch.trim()) return true
     const q = logSearch.toLowerCase()
     const versionLabel = versionLabelById.get(l.versionId) || l.detail?.versionLabel || ''
     return [actionMeta(l.action).label, l.detail?.summary, versionLabel, l.actorName]
       .some((s) => String(s || '').toLowerCase().includes(q))
-  })
+  }), [logs, logSearch, versionLabelById])
+
+  const logColumns = useMemo(() => [
+    { key: 'version', label: 'Version Number', text: (l) => versionLabelById.get(l.versionId) || l.detail?.versionLabel || '' },
+    { key: 'action', label: 'Action', text: (l) => actionMeta(l.action).label },
+    { key: 'details', label: 'Details', text: (l) => l.detail?.summary || '' },
+    { key: 'date', label: 'Log Date', text: (l) => (l.createdAt ? fmtDate(l.createdAt) : ''), sortValue: (l) => time(l.createdAt) },
+    { key: 'time', label: 'Time', text: (l) => (l.createdAt ? fmtTime(l.createdAt) : '') },
+    { key: 'batch', label: 'Batch ID', text: (l) => (l.batchId == null ? '' : String(l.batchId)), sortValue: (l) => l.batchId ?? null, numeric: true },
+  ], [versionLabelById])
+  const versionTable = useTableView(filteredVersions, VERSION_COLUMNS)
+  const logTable = useTableView(filteredLogs, logColumns)
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -166,26 +195,20 @@ export default function TemplateVersionsView({ templateId, templateName, marketp
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </button>
         </div>
-        <div className="border border-divider rounded-lg overflow-hidden bg-card">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="bg-surface border-b border-divider">
-                <th className="px-3 py-2 w-10" />
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Version Number</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Create date</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Updated date</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Live date</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Live</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredVersions.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-subtle">No versions yet — save this template to create one.</td></tr>
-              ) : (
-                filteredVersions.map((v) => (
-                  <tr key={v.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
-                    <td className="px-3 py-2.5 text-center">
-                      <input type="checkbox" checked={selectedIds.has(v.id)} onChange={() => toggleSelect(v.id)} className="h-4 w-4 rounded border-divider-light text-accent" />
+        <DataTable
+          table={versionTable}
+          columns={VERSION_COLUMNS}
+          lead={<th className={`${TH} w-10`} aria-label="Select" />}
+          colSpan={VERSION_COLUMNS.length + 1}
+          empty={versionSearch.trim() ? 'No versions match your search.' : 'No versions yet — save this template to create one.'}
+          noMatch="No versions match the search or filters."
+          noun="version"
+          summaryExtra={selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+        >
+                {versionTable.pageRows.map((v) => (
+                  <tr key={v.id} data-selected={selectedIds.has(v.id)}>
+                    <td className="px-3 py-2.5">
+                      <input type="checkbox" checked={selectedIds.has(v.id)} onChange={() => toggleSelect(v.id)} className="h-4 w-4 accent-[var(--color-action)]" aria-label={`Select ${v.label || `V${v.versionNumber}`}`} />
                     </td>
                     <td className="px-3 py-2.5 font-medium text-foreground">{v.label || `V${v.versionNumber}`}</td>
                     <td className="px-3 py-2.5 text-subtle" title={fmtDateTime(v.createdAt)}>{fmtDate(v.createdAt)}</td>
@@ -204,11 +227,8 @@ export default function TemplateVersionsView({ templateId, templateName, marketp
                       </button>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+        </DataTable>
       </div>
 
       {/* Log */}
@@ -225,27 +245,18 @@ export default function TemplateVersionsView({ templateId, templateName, marketp
             />
           </div>
         </div>
-        <div className="border border-divider rounded-lg overflow-hidden bg-card">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="bg-surface border-b border-divider">
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Version Number</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Action</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Details</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Log Date</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Time</th>
-                <th className="px-3 py-2 text-left font-semibold text-foreground">Batch ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredLogs.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-subtle">No activity logged yet.</td></tr>
-              ) : (
-                filteredLogs.map((l) => {
+        <DataTable
+          table={logTable}
+          columns={logColumns}
+          empty={logSearch.trim() ? 'No activity matches your search.' : 'No activity logged yet.'}
+          noMatch="No activity matches the search or filters."
+          noun="event"
+        >
+                {logTable.pageRows.map((l) => {
                   const meta = actionMeta(l.action)
                   const Icon = meta.icon
                   return (
-                  <tr key={l.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
+                  <tr key={l.id}>
                     <td className="px-3 py-2.5 text-foreground">{versionLabelById.get(l.versionId) || l.detail?.versionLabel || '—'}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold ring-1 ring-inset ${meta.chip}`}>
@@ -260,11 +271,8 @@ export default function TemplateVersionsView({ templateId, templateName, marketp
                     <td className="px-3 py-2.5 font-mono text-subtle">{l.batchId}</td>
                   </tr>
                   )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                })}
+        </DataTable>
       </div>
     </div>
   )

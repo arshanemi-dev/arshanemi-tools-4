@@ -27,6 +27,21 @@ function latestOf(...isos) {
   return isos.filter(Boolean).reduce((a, b) => (new Date(b) > new Date(a) ? b : a), null)
 }
 
+// What one line of the list shows — the row below and the list page's column
+// sort / filter both read it. An older version row shows what that version
+// captured at save time (snapshot.meta; versions saved before meta was
+// captured fall back to the template's current values). The head row is also
+// where template-level edits land, so its Updated date reflects those too,
+// not just the version's own rename/live events.
+export function lineSource({ template, version = null, isHead = true }) {
+  const source = !isHead && version?.meta
+    ? { ...template, ...version.meta, aiRules: version.meta.aiRules || template.aiRules }
+    : template
+  const createdAt = version ? version.createdAt : template.createdAt
+  const updatedAt = !version ? template.updatedAt : isHead ? latestOf(version.updatedAt, template.updatedAt) : version.updatedAt
+  return { source, createdAt, updatedAt }
+}
+
 function Switch({ on, busy, onClick, title, locked = false }) {
   return (
     <button
@@ -68,7 +83,7 @@ function DateCell({ iso, muted }) {
 // actions, so e.g. Delete on an old version row can never be mistaken for
 // deleting the whole template.
 export default function TemplateSettingsListRow({
-  template, version = null, isHead = true, isLastInGroup = true,
+  template, version = null, isHead = true,
   isSelected, onToggleSelect, onUpdated, onDeleted, onToggleLive, liveBusy = false,
 }) {
   const { addToast } = useToast()
@@ -88,16 +103,9 @@ export default function TemplateSettingsListRow({
   // list route as `viewerCanManage`; treated as allowed when absent.
   const canManage = template.viewerCanManage !== false
   const NOT_YOURS = "Only this template's owner or a master admin can change it"
-  const source = isChild && version?.meta
-    ? { ...template, ...version.meta, aiRules: version.meta.aiRules || template.aiRules }
-    : template
+  const { source, createdAt, updatedAt } = lineSource({ template, version, isHead })
   const totalRows = Object.values(template.rowCounts || {}).reduce((sum, n) => sum + (n || 0), 0)
   const isUsed = totalRows > 0
-
-  // The head row is also where template-level edits land, so its Updated
-  // date reflects those too, not just the version's own rename/live events.
-  const createdAt = version ? version.createdAt : template.createdAt
-  const updatedAt = !version ? template.updatedAt : isHead ? latestOf(version.updatedAt, template.updatedAt) : version.updatedAt
 
   async function patchTemplate(body) {
     const res = await fetch(`/api/listing-tools/${template.id}`, {
@@ -185,26 +193,24 @@ export default function TemplateSettingsListRow({
     }
   }
 
-  const rowCls = [
-    'hover:bg-surface/60',
-    isLastInGroup ? 'border-b border-divider last:border-b-0' : 'border-b border-dashed border-divider/70',
-    isChild ? 'bg-surface/40' : '',
-    isHead && isSelected ? 'bg-accent/6' : '',
-  ].join(' ')
   const cellText = isChild ? 'text-subtle' : 'text-muted'
-  const inputCls = 'w-full px-2 py-1 text-[12.5px] border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light bg-card'
+  const inputCls = 'w-full px-2 py-1 text-left text-[12.5px] border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light bg-card'
   const detailsHref = `/listing-tools/template-settings/${template.id}/details`
 
+  // A row in tools-5's table (DataTable): an older version sits under its
+  // template with tools-5's light blue `data-child` tint, and a ticked
+  // template is a `data-selected` row.
   return (
     <>
-      <tr className={rowCls}>
-        <td className="px-3 py-3 text-center">
+      <tr data-child={isChild} data-selected={isHead && isSelected}>
+        <td className="px-3 py-3">
           {isHead ? (
             <input
               type="checkbox"
               checked={isSelected}
               onChange={(e) => onToggleSelect(template.id, e.target.checked)}
-              className="w-4 h-4 text-accent rounded border-divider-light focus:ring-accent cursor-pointer"
+              aria-label={`Select ${template.templateName}`}
+              className="w-4 h-4 cursor-pointer accent-[var(--color-action)]"
             />
           ) : (
             <CornerDownRight className="mx-auto h-3.5 w-3.5 text-subtle/70" aria-label="Older version of the template above" />
@@ -255,7 +261,7 @@ export default function TemplateSettingsListRow({
         <DateCell iso={updatedAt} muted={isChild} />
         <td className="px-3 py-3 whitespace-nowrap">
           {version ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center gap-2">
               <Switch
                 on={version.isLive}
                 busy={liveBusy}
@@ -303,7 +309,7 @@ export default function TemplateSettingsListRow({
         })}
 
         <td className="px-3 py-3">
-          <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+          <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
             {isChild ? (
               <>
                 <Link href={`${detailsHref}?tab=versions`}>

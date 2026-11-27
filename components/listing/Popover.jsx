@@ -4,10 +4,24 @@ import { useEffect, useRef, useState } from 'react'
 
 // Minimal click-to-open popover — a trigger + an absolutely-positioned panel
 // that closes on outside-click / Escape. Same component as tools-5's
-// components/dashboard/Popover.jsx (Header Mapping column filters).
-export default function Popover({ trigger, children, align = 'left', panelClass = '' }) {
-  const [open, setOpen] = useState(false)
+// components/dashboard/Popover.jsx (every table's column filter menu).
+// `className` goes on the wrapper (it is the positioning box, so e.g.
+// "min-w-0 flex-1" lets a trigger fill a row).
+export default function Popover({ trigger, children, align = 'left', panelClass = '', className = '', open: controlledOpen, onOpenChange }) {
+  const [uncontrolled, setUncontrolled] = useState(false)
+  const open = controlledOpen ?? uncontrolled
+  const setOpen = (v) => {
+    if (onOpenChange) onOpenChange(v)
+    if (controlledOpen === undefined) setUncontrolled(v)
+  }
   const ref = useRef(null)
+  const panelRef = useRef(null)
+
+  // A panel that opens near the bottom of a scrolling area (a long settings
+  // column, a short table) would be half out of sight — bring it into view.
+  useEffect(() => {
+    if (open) panelRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -21,14 +35,15 @@ export default function Popover({ trigger, children, align = 'left', panelClass 
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="relative" ref={ref}>
+    <div className={`relative ${className}`} ref={ref}>
       <div onClick={() => setOpen(!open)}>{trigger(open)}</div>
       {open && (
         <div
-          className={`absolute z-40 mt-2 min-w-[12rem] rounded-xl border border-divider-light bg-background p-1 shadow-lg shadow-black/5 ${
+          ref={panelRef}
+          className={`dropdown-panel-in absolute z-40 mt-2 min-w-[12rem] rounded-xl border border-divider-light bg-background p-1 text-foreground shadow-lg shadow-black/5 ${
             align === 'right' ? 'right-0' : 'left-0'
           } ${panelClass}`}
         >

@@ -1,14 +1,19 @@
 'use client'
-import { Fragment } from 'react'
-import { Filter, ChevronDown, Lock, Trash2 } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { ChevronDown, Lock, Trash2 } from 'lucide-react'
 import ComboboxCell from './ComboboxCell'
 import MultiSelectCell from './MultiSelectCell'
 import ImageCell from './ImageCell'
 import FormulaCell from './FormulaCell'
 import AutoGrowTextarea from './AutoGrowTextarea'
 import HeaderInfoTip from './HeaderInfoTip'
+import ColumnFilterButton from './ColumnFilterButton'
 import { recomputeFormulas } from './formula'
 import { useBulkImageUpload } from './useBulkImageUpload'
+import { activeFilters, cellNumber, cellPasses, cellText, columnOptions, columnRange } from '@/lib/columnFilter'
+
+// A cell as tools-5's column filter reads it (lib/columnFilter.js) — what it shows.
+const cellOf = (row, headerId) => ({ display: String(row?.[headerId] ?? '').trim() })
 
 // `aiFilled` (plan §14) is a bookkeeping key, not a header id — excluded
 // here so a row with a stale AI-filled marker but every real header cleared
@@ -31,9 +36,6 @@ export default function SheetGrid({
   selectedIds = [],
   onToggleSelect,
   onToggleSelectAll,
-  activeFilterHeaderId,
-  filterValue = '',
-  onFilterChange,
   readOnly = false,
   // Connected-headers support (components/listing/linkedHeaders.js) — both
   // optional, SheetGrid stays ignorant of what "linked" actually means:
@@ -89,14 +91,34 @@ export default function SheetGrid({
   // button). Default keeps the old always-one-trailing-blank behaviour.
   autoAppendRow = true,
   // Opt-in — `isRowVisible(row, rowIndex)` hides a row from view (a page's
-  // search box / column filter) WITHOUT taking it out of `rows`. This is how
-  // a page must filter (see rowSearch.js): every edit hands `onRowsChange`
-  // the whole `rows` list back and pages save exactly that, so a filtered
-  // copy passed as `rows` would lose every hidden row on the first
-  // keystroke. Row indexes given to every callback stay the real ones.
+  // search box) WITHOUT taking it out of `rows`. This is how a page must
+  // filter (see rowSearch.js): every edit hands `onRowsChange` the whole
+  // `rows` list back and pages save exactly that, so a filtered copy passed
+  // as `rows` would lose every hidden row on the first keystroke. Row indexes
+  // given to every callback stay the real ones.
   isRowVisible,
 }) {
   const sortedHeaders = [...headers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+  // Column filters — tools-5's (ColumnFilterButton / lib/columnFilter.js):
+  // every column but an image one has the funnel in its header (search + tick
+  // the values to keep; a formula column also a Min / Max range). Like the
+  // page's search box they only HIDE rows (the same isRowVisible rule — the
+  // whole list still goes back on every edit), and an empty row always shows
+  // — it's where the next entry goes. No sort: this grid is typed into, and
+  // its row order is the sheet's own.
+  const [filters, setFilters] = useState({}) // { [headerId]: { values, min, max } | null }
+  const [menuOpen, setMenuOpen] = useState(false) // a filter menu is open — the grid makes room for it
+  const applied = activeFilters(filters, sortedHeaders.map((h) => h.id))
+  const passes = (row, except = null) => applied.every(([key, f]) => key === except || cellPasses(f, cellOf(row, key)))
+  const pageShows = (row, i) => !isRowVisible || isRowVisible(row, i)
+  const rowShown = (row, i) => pageShows(row, i) && (isRowEmpty(row) || passes(row))
+  // A column's checklist / range: the filled rows the page and every OTHER
+  // column filter leave, the way a sheet does.
+  const filledRows = rows.filter((row, i) => !isRowEmpty(row) && pageShows(row, i))
+  const optionsFor = (key) => columnOptions(filledRows.filter((row) => passes(row, key)), (row) => cellText(cellOf(row, key)))
+  const rangeFor = (key) => columnRange(filledRows.filter((row) => passes(row, key)), (row) => cellNumber(cellOf(row, key)))
+  const setFilter = (key, f) => setFilters((prev) => ({ ...prev, [key]: f }))
 
   // Freeze-panes: the header row stays pinned while rows scroll (below, via
   // `max-h-[70vh] overflow-auto` on the table's own wrapper — same 70vh
@@ -136,7 +158,7 @@ export default function SheetGrid({
   // own single-file path, so a multi-select from inside a cell behaves
   // exactly like the dedicated BulkImageDropZone toolbar above the grid:
   // same row-by-row empty-box fill, same capacity check, same progress UI.
-  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl, onImageUploaded, isRowVisible })
+  const bulk = useBulkImageUpload({ headers: sortedHeaders, rows, onRowsChange, uploadUrl, onImageUploaded, isRowVisible: applied.length ? rowShown : isRowVisible })
 
   // Cascade a single cell's new value into the rest of that same row —
   // connected-header auto-fill, then formula recompute (in that order, so a
@@ -198,9 +220,21 @@ export default function SheetGrid({
           <p className={`text-[11.5px] ${bulk.message.warning ? 'text-red-500 font-medium' : 'text-subtle'}`}>{bulk.message.text}</p>
         </div>
       )}
+      {/* Filters on: say so on the grid itself, with a one-click way out (tools-5's bar). */}
+      {applied.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-divider bg-action-soft px-3 py-1.5 text-xs text-foreground">
+          <span>
+            {applied.length} filter{applied.length === 1 ? '' : 's'} on — showing <span className="font-semibold">{filledRows.filter((row) => passes(row)).length}</span> of {filledRows.length} row{filledRows.length === 1 ? '' : 's'}
+          </span>
+          <button type="button" onClick={() => setFilters({})} className="font-semibold text-link hover:underline">
+            Clear all filters
+          </button>
+        </div>
+      )}
       {/* `container-type` (so the sub-row can size itself to the viewport with
-          `100cqi`) only when sub-rows are in use — other callers untouched. */}
-      <div className={`max-h-[80vh] overflow-auto ${renderRowSubRow ? '[container-type:inline-size]' : ''}`}>
+          `100cqi`) only when sub-rows are in use — other callers untouched.
+          Taller while a filter menu is open, so the menu isn't cut off. */}
+      <div data-table-scroll className={`max-h-[80vh] overflow-auto ${menuOpen ? 'min-h-[30rem]' : ''} ${renderRowSubRow ? '[container-type:inline-size]' : ''}`}>
       {/* `border-separate` (not `collapse`) is required for the sticky header/column borders
           above to stay visible while scrolling — `border-collapse` shares a border between two
           adjacent cells, and once one of them is repositioned by `position: sticky`, browsers
@@ -245,26 +279,18 @@ export default function SheetGrid({
                     <ChevronDown className="w-3 h-3 text-subtle" />
                   )}
                   {h.disabled && <Lock className="w-3 h-3 text-subtle" title="Read-only — filled automatically" />}
-                  {onFilterChange && h.isUniqueKeyPart && (
-                    <button
-                      type="button"
-                      onClick={() => onFilterChange(h.id)}
-                      className={`transition-colors ${activeFilterHeaderId === h.id ? 'text-accent' : 'text-subtle hover:text-accent'}`}
-                    >
-                      <Filter className="w-3 h-3" />
-                    </button>
+                  {h.dataType !== 'image' && (
+                    <ColumnFilterButton
+                      label={h.label}
+                      filter={filters[h.id] || null}
+                      getOptions={() => optionsFor(h.id)}
+                      getRange={h.dataType === 'formula' ? () => rangeFor(h.id) : null}
+                      onChange={(f) => setFilter(h.id, f)}
+                      onOpenChange={setMenuOpen}
+                    />
                   )}
                   {headerInfo && <HeaderInfoTip label={h.label} description={h.description} className="ml-auto" />}
                 </div>
-                {activeFilterHeaderId === h.id && (
-                  <input
-                    autoFocus
-                    value={filterValue}
-                    onChange={(e) => onFilterChange(h.id, e.target.value)}
-                    placeholder="Filter…"
-                    className="mt-1 w-full px-1.5 py-0.5 text-[11.5px] font-normal border border-divider rounded focus:outline-none focus:ring-1 focus:ring-accent-light"
-                  />
-                )}
                 {/* Formula headers carry their own editable formula box
                     right here — no need to leave this page and go back to
                     Template Settings to tweak "[MRP] * 1.5" while looking at
@@ -292,7 +318,7 @@ export default function SheetGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (isRowVisible && !isRowVisible(row, rowIndex) ? null : (
+          {rows.map((row, rowIndex) => (!rowShown(row, rowIndex) ? null : (
             <Fragment key={rowIndex}>
             <tr className="hover:bg-surface/80 group">
               {onDeleteRow && (

@@ -973,6 +973,7 @@ function ScopedAutoDetails({ templateId }) {
             sheets={content.sheets}
           />
           <SheetGrid
+            key={openGroup}
             headerInfo
             headers={sheetsByGroup[openGroup].headers}
             rows={sessionRowsFor(openGroup)}

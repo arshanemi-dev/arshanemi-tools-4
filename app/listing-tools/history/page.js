@@ -1,6 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import DataTable from '@/components/listing/DataTable'
+import useTableView from '@/components/listing/useTableView'
+import { fmtDateTime } from '@/lib/templateLogActions'
 
 // Cross-template save history — every Product Details / Prefill Details row
 // this user has ever saved (Auto Listing Save/Download, or a direct Product
@@ -10,11 +12,14 @@ import { Loader2 } from 'lucide-react'
 // /export route's merge step) via the read-only proxies at
 // app/api/listing-tools/product-details-history and .../prefill-details-history
 // — distinct from TemplateHistoryPanel.jsx's per-template "Saved — Product
-// Details, N rows" action log, this shows the actual saved values.
+// Details, N rows" action log, this shows the actual saved values. Every
+// column sorts and filters from its header (tools-5's table — DataTable).
 const TABS = [
   { key: 'product', label: 'Product Details', endpoint: '/api/listing-tools/product-details-history', keyLabel: 'Product Number', keyField: 'product_number' },
   { key: 'prefill', label: 'Brand Details', endpoint: '/api/listing-tools/prefill-details-history', keyLabel: 'Brand', keyField: 'brand' },
 ]
+
+const NO_ROWS = []
 
 export default function ListingHistoryPage() {
   const [active, setActive] = useState('product')
@@ -51,40 +56,37 @@ export default function ListingHistoryPage() {
         ))}
       </div>
 
-      <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        {rows === null && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-5 h-5 animate-spin text-subtle" />
-          </div>
-        )}
-        {rows !== null && rows.length === 0 && (
-          <p className="text-center py-16 text-[13px] text-subtle">No {tab.label.toLowerCase()} history yet.</p>
-        )}
-        {rows !== null && rows.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead className="bg-surface border-b border-divider">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-semibold text-muted">Template</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-muted">{tab.keyLabel}</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-muted">SKU</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-muted">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-divider last:border-0">
-                    <td className="px-4 py-2.5 text-muted">{r.template_name}</td>
-                    <td className="px-4 py-2.5 text-foreground font-medium">{r[tab.keyField]}</td>
-                    <td className="px-4 py-2.5 text-subtle">{r.row_data?.sku || '—'}</td>
-                    <td className="px-4 py-2.5 text-subtle">{new Date(r.updated_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* A new tab is a new table — its filters and sort start fresh. */}
+      <HistoryTable key={active} tab={tab} rows={rows} />
     </div>
+  )
+}
+
+function HistoryTable({ tab, rows }) {
+  const columns = useMemo(() => [
+    { key: 'template', label: 'Template', text: (r) => r.template_name },
+    { key: 'key', label: tab.keyLabel, text: (r) => r[tab.keyField] },
+    { key: 'sku', label: 'SKU', text: (r) => r.row_data?.sku || '' },
+    { key: 'updated', label: 'Updated', text: (r) => (r.updated_at ? fmtDateTime(r.updated_at) : ''), sortValue: (r) => (r.updated_at ? new Date(r.updated_at).getTime() : null) },
+  ], [tab])
+  const table = useTableView(rows || NO_ROWS, columns, { defaultSort: { key: 'updated', dir: 'desc' } })
+
+  return (
+    <DataTable
+      table={table}
+      columns={columns}
+      loading={rows === null}
+      empty={`No ${tab.label.toLowerCase()} history yet.`}
+      noun="row"
+    >
+      {table.pageRows.map((r) => (
+        <tr key={r.id}>
+          <td className="px-3 py-2.5 text-muted">{r.template_name}</td>
+          <td className="px-3 py-2.5 font-medium text-foreground">{columns[1].text(r)}</td>
+          <td className="px-3 py-2.5 text-subtle">{r.row_data?.sku || '—'}</td>
+          <td className="px-3 py-2.5 whitespace-nowrap text-subtle">{r.updated_at ? fmtDateTime(r.updated_at) : '—'}</td>
+        </tr>
+      ))}
+    </DataTable>
   )
 }

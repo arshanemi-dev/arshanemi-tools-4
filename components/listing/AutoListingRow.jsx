@@ -61,24 +61,30 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
 
   return (
     <>
-      <tr className="border-b border-divider hover:bg-surface/60">
-        <td className="px-4 py-3">
-          <button type="button" onClick={onToggle} className="flex items-center gap-1.5 text-muted font-medium">
+      {/* A row in tools-5's table (DataTable): `data-active` tints the open
+          one, and the brand sheet under it is a `data-child` row — the light
+          blue tint tools-5 gives a row's own transactions. */}
+      <tr data-active={expanded}>
+        <td className="px-3 py-2.5">
+          <button type="button" onClick={onToggle} className="mx-auto flex items-center gap-1.5 text-muted font-medium">
             {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             My Template
           </button>
         </td>
-        <td className="px-4 py-3 text-foreground font-medium">{template.templateName}</td>
-        <td className="px-4 py-3 text-subtle">{template.description || '—'}</td>
-        <td className="px-4 py-3 text-right">
+        <td className="px-3 py-2.5 text-foreground font-medium">{template.templateName}</td>
+        <td className="px-3 py-2.5 text-subtle">{template.description || '—'}</td>
+        <td className="px-3 py-2.5">
           <Link href={`/listing-tools/auto-details?template=${template.id}`}>
             <PillButton variant="view">View Details</PillButton>
           </Link>
         </td>
       </tr>
       {expanded && (
-        <tr>
-          <td colSpan={4} className="bg-surface px-4 py-4">
+        <tr data-child="true">
+          <td colSpan={4} className="p-0">
+            {/* The table centres and breaks its cells' text; the sheet under
+                a row reads left to right like everywhere else. */}
+            <div className="px-4 py-4 text-left [overflow-wrap:normal]">
             {loading && <p className="text-[13px] text-subtle">Loading…</p>}
             {prefillSheet && (
               <div className="space-y-3">
@@ -108,6 +114,7 @@ export default function AutoListingRow({ template, expanded, onToggle, onDeleted
                 />
               </div>
             )}
+            </div>
           </td>
         </tr>
       )}

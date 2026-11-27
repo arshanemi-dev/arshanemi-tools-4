@@ -321,8 +321,8 @@ export default function HeaderMappingSection({
           categoryForOurHeaderId={categoryForOurHeaderId}
           categoryOrder={categoryOrder}
           ourQuery={query}
-          onOurQuery={setQuery}
           ourSort={sort}
+          onOurSort={setSort}
         />
       </div>
 

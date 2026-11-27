@@ -7,18 +7,17 @@ import MarketplaceTabs from '@/components/listing/MarketplaceTabs'
 import { useToast } from '@/components/admin/Toast'
 import { LOG_CATEGORIES, actionMeta, fmtDate, fmtTime, versionLabelOf } from '@/lib/templateLogActions'
 import { buildMarketplaceTabs, marketplaceKeyOf, resolveActiveTab } from '@/lib/marketplaceTabs'
-import { SORT_LABELS, describeFilter, filterRows, isFilterActive, sortRows } from '@/lib/gridFilters'
+import useTableView from '@/components/listing/useTableView'
 import LogStatTiles from './LogStatTiles'
 import LogFilterBar from './LogFilterBar'
 import LogGrid from './LogGrid'
 import LogDetailDrawer from './LogDetailDrawer'
-import { LOG_COLUMNS } from './logColumns'
+import { LOG_COLUMNS, batchFilter } from './logColumns'
 
 // Pages of this size (under the hub's 999 cap) until everything in scope is
 // in; LOAD_CAP guards against an unbounded pull on a very old, busy log.
 const LOAD_PAGE = 900
 const LOAD_CAP = 10000
-const RENDER_STEP = 200
 const DEFAULT_SORT = { key: 'createdAt', dir: 'desc' }
 
 async function getJson(url) {
@@ -33,25 +32,17 @@ function csvCell(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
-function filtersSignature(filters) {
-  return Object.entries(filters)
-    .map(([k, f]) => `${k}:${f?.values ? [...f.values].join('|') : ''}:${JSON.stringify(f?.condition || null)}`)
-    .join(';')
-}
-
 // Template Logs (master_admin). Top-level marketplace tabs (first selected
-// by default) scope what's loaded; below that the page works like a
-// spreadsheet: the marketplace's whole log is pulled in once (paged), then
-// every column can be sorted, filtered by condition or by values, and
-// searched — all client-side, so sorting and filtering are always over
-// every row, never just the loaded page. Template names and version labels
-// are joined from the templates list and the light all-versions list; a row
-// for something since deleted falls back to what its own detail captured.
+// by default) scope what's loaded; below that the page works like tools-5's
+// tables: the marketplace's whole log is pulled in once (paged), then it is
+// searched, and every column sorted and filtered from its header — all
+// client-side, so sorting and filtering are always over every row, never
+// just the loaded page. Template names and version labels are joined from
+// the templates list and the light all-versions list; a row for something
+// since deleted falls back to what its own detail captured.
 export default function TemplateLogsView() {
   const { addToast } = useToast()
   const [marketplaceKey, setMarketplaceKey] = useState(null) // null = default to the first tab
-  const [columnFilters, setColumnFilters] = useState({})
-  const [sort, setSort] = useState(DEFAULT_SORT)
   const [search, setSearch] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
   const [templates, setTemplates] = useState(null)
@@ -59,7 +50,6 @@ export default function TemplateLogsView() {
   const [versions, setVersions] = useState(null)
   const [feed, setFeed] = useState({ key: null, logs: [], capped: false, error: null })
   const [progress, setProgress] = useState({ key: null, count: 0 })
-  const [render, setRender] = useState({ key: null, limit: RENDER_STEP })
   const [openLog, setOpenLog] = useState(null)
 
   const marketplaceTabs = useMemo(() => (templates ? buildMarketplaceTabs(templates) : null), [templates])
@@ -141,94 +131,64 @@ export default function TemplateLogsView() {
     [feed.logs, templatesById, versionsById, templatesFailed],
   )
 
-  const filteredRows = useMemo(() => filterRows(rows, LOG_COLUMNS, columnFilters, search), [rows, columnFilters, search])
-  const sortedRows = useMemo(
-    () => sortRows(filteredRows, LOG_COLUMNS.find((c) => c.key === sort.key), sort.dir),
-    [filteredRows, sort],
-  )
-  // A column's value checklist offers what every OTHER filter leaves.
-  const optionRowsFor = useCallback(
-    (key) => filterRows(rows, LOG_COLUMNS, columnFilters, search, key),
-    [rows, columnFilters, search],
-  )
+  // The search box first (any column), then the columns' own filters and the
+  // sort — tools-5's table (useTableView), which also feeds the export.
+  const searched = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((r) => LOG_COLUMNS.some((c) => String((c.search || c.text)(r) ?? '').toLowerCase().includes(q)))
+  }, [rows, search])
+  const table = useTableView(searched, LOG_COLUMNS, { defaultSort: DEFAULT_SORT })
 
   const loading = feed.key !== feedKey || templates === null || versions === null
   const loadingLabel = progress.key === feedKey && progress.count > 0
     ? `Loading events… ${progress.count.toLocaleString()} so far`
     : 'Loading events…'
 
-  const viewKey = `${feed.key}|${filtersSignature(columnFilters)}|${sort.key}:${sort.dir}|${search}`
-  const renderLimit = render.key === viewKey ? render.limit : RENDER_STEP
-  const isFiltered = !!search.trim() || LOG_COLUMNS.some((c) => isFilterActive(c, columnFilters[c.key]))
-
-  const applyFilter = useCallback((key, filter) => {
-    setColumnFilters((prev) => {
-      const next = { ...prev }
-      if (filter) next[key] = filter
-      else delete next[key]
-      return next
-    })
-  }, [])
   const closeDrawer = useCallback(() => setOpenLog(null), [])
-
-  function clearAll() {
-    setColumnFilters({})
-    setSearch('')
-  }
 
   // Column filters are built from one marketplace's values, so they reset
   // on a tab switch; sort and search carry over.
   function handleSelectTab(key) {
     setMarketplaceKey(key)
-    setColumnFilters({})
+    table.clearFilters()
     setOpenLog(null)
   }
 
   function showBatch(batchId) {
     setOpenLog(null)
-    setColumnFilters({ batch: { values: new Set([String(batchId)]), condition: null } })
+    table.replaceFilters({ batch: batchFilter(batchId) })
   }
 
   // The (hidden) stat tiles: counts over everything loaded, and a click sets
   // the Event column's values filter to that category's events.
-  const eventColumn = LOG_COLUMNS.find((c) => c.key === 'event')
-  const categoryLabels = (c) => new Set(c.actions.map((a) => actionMeta(a).label))
+  const categoryLabels = (c) => [...new Set(c.actions.map((a) => actionMeta(a).label))]
   const tileCounts = useMemo(
     () => Object.fromEntries(LOG_CATEGORIES.map((c) => [c.id, c.actions ? rows.filter((r) => c.actions.includes(r.action)).length : rows.length])),
     [rows],
   )
-  const eventFilter = columnFilters.event
-  const activeCategory = !isFilterActive(eventColumn, eventFilter)
+  const eventFilter = table.filters.event
+  const activeCategory = !eventFilter
     ? 'all'
     : LOG_CATEGORIES.find((c) => {
-        if (!c.actions || !eventFilter.values || eventFilter.condition) return false
+        if (!c.actions || !eventFilter.values || eventFilter.min != null || eventFilter.max != null) return false
         const labels = categoryLabels(c)
-        return labels.size === eventFilter.values.size && [...labels].every((l) => eventFilter.values.has(l))
+        return labels.length === eventFilter.values.length && labels.every((l) => eventFilter.values.includes(l))
       })?.id || null
   function selectCategory(id) {
     const category = LOG_CATEGORIES.find((c) => c.id === id)
-    applyFilter('event', category?.actions ? { values: categoryLabels(category), condition: null } : null)
+    table.setFilter('event', category?.actions ? { values: categoryLabels(category) } : null)
   }
 
-  const chips = LOG_COLUMNS.filter((c) => isFilterActive(c, columnFilters[c.key])).map((c) => ({
-    key: c.key,
-    label: describeFilter(c, columnFilters[c.key]),
-    onClear: () => applyFilter(c.key, null),
-  }))
-  const sortColumn = LOG_COLUMNS.find((c) => c.key === sort.key)
-  const sortChip = sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir
-    ? { label: `${sortColumn.label}: ${SORT_LABELS[sortColumn.type][sort.dir].replace(/^Sort /, '')}`, onClear: () => setSort(DEFAULT_SORT) }
-    : null
-
   function exportCsv() {
-    if (!sortedRows.length) {
+    if (!table.rows.length) {
       addToast('Nothing to export — no events in view.', 'error')
       return
     }
     const header = ['Date', 'Time', 'Event', 'Marketplace', 'Template #', 'Template', 'Version', 'Details', 'By', 'Batch ID']
     const lines = [
       header,
-      ...sortedRows.map((r) => [
+      ...table.rows.map((r) => [
         fmtDate(r.createdAt), fmtTime(r.createdAt), actionMeta(r.action).label, activeTab?.label || '', r.templateNumber || '',
         r.templateName, r.versionLabel || '', r.detail?.summary || '', r.actorName || '', r.batchId,
       ]),
@@ -271,7 +231,7 @@ export default function TemplateLogsView() {
       <LogStatTiles counts={loading ? null : tileCounts} active={activeCategory} onSelect={selectCategory} />
 
       <div className="mb-3">
-        <LogFilterBar search={search} onSearch={setSearch} chips={chips} sortChip={sortChip} onClearAll={clearAll} />
+        <LogFilterBar search={search} onSearch={setSearch} />
       </div>
 
       {feed.capped && feed.key === feedKey && (
@@ -286,23 +246,16 @@ export default function TemplateLogsView() {
       )}
 
       <LogGrid
+        table={table}
         columns={LOG_COLUMNS}
-        rows={sortedRows}
-        totalCount={rows.length}
         loading={loading}
         loadingLabel={loadingLabel}
-        filters={columnFilters}
-        sort={sort}
-        onSort={(key, dir) => setSort({ key, dir })}
-        onApplyFilter={applyFilter}
-        optionRowsFor={optionRowsFor}
         onRowClick={setOpenLog}
         activeRowId={openLog?.id}
         onBatch={showBatch}
-        renderLimit={renderLimit}
-        onShowMore={(all) => setRender({ key: viewKey, limit: all ? sortedRows.length : renderLimit + RENDER_STEP })}
-        isFiltered={isFiltered}
-        onClearFilters={clearAll}
+        empty={search.trim()
+          ? 'No events match your search.'
+          : 'No activity yet — template and version changes (saves, go-lives, rule edits, deletions) will show up here as they happen.'}
       />
 
       {openLog && <LogDetailDrawer log={openLog} onClose={closeDrawer} onBatch={showBatch} />}

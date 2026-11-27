@@ -38,6 +38,7 @@
   --color-action:        #16a34a;
   --color-action-hover:  #15803d;
   --color-action-soft:   #dcfce7;
+  --color-link:          #4f46e5;
   --color-neg:           #dc2626;
 
   /* RGB channels for rgba() usage */
@@ -93,6 +94,7 @@ html[data-theme="dark"] {
   --color-action:        #22c55e;
   --color-action-hover:  #16a34a;
   --color-action-soft:   #0f2a1a;
+  --color-link:          #818cf8;
   --color-neg:           #f87171;
 
   /* RGB channels — dark overrides */

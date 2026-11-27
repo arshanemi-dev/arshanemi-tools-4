@@ -5,20 +5,44 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Search, Download, Upload, Loader2, CopyCheck, Layers } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
-import TemplateSettingsListRow from '@/components/listing/TemplateSettingsListRow'
+import TemplateSettingsListRow, { lineSource } from '@/components/listing/TemplateSettingsListRow'
 import MarketplaceTabs from '@/components/listing/MarketplaceTabs'
+import DataTable, { PlainTh, TH } from '@/components/listing/DataTable'
+import useTableView from '@/components/listing/useTableView'
 import { useToast } from '@/components/admin/Toast'
-import { versionLabelOf } from '@/lib/templateLogActions'
+import { fmtDate, versionLabelOf } from '@/lib/templateLogActions'
 import { buildMarketplaceTabs, marketplaceKeyOf, resolveActiveTab } from '@/lib/marketplaceTabs'
 import { visibleSheetNames } from '@/lib/sheetVisibility'
 
 const BULK_COLUMNS = ['Template Name', 'Template Description', 'Title', 'Description', 'Keywords', 'Rules', 'Rule-1', 'Rule-2']
 
+// One list line = one version of a template (or the template itself when it
+// has no versions yet). Each column sorts and filters on what its cell shows
+// (lineSource — the same values TemplateSettingsListRow prints); dates sort
+// by the real time. Visible is the template's own switch, so a template's
+// version lines carry it too.
+const day = (iso) => (iso ? fmtDate(iso) : '')
+const time = (iso) => (iso ? new Date(iso).getTime() : null)
+const rule = (key) => (line) => line.source.aiRules?.[key] || ''
 const COLUMNS = [
-  'Visible', 'Template #', 'Version', 'Template Name', 'Template Final Name', 'Created', 'Updated', 'Live Date',
-  'Description', 'Rule Title', 'Rule Description', 'Keywords', 'Rules', 'Rule-1', 'Rule-2',
+  { key: 'visible', label: 'Visible', text: (l) => (l.template.isAllowedToShow ? 'Visible' : 'Hidden') },
+  { key: 'number', label: 'Template #', text: (l) => l.template.templateNumber || '' },
+  { key: 'version', label: 'Version', text: (l) => (l.version ? versionLabelOf(l.version) : 'No versions'), sortValue: (l) => l.version?.versionNumber ?? null },
+  { key: 'name', label: 'Template Name', text: (l) => l.source.templateName || '' },
+  { key: 'finalName', label: 'Template Final Name', text: (l) => l.source.finalName || '' },
+  { key: 'created', label: 'Created', text: (l) => day(l.createdAt), sortValue: (l) => time(l.createdAt) },
+  { key: 'updated', label: 'Updated', text: (l) => day(l.updatedAt), sortValue: (l) => time(l.updatedAt) },
+  { key: 'liveAt', label: 'Live Date', text: (l) => day(l.version?.liveAt), sortValue: (l) => time(l.version?.liveAt) },
+  { key: 'description', label: 'Description', text: (l) => l.source.description || '' },
+  { key: 'title', label: 'Rule Title', text: rule('title') },
+  { key: 'ruleDescription', label: 'Rule Description', text: rule('description') },
+  { key: 'keyword', label: 'Keywords', text: rule('keyword') },
+  { key: 'otherRules', label: 'Rules', text: rule('otherRules') },
+  { key: 'rule1', label: 'Rule-1', text: rule('rule1') },
+  { key: 'rule2', label: 'Rule-2', text: rule('rule2') },
 ]
 const COL_COUNT = COLUMNS.length + 2 // + checkbox + actions
+const groupOfLine = (line) => line.template.id
 
 const VIEW_MODES = [
   { id: 'all', label: 'All versions' },
@@ -126,37 +150,65 @@ export default function TemplateSettingsListPage() {
 
   const marketplaceTabs = useMemo(() => (templates ? buildMarketplaceTabs(templates) : null), [templates])
   const activeTab = marketplaceTabs ? resolveActiveTab(marketplaceTabs, marketplaceKey) : null
-  const tabTemplates = activeTab ? templates.filter((t) => marketplaceKeyOf(t) === activeTab.key) : templates || []
+  const tabKey = activeTab?.key ?? null
+  const tabTemplates = useMemo(
+    () => (tabKey ? templates.filter((t) => marketplaceKeyOf(t) === tabKey) : templates || []),
+    [templates, tabKey],
+  )
+
+  // The search box, then one line per version (every version, or just the
+  // latest) — what the table's column filters and sort work on. A template's
+  // lines stay together, newest version first (useTableView groupOf).
+  const query = search.trim().toLowerCase()
+  const lines = useMemo(() => {
+    const out = []
+    for (const t of tabTemplates) {
+      if (query) {
+        const haystack = [
+          t.templateName, t.description, t.finalName, t.templateNumber,
+          ...(versionsByTemplate.get(t.id) || []).map(versionLabelOf),
+        ]
+        if (!haystack.some((s) => String(s || '').toLowerCase().includes(query))) continue
+      }
+      const all = versionsByTemplate.get(t.id) || []
+      const shown = viewMode === 'latest' ? all.slice(0, 1) : all
+      if (!shown.length) {
+        out.push({ key: t.id, template: t, version: null, isHead: true, ...lineSource({ template: t }) })
+        continue
+      }
+      // The head line keeps a stable key so a new version appearing above
+      // it doesn't remount its row (and drop an in-progress edit).
+      shown.forEach((v, i) => {
+        out.push({ key: i === 0 ? t.id : v.id, template: t, version: v, isHead: i === 0, ...lineSource({ template: t, version: v, isHead: i === 0 }) })
+      })
+    }
+    return out
+  }, [tabTemplates, query, versionsByTemplate, viewMode])
+  const table = useTableView(lines, COLUMNS, { groupOf: groupOfLine })
+  // The templates the table shows right now (every page) — what Select All ticks.
+  const shownIds = useMemo(() => [...new Set(table.rows.map(groupOfLine))], [table.rows])
 
   // Selection never carries across tabs — bulk actions (download, AI copy,
-  // Edit Bulk Listing) must only ever act on rows you can actually see.
+  // Edit Bulk Listing) must only ever act on rows you can actually see. The
+  // column filters are built from one marketplace's values, so they reset too.
   function handleSelectTab(key) {
     setMarketplaceKey(key)
     setSelectedIds(new Set())
+    table.clearFilters()
   }
-
-  const query = search.trim().toLowerCase()
-  const filtered = tabTemplates.filter((t) => {
-    if (!query) return true
-    const haystack = [
-      t.templateName, t.description, t.finalName, t.templateNumber,
-      ...(versionsByTemplate.get(t.id) || []).map(versionLabelOf),
-    ]
-    return haystack.some((s) => String(s || '').toLowerCase().includes(query))
-  })
 
   const versionCount = tabTemplates.reduce((n, t) => n + (versionsByTemplate.get(t.id) || []).length, 0)
   const liveCount = tabTemplates.filter((t) => (versionsByTemplate.get(t.id) || []).some((v) => v.isLive)).length
 
   // Selection Logic
-  const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selectedIds.has(t.id))
-  const someFilteredSelected = filtered.some((t) => selectedIds.has(t.id)) && !allFilteredSelected
+  const allFilteredSelected = shownIds.length > 0 && shownIds.every((id) => selectedIds.has(id))
+  const someFilteredSelected = shownIds.some((id) => selectedIds.has(id)) && !allFilteredSelected
 
   function toggleSelectAll() {
     if (allFilteredSelected) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(filtered.map((t) => t.id)))
+      setSelectedIds(new Set(shownIds))
     }
   }
 
@@ -411,69 +463,46 @@ export default function TemplateSettingsListPage() {
         </PillButton>
       </div>
 
-      {/* Table Component */}
-      <div className="border border-divider rounded-lg overflow-x-auto bg-card">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="bg-card border-b border-divider">
-              <th className="px-3 py-2.5 text-center w-10">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someFilteredSelected
-                  }}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 text-accent rounded border-divider-light focus:ring-accent cursor-pointer"
-                />
-              </th>
-              {COLUMNS.map((label) => (
-                <th key={label} className="px-3 py-2.5 text-left font-semibold text-foreground whitespace-nowrap">
-                  {label}
-                </th>
-              ))}
-              <th className="px-3 py-2.5 text-right font-semibold text-foreground">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {templates === null && (
-              <tr>
-                <td colSpan={COL_COUNT} className="px-4 py-10 text-center text-subtle">
-                  Loading…
-                </td>
-              </tr>
-            )}
-            {templates !== null && filtered.length === 0 && (
-              <tr>
-                <td colSpan={COL_COUNT} className="px-4 py-10 text-center text-subtle">
-                  {query ? 'No templates or versions match your search.' : 'No templates yet — create one to get started.'}
-                </td>
-              </tr>
-            )}
-            {filtered.flatMap((t) => {
-              const all = versionsByTemplate.get(t.id) || []
-              const shown = viewMode === 'latest' ? all.slice(0, 1) : all
-              if (shown.length === 0) {
-                return [<TemplateSettingsListRow key={t.id} template={t} isSelected={selectedIds.has(t.id)} {...rowProps} />]
-              }
-              // The head row keeps a stable key so a new version appearing
-              // above it doesn't remount it (and drop an in-progress edit).
-              return shown.map((v, i) => (
-                <TemplateSettingsListRow
-                  key={i === 0 ? t.id : v.id}
-                  template={t}
-                  version={v}
-                  isHead={i === 0}
-                  isLastInGroup={i === shown.length - 1}
-                  isSelected={selectedIds.has(t.id)}
-                  liveBusy={liveBusyId === v.id}
-                  {...rowProps}
-                />
-              ))
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Table — tools-5's (DataTable): every column sorts and filters from
+          its header; a template and its versions move and page together. */}
+      <DataTable
+        table={table}
+        columns={COLUMNS}
+        lead={(
+          <th className={`${TH} w-10`}>
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someFilteredSelected
+              }}
+              onChange={toggleSelectAll}
+              aria-label="Select every template shown"
+              className="w-4 h-4 cursor-pointer accent-[var(--color-action)]"
+            />
+          </th>
+        )}
+        trail={<PlainTh>Actions</PlainTh>}
+        colSpan={COL_COUNT}
+        loading={templates === null}
+        empty={query ? 'No templates or versions match your search.' : 'No templates yet — create one to get started.'}
+        noMatch={query ? 'No templates or versions match your search or filters.' : 'No templates match the current filters.'}
+        noun="template"
+        summaryExtra={selectedIds.size > 0 && ` · ${selectedIds.size} selected`}
+        scrollClass="max-h-[75vh]"
+      >
+        {table.pageRows.map((line) => (
+          <TemplateSettingsListRow
+            key={line.key}
+            template={line.template}
+            version={line.version}
+            isHead={line.isHead}
+            isSelected={selectedIds.has(line.template.id)}
+            liveBusy={!!line.version && liveBusyId === line.version.id}
+            {...rowProps}
+          />
+        ))}
+      </DataTable>
     </div>
   )
 }

@@ -74,9 +74,9 @@ function ScopedProductDetails({ templateId }) {
   // Details sheet, exactly as the first tab did. In the Excel View the open
   // tab is the target instead — see downloadGroup below.
   const [activeGroup, setActiveGroup] = useState('design_system')
-  // Per-column filter, kept per group: { [group]: { key, value } }. Only a
-  // sheet's unique-key column offers the filter toggle.
-  const [filter, setFilter] = useState({})
+  // Bumped to start the grids over (their own column filters) — part of each
+  // SheetGrid's key.
+  const [gridReset, setGridReset] = useState(0)
   const uploadInputRef = useRef(null)
   const { exporting, gate, closeGate, runExport } = useTemplateExport(templateId)
   const { gate: aiGate, closeGate: closeAiGate, fillRowFromImage } = useAiFill(templateId)
@@ -123,36 +123,22 @@ function ScopedProductDetails({ templateId }) {
   const filledRowCount = (activeSheet?.rows || []).filter((r) => Object.entries(r).some(([k, v]) => k !== 'aiFilled' && String(v ?? '').trim())).length
   const hasAnyFilledRow = filledRowCount > 1
 
-  // Which rows the Search box and a key-column filter hide. A grid always gets
-  // a group's WHOLE row list plus one of these (SheetGrid's isRowVisible) —
-  // never a filtered copy: an edit saves the list the grid was given, so the
-  // hidden rows would be deleted from the sheet (see
-  // components/listing/rowSearch.js). The last row always shows, so there's
-  // somewhere to type the next entry.
+  // Which rows the Search box hides. A grid always gets a group's WHOLE row
+  // list plus one of these (SheetGrid's isRowVisible) — never a filtered
+  // copy: an edit saves the list the grid was given, so the hidden rows would
+  // be deleted from the sheet (see components/listing/rowSearch.js). The last
+  // row always shows, so there's somewhere to type the next entry. Each
+  // column's own filter lives in the grid's header (SheetGrid — tools-5's
+  // column funnel) and hides rows the same way.
   const query = search.trim().toLowerCase()
-  function passesKeyFilter(group, row) {
-    const f = filter[group]
-    if (!f?.key || !String(f.value).trim()) return true
-    return String(row?.[f.key] ?? '').toLowerCase().includes(String(f.value).toLowerCase())
-  }
   // Excel View — one group's own rows.
   function rowVisibleIn(group) {
-    return (row, i) => i === sheetsByGroup[group].rows.length - 1
-      || (passesKeyFilter(group, row) && (!query || rowMatchesSearch(row, query)))
+    return (row, i) => !query || i === sheetsByGroup[group].rows.length - 1 || rowMatchesSearch(row, query)
   }
   // Input Box View — a product: its Product Details row or any of the boxes under it.
   function productVisible(row, i) {
-    return i === sheetsByGroup.design_system.rows.length - 1
-      || (passesKeyFilter('design_system', row)
-        && (!query || rowMatchesSearch(row, query) || mergeGroups.some((g) => rowMatchesSearch(sheetsByGroup[g].rows[i], query))))
-  }
-
-  function onFilterChange(group, headerId, value) {
-    if (value === undefined) {
-      setFilter((prev) => ({ ...prev, [group]: prev[group]?.key === headerId ? { key: null, value: '' } : { key: headerId, value: '' } }))
-    } else {
-      setFilter((prev) => ({ ...prev, [group]: { key: prev[group]?.key ?? headerId, value } }))
-    }
+    return !query || i === sheetsByGroup.design_system.rows.length - 1
+      || rowMatchesSearch(row, query) || mergeGroups.some((g) => rowMatchesSearch(sheetsByGroup[g].rows[i], query))
   }
 
   // Row edits persist on a short 50ms idle debounce (unlike header/formula edits below, which
@@ -342,7 +328,7 @@ function ScopedProductDetails({ templateId }) {
       }
       setActiveGroup(result.group)
       setExcelGroup(result.group)
-      setFilter((prev) => ({ ...prev, [result.group]: { key: null, value: '' } }))
+      setGridReset((n) => n + 1) // a freshly uploaded sheet starts with no column filters
       setContent((prev) => ({ ...prev, sheets: prev.sheets.map((s) => (s.group === result.group ? { ...s, rows: result.rows } : s)) }))
       await fetch(`/api/listing-tools/${templateId}/sheets/${result.group}`, {
         method: 'PATCH',
@@ -408,7 +394,6 @@ function ScopedProductDetails({ templateId }) {
       {content && view === 'boxes' && (sheetsByGroup.design_system?.headers?.length ?? 0) > 0 && (() => {
         const g = 'design_system'
         const gsheet = sheetsByGroup[g]
-        const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
         // Product Details table = core columns only; "Big" / "Image Link"
         // (design_system headers tagged `uiBucket`) show in the sub-row as
         // their own groups instead.
@@ -457,6 +442,7 @@ function ScopedProductDetails({ templateId }) {
 
         return (
           <SheetGrid
+            key={`boxes:${gridReset}`}
             headerInfo
             autoAppendRow={false}
             headers={coreHeaders}
@@ -464,9 +450,6 @@ function ScopedProductDetails({ templateId }) {
             isRowVisible={productVisible}
             onRowsChange={(nextRows) => saveRows(g, nextRows)}
             uploadUrl={`/api/listing-tools/${templateId}/images`}
-            activeFilterHeaderId={filter[g]?.key || null}
-            filterValue={filter[g]?.value || ''}
-            onFilterChange={gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined}
             pickerOptions={buildPickerOptions(gsheet.headers, sheetsByGroup)}
             onCellChange={dsOnCellChange}
             onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}
@@ -493,20 +476,17 @@ function ScopedProductDetails({ templateId }) {
       {content && view === 'excel' && openGroup && (() => {
         const g = openGroup
         const gsheet = sheetsByGroup[g]
-        const gKeyHeaderId = gsheet.headers.find((h) => h.isUniqueKeyPart)?.id
         return (
           <div className="border border-divider rounded-lg overflow-hidden bg-card">
             <SheetTabs active={g} onChange={setExcelGroup} sheets={content.sheets} />
             <SheetGrid
+              key={`${g}:${gridReset}`}
               headerInfo
               headers={gsheet.headers}
               rows={gsheet.rows}
               isRowVisible={rowVisibleIn(g)}
               onRowsChange={(nextRows) => saveRows(g, nextRows)}
               uploadUrl={`/api/listing-tools/${templateId}/images`}
-              activeFilterHeaderId={filter[g]?.key || null}
-              filterValue={filter[g]?.value || ''}
-              onFilterChange={gKeyHeaderId ? ((headerId, value) => onFilterChange(g, headerId, value)) : undefined}
               pickerOptions={buildPickerOptions(gsheet.headers, sheetsByGroup)}
               onCellChange={(headerId, value, rowIndex) => resolveLinkedFill(gsheet.headers, headerId, value, rowIndex, sheetsByGroup)}
               onHeaderChange={(headerId, patch) => handleHeaderChange(g, headerId, patch)}

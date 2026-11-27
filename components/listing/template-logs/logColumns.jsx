@@ -1,25 +1,25 @@
 'use client'
 
-import { actionMeta, fmtDateTime, fmtRelative } from '@/lib/templateLogActions'
-import { dateFromDayKey, dayKeyOf } from '@/lib/gridFilters'
+import { actionMeta, fmtDate, fmtDateTime, fmtRelative } from '@/lib/templateLogActions'
 import { ActionChip, Avatar, VersionPill } from './LogCells'
 
-// The Template Logs grid's columns — the column-definition shape
-// lib/gridFilters.js documents, plus `width` (a Tailwind class; the one
-// column without a width absorbs the remaining space) and `render`.
-// Empty cells render blank, same as the Template Settings list.
+const time = (iso) => (iso ? new Date(iso).getTime() : null)
+
+// The Template Logs grid's columns — the column shape useTableView reads
+// (tools-5's table: `text` = what the column's filter ticks, `sortValue` =
+// what it sorts by), plus `search` (what the page's search box matches, when
+// it isn't the text) and `render`. The Date & Time column filters by day —
+// one tick per day, not per second — and sorts by the real time. Empty cells
+// render blank, same as the Template Settings list.
 export const LOG_COLUMNS = [
   {
     key: 'createdAt',
     label: 'Date & Time',
-    type: 'date',
-    width: 'w-44',
-    value: (r) => dayKeyOf(r.createdAt),
-    valueLabel: (key) => dateFromDayKey(key).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }),
-    text: (r) => fmtDateTime(r.createdAt),
-    date: (r) => r.createdAt,
+    text: (r) => (r.createdAt ? fmtDate(r.createdAt) : ''),
+    search: (r) => fmtDateTime(r.createdAt),
+    sortValue: (r) => time(r.createdAt),
     render: (r) => (
-      <span className="font-mono text-[12px] text-muted" title={fmtRelative(r.createdAt)}>
+      <span className="whitespace-nowrap font-mono text-[12px] text-muted" title={fmtRelative(r.createdAt)}>
         {fmtDateTime(r.createdAt)}
       </span>
     ),
@@ -27,27 +27,21 @@ export const LOG_COLUMNS = [
   {
     key: 'event',
     label: 'Event',
-    type: 'text',
-    width: 'w-48',
-    value: (r) => actionMeta(r.action).label,
+    text: (r) => actionMeta(r.action).label,
     render: (r) => <ActionChip action={r.action} />,
   },
   {
     key: 'templateNumber',
     label: 'Template #',
-    type: 'text',
-    width: 'w-28',
-    value: (r) => r.templateNumber || '',
+    text: (r) => r.templateNumber || '',
     render: (r) => <span className="font-mono text-[12px] text-subtle">{r.templateNumber}</span>,
   },
   {
     key: 'templateName',
     label: 'Template',
-    type: 'text',
-    width: 'w-60',
-    value: (r) => r.templateName || '',
+    text: (r) => r.templateName || '',
     render: (r) => (
-      <span className="flex min-w-0 items-center gap-1.5">
+      <span className="inline-flex min-w-0 max-w-[16rem] items-center gap-1.5">
         <span className={`truncate font-medium ${r.templateExists ? 'text-foreground' : 'text-subtle line-through decoration-subtle/50'}`}>
           {r.templateName}
         </span>
@@ -60,30 +54,24 @@ export const LOG_COLUMNS = [
   {
     key: 'version',
     label: 'Version',
-    type: 'text',
-    width: 'w-28',
-    value: (r) => r.versionLabel || '',
+    text: (r) => r.versionLabel || '',
     // V10 after V9 — by the real version number, not the label's text.
-    sortValue: (r) => r.versionNumber ?? '',
+    sortValue: (r) => r.versionNumber ?? null,
     render: (r) => <VersionPill label={r.versionLabel} isLive={r.versionIsLive} />,
   },
   {
     key: 'details',
     label: 'Details',
-    type: 'text',
-    width: '',
-    value: (r) => r.detail?.summary || '',
-    render: (r) => <span className="block truncate text-muted">{r.detail?.summary}</span>,
+    text: (r) => r.detail?.summary || '',
+    render: (r) => <span className="mx-auto block max-w-[28rem] truncate text-muted" title={r.detail?.summary || ''}>{r.detail?.summary}</span>,
   },
   {
     key: 'actor',
     label: 'By',
-    type: 'text',
-    width: 'w-44',
-    value: (r) => r.actorName || '',
+    text: (r) => r.actorName || '',
     render: (r) =>
       r.actorName ? (
-        <span className="flex min-w-0 items-center gap-2 text-muted">
+        <span className="inline-flex min-w-0 max-w-[14rem] items-center gap-2 text-muted">
           <Avatar name={r.actorName} />
           <span className="truncate">{r.actorName}</span>
         </span>
@@ -92,11 +80,8 @@ export const LOG_COLUMNS = [
   {
     key: 'batch',
     label: 'Batch',
-    type: 'number',
-    width: 'w-24',
-    value: (r) => (r.batchId == null ? '' : String(r.batchId)),
-    valueLabel: (v) => `#${v}`,
-    number: (r) => r.batchId,
+    text: (r) => (r.batchId == null ? '' : `#${r.batchId}`),
+    sortValue: (r) => r.batchId ?? null,
     render: (r, { onBatch }) => (
       <button
         type="button"
@@ -109,3 +94,6 @@ export const LOG_COLUMNS = [
     ),
   },
 ]
+
+// The filter "Filter to every event from this batch" sets on the Batch column.
+export const batchFilter = (batchId) => ({ values: [`#${batchId}`] })

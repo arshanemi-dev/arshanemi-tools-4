@@ -1,0 +1,77 @@
+/* Never narrower than the scroll area (the header band spans its full
+   width), never squeezed below its content either — it scrolls instead. */
+.table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+  /* Separate borders stay attached to sticky cells while scrolling.
+     Draw each shared edge once so the grid stays one pixel wide. */
+  border-collapse: separate;
+  border-spacing: 0;
+  border-top: 1px solid var(--color-divider-light);
+  border-left: 1px solid var(--color-divider-light);
+}
+
+.table > :is(thead, tbody, tfoot) > tr > :is(th, td) {
+  padding-left: 0;
+  padding-right: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border-right: 1px solid var(--color-divider-light);
+  border-bottom: 1px solid var(--color-divider-light);
+}
+
+/* The header row is a dark band — a light grid line would glare on it, so
+   its cells get a faint white edge instead; the light green Total row under
+   it gets a faint dark one. */
+.table > thead > tr > th {
+  border-right-color: rgb(255 255 255 / 0.12);
+  border-bottom-color: rgb(255 255 255 / 0.12);
+}
+
+.table > thead > tr > td {
+  border-right-color: rgb(0 0 0 / 0.08);
+  border-bottom-color: rgb(0 0 0 / 0.12);
+}
+
+/* Values sit centered under their centered headers. The Overview tree
+   column stays left — its flex row + text-left keep the level indents. */
+.table > tbody > tr > td {
+  text-align: center;
+}
+
+.table > tbody > tr:nth-child(odd) {
+  background-color: var(--color-background);
+}
+
+.table > tbody > tr:nth-child(even) {
+  background-color: var(--color-card);
+}
+
+.table > tbody > tr:hover {
+  background-color: var(--color-card-hover);
+}
+
+/* An opened row's transactions (DetailsTable ChildRows) — a light blue tint
+   under their row, whatever stripe they land on. */
+.table > tbody > tr[data-child='true'],
+.table > tbody > tr[data-child='true']:hover {
+  background-color: color-mix(in srgb, var(--color-link) 6%, var(--color-background));
+}
+
+.table > tbody > tr[data-active='true'],
+.table > tbody > tr[data-dirty='true'] {
+  background-color: color-mix(in srgb, var(--color-link) 12%, var(--color-background));
+}
+
+/* Selection wins over stripes, hover, edited rows and preview cell tints.
+   Opaque cell backgrounds also keep sticky columns readable. */
+.table > tbody > tr[data-selected='true'],
+.table > tbody > tr[data-selected='true'] > td {
+  background-color: var(--color-action-soft);
+}
+
+.table > tbody > tr[data-selected='true']:nth-child(even),
+.table > tbody > tr[data-selected='true']:nth-child(even) > td {
+  background-color: color-mix(in srgb, var(--color-action) 20%, var(--color-action-soft));
+}

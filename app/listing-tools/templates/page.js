@@ -1,11 +1,17 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Search, Plus, Minus } from 'lucide-react'
 import PillButton from '@/components/listing/PillButton'
 import TemplateBadge from '@/components/listing/TemplateBadge'
+import DataTable, { PlainTh } from '@/components/listing/DataTable'
+import useTableView from '@/components/listing/useTableView'
 import { useToast } from '@/components/admin/Toast'
 
+const NO_TEMPLATES = []
+
+// Every template this viewer can pick from, in tools-5's table (DataTable):
+// each column sorts and filters from its header, on what the cell shows.
 export default function ChooseTemplatePage() {
   const { addToast } = useToast()
   const [templates, setTemplates] = useState(null)
@@ -30,7 +36,7 @@ export default function ChooseTemplatePage() {
       .catch(() => setMine(new Set()))
   }, [])
 
-  const filtered = (templates || []).filter((t) => {
+  const filtered = useMemo(() => (templates || NO_TEMPLATES).filter((t) => {
     if (!search.trim()) return true
     const q = search.toLowerCase()
     return (
@@ -39,7 +45,18 @@ export default function ChooseTemplatePage() {
       (t.templateNumber || '').toLowerCase().includes(q) ||
       (t.description || '').toLowerCase().includes(q)
     )
-  })
+  }), [templates, search])
+
+  // What each cell shows — what its column sorts and filters on.
+  const columns = useMemo(() => [
+    { key: 'number', label: 'Template #', text: (t) => t.templateNumber || '' },
+    { key: 'name', label: 'Template Name', text: (t) => t.templateName || '' },
+    { key: 'finalName', label: 'Template Final Name', text: (t) => t.finalName || '' },
+    { key: 'mine', label: 'My Template', text: (t) => (mine?.has(t.id) ? t.templateName : '') },
+    { key: 'all', label: 'All Template', text: (t) => [t.templateName, t.viewerBadge?.label].filter(Boolean).join(' · ') },
+    { key: 'description', label: 'Description', text: (t) => t.keywords || '' },
+  ], [mine])
+  const table = useTableView(filtered, columns)
 
   // Tells the left sidebar (components/listing/ListingToolsSidebar.jsx, a
   // separate tree in the layout) the "My Template" set changed, so its list
@@ -101,33 +118,23 @@ export default function ChooseTemplatePage() {
         />
       </div>
 
-      <div className="border border-divider rounded-lg overflow-hidden bg-card">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="bg-card border-b border-divider">
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template #</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template Name</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Template Final Name</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground w-52">My Template</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground w-52">All Template</th>
-              <th className="px-4 py-2.5 text-left font-semibold text-foreground">Description</th>
-              <th className="px-4 py-2.5 text-right font-semibold text-foreground w-36">View Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(templates === null || mine === null) && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-subtle">Loading…</td></tr>
-            )}
-            {templates !== null && mine !== null && filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-subtle">No templates yet.</td></tr>
-            )}
-            {templates !== null && mine !== null && filtered.map((t) => {
-              const isMine = mine.has(t.id)
+      <DataTable
+        table={table}
+        columns={columns}
+        trail={<PlainTh>View Details</PlainTh>}
+        colSpan={columns.length + 1}
+        loading={templates === null || mine === null}
+        empty={search.trim() ? 'No templates match your search.' : 'No templates yet.'}
+        noMatch={search.trim() ? 'No templates match your search or filters.' : 'No templates match the current filters.'}
+        noun="template"
+      >
+            {table.pageRows.map((t) => {
+              const isMine = !!mine?.has(t.id)
               return (
-                <tr key={t.id} className="border-b border-divider last:border-b-0 hover:bg-surface/60">
-                  <td className="px-4 py-3 text-subtle font-mono whitespace-nowrap">{t.templateNumber || '—'}</td>
-                  <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{t.templateName || '—'}</td>
-                  <td className="px-4 py-3 max-w-[220px]">
+                <tr key={t.id}>
+                  <td className="px-3 py-2.5 text-subtle font-mono whitespace-nowrap">{t.templateNumber || '—'}</td>
+                  <td className="px-3 py-2.5 text-foreground font-medium whitespace-nowrap">{t.templateName || '—'}</td>
+                  <td className="px-3 py-2.5 max-w-[220px]">
                     <span
                       className="block truncate font-mono text-[12.5px] text-subtle"
                       title={t.finalName || '—'}
@@ -138,7 +145,7 @@ export default function ChooseTemplatePage() {
 
                   {/* My Template — a badge only appears once you've actually
                       added this template; the − removes it. */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2.5">
                     {isMine ? (
                       <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent/15 pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-accent-hover">
                         <span className="truncate">{t.templateName}</span>
@@ -158,7 +165,7 @@ export default function ChooseTemplatePage() {
 
                   {/* All Template — every template gets a badge here, always
                       with a + to add it (disabled once it's already mine). */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2.5">
                     <span className="inline-flex max-w-full items-center gap-1.5">
                       <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-card-hover pl-2.5 pr-1.5 py-1 text-[12px] font-medium text-muted">
                         <span className="truncate">{t.templateName}</span>
@@ -176,8 +183,8 @@ export default function ChooseTemplatePage() {
                     </span>
                   </td>
 
-                  <td className="px-4 py-3 text-subtle">{t.keywords || '—'}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-3 py-2.5 text-subtle">{t.keywords || '—'}</td>
+                  <td className="px-3 py-2.5">
                     <Link href={`/listing-tools/template-settings/${t.id}/details`}>
                       <PillButton variant="view">View Details</PillButton>
                     </Link>
@@ -185,9 +192,7 @@ export default function ChooseTemplatePage() {
                 </tr>
               )
             })}
-          </tbody>
-        </table>
-      </div>
+      </DataTable>
     </div>
   )
 }

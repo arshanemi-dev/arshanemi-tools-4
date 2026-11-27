@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Check as CheckIcon, Filter, Loader2, Pencil, Settings, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import Popover from './Popover'
+import { Check as CheckIcon, Loader2, Pencil, Settings, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import ColumnFilterButton from './ColumnFilterButton'
 import { DEFAULT_LIST_SORT, sortItems, matchesQuery } from '@/lib/listSort'
 
 const OUR_COL = '__our__'
@@ -18,34 +18,24 @@ const PLACE_GROUP = {
   prefill: { label: 'Brand Details', dot: 'bg-[#2563eb]', text: 'text-[#2563eb]' },
 }
 
-function ColumnHead({ label, sub, filter, onFilter }) {
+// A column head with tools-5's funnel (ColumnFilterButton — Sort A → Z /
+// Z → A, then search + tick the headers to keep, several at once); `wide` —
+// the list in 3 columns, so long header lists show at a glance. Same as
+// tools-5's Template Settings HeaderMappingTable.
+function ColumnHead({ label, sub, filter, onFilter, getOptions, onOpenChange, sortDir, onSort }) {
   return (
     <div className="flex items-center gap-1 whitespace-nowrap">
       {/* A sheet column is headed by its file name, which can be long. */}
       <span className="max-w-[16rem] truncate font-normal" title={label}>{label}</span>
       {sub && <span className="text-[10.5px] font-normal text-subtle">· {sub}</span>}
-      <Popover
-        panelClass="min-w-[13rem] p-2"
-        trigger={() => (
-          <button type="button" aria-label={`Filter ${label}`} className={`rounded p-0.5 hover:bg-card-hover ${filter ? 'text-action' : 'text-foreground'}`}>
-            <Filter size={13} fill="currentColor" />
-          </button>
-        )}
-      >
-        <div className="space-y-2">
-          <input
-            autoFocus
-            value={filter || ''}
-            onChange={(e) => onFilter(e.target.value)}
-            placeholder="Contains…"
-            className="w-full rounded-md border border-divider bg-background px-2 py-1 text-[12px] font-normal focus:border-accent focus:outline-none"
-          />
-          {filter && <button type="button" onClick={() => onFilter('')} className="text-[11px] font-medium text-subtle hover:text-foreground">Clear filter</button>}
-        </div>
-      </Popover>
+      <ColumnFilterButton label={label} filter={filter} getOptions={getOptions} onChange={onFilter} onOpenChange={onOpenChange} size={13} sortDir={sortDir} onSort={onSort} wide />
     </div>
   )
 }
+
+// Distinct names → the funnel's checklist options.
+const optionsOf = (names) => [...new Set(names)].map((text) => ({ text }))
+const byText = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
 
 function RowBtn({ title, onClick, disabled, tone, children }) {
   return (
@@ -88,16 +78,28 @@ function Check({ checked, onChange, label, disabled }) {
 // sheet headers as boxes (× unmaps); below, the Unmapped block lists each
 // column's leftovers independently. With `showMapping` off (the sidebar's
 // Header Mapping eye) only the Our Header column shows.
+//
+// Filters and sort — tools-5's: every column has the spreadsheet-style
+// funnel (search + tick the headers to keep). `ourQuery` (the section's
+// search box) looks in EVERY column on top of that: a Mapped row shows when
+// its Our Header or a sheet header mapped to it matches; each Unmapped list
+// is searched on its own. Our Header's "Sort A → Z / Z → A" is the section's
+// own Name sort (`ourSort` / `onOurSort` — the menu and the sort picker above
+// the table are one setting); a sheet column's sort orders that column's
+// Unmapped list, and the Mapped rows by the header mapped there (rows with
+// nothing mapped in it go last). One sheet column at a time, and it steps
+// aside when Our Header is sorted.
 export default function HeaderMappingTable({
   ourHeaders, mappedHeaders, unmappedRawHeaders, commonHeaderKeys, sheets = NO_SHEETS, showMapping = true,
   activeId, onSelect, checked, onToggleCheck, onUnmap, onRename, isDuplicate, onDelete, busyId,
   onOpenHeaderSettings, onOpenColumnSettings, onOpenRawHeaderSettings,
-  categoryForOurHeaderId, categoryOrder, ourQuery, onOurQuery, ourSort = DEFAULT_LIST_SORT,
+  categoryForOurHeaderId, categoryOrder, ourQuery = '', ourSort = DEFAULT_LIST_SORT, onOurSort = () => {},
 }) {
-  const [filters, setFilters] = useState({})
-  const setFilter = (col) => (q) => setFilters((f) => ({ ...f, [col]: q }))
-  const ourFilter = ourQuery ?? filters[OUR_COL]
-  const setOurFilter = onOurQuery ?? setFilter(OUR_COL)
+  const [filters, setFilters] = useState({}) // { [column]: { values: [header name, ...] } | null }
+  const [colSort, setColSort] = useState(null) // { id, dir } — the sheet column the table is sorted on
+  const [menuOpen, setMenuOpen] = useState(false) // a filter menu is open — the table makes room for it
+  const setFilter = (col) => (f) => setFilters((prev) => ({ ...prev, [col]: f }))
+  const allowed = (col) => (filters[col]?.values ? new Set(filters[col].values) : null)
   const grouping = !!categoryOrder && categoryOrder.length > 2
   const categoryOf = (h) => categoryForOurHeaderId?.get(h.id) || 'Unassigned'
 
@@ -147,12 +149,35 @@ export default function HeaderMappingTable({
   }, [showMapping, commonHeaderKeys, unmappedRawHeaders, sheets, mappedHeaders])
 
   const mappedFor = (h, c) => (mappedById.get(h.id)?.sheetHeaders || []).filter(c.pick)
-  const mergedRows = !showMapping ? [] : rows.filter((h) => mappedById.has(h.id)
-    && matchesQuery(h.label, ourFilter)
-    && columns.every((c) => !filters[c.id] || mappedFor(h, c).some((s) => matchesQuery(s, filters[c.id]))))
-  const ourUnmapped = rows.filter((h) => (!showMapping || !mappedById.has(h.id)) && matchesQuery(h.label, ourFilter))
-  const colUnmapped = columns.map((c) => c.unmapped.filter((o) => matchesQuery(o, filters[c.id])))
+  const ourAllowed = allowed(OUR_COL)
+  const inOur = (h) => !ourAllowed || ourAllowed.has(h.label)
+  const rowMatches = (h) => matchesQuery(h.label, ourQuery) || columns.some((c) => mappedFor(h, c).some((s) => matchesQuery(s, ourQuery)))
+  const colAllowed = columns.map((c) => allowed(c.id))
+  const sortCol = colSort ? columns.find((c) => c.id === colSort.id) : null
+  const sign = colSort?.dir === 'desc' ? -1 : 1
+  const mergedMatches = !showMapping ? [] : rows.filter((h) => mappedById.has(h.id)
+    && inOur(h) && rowMatches(h)
+    && columns.every((c, ci) => !colAllowed[ci] || mappedFor(h, c).some((s) => colAllowed[ci].has(s))))
+  const mergedRows = sortCol
+    ? [...mergedMatches].sort((a, b) => {
+      const x = mappedFor(a, sortCol)[0]
+      const y = mappedFor(b, sortCol)[0]
+      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1 // nothing mapped here → last
+      return sign * byText(x, y)
+    })
+    : mergedMatches
+  const ourUnmapped = rows.filter((h) => (!showMapping || !mappedById.has(h.id)) && inOur(h) && matchesQuery(h.label, ourQuery))
+  const colUnmapped = columns.map((c, ci) => {
+    const list = c.unmapped.filter((o) => (!colAllowed[ci] || colAllowed[ci].has(o)) && matchesQuery(o, ourQuery))
+    return sortCol?.id === c.id ? [...list].sort((a, b) => sign * byText(a, b)) : list
+  })
   const raggedCount = Math.max(ourUnmapped.length, ...colUnmapped.map((l) => l.length), 0)
+  // Every name a column stands for — what its funnel offers.
+  const columnNames = (c) => [...mappedHeaders.flatMap((m) => m.sheetHeaders.filter(c.pick)), ...c.unmapped]
+  const ourSortDir = ourSort === 'name-asc' ? 'asc' : ourSort === 'name-desc' ? 'desc' : null
+  const sortOur = (dir) => { setColSort(null); onOurSort(dir ? `name-${dir}` : DEFAULT_LIST_SORT) }
+  // Only the filters of columns on screen count (a removed sheet's goes quiet).
+  const filterCount = [OUR_COL, ...columns.map((c) => c.id)].filter((k) => filters[k]?.values).length
 
   // Per-row rename: Edit swaps the name for an input with Save ✓ / Cancel ×
   // (Enter / Escape too). A name another Our Header already has can't be saved.
@@ -270,16 +295,42 @@ export default function HeaderMappingTable({
     : [[`Mapped · ${mergedRows.length}`, mergedRows]]
 
   return (
-    <div className="max-h-[32rem] min-h-[14rem] overflow-auto border-y border-divider">
+    <>
+    {filterCount > 0 && (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-divider bg-action-soft px-4 py-1.5 text-xs text-foreground">
+        <span>{filterCount} column filter{filterCount === 1 ? '' : 's'} on</span>
+        <button type="button" onClick={() => setFilters({})} className="font-semibold text-link hover:underline">Clear all filters</button>
+      </div>
+    )}
+    {/* Taller while a filter menu is open, so the menu isn't cut off. */}
+    <div data-table-scroll className={`max-h-[32rem] overflow-auto border-y border-divider ${menuOpen ? 'min-h-[32rem]' : 'min-h-[14rem]'}`}>
       <table className="w-full border-collapse text-left text-[13px]">
         <thead className="sticky top-0 z-10 bg-background text-muted">
           <tr>
             <th className="sticky left-0 z-20 min-w-[16rem] border border-divider bg-background px-2 py-1.5">
-              <ColumnHead label="Our Header" sub={`${ourHeaders.length}`} filter={ourFilter} onFilter={setOurFilter} />
+              <ColumnHead
+                label="Our Header"
+                sub={`${ourHeaders.length}`}
+                filter={filters[OUR_COL] || null}
+                onFilter={setFilter(OUR_COL)}
+                getOptions={() => optionsOf(rows.map((h) => h.label))}
+                onOpenChange={setMenuOpen}
+                sortDir={sortCol ? null : ourSortDir}
+                onSort={sortOur}
+              />
             </th>
             {columns.map((c) => (
               <th key={c.id} className="min-w-[12rem] border border-divider px-2 py-1.5">
-                <ColumnHead label={c.name} sub={`${c.unmapped.length}${c.total == null ? '' : ` of ${c.total}`} unmapped`} filter={filters[c.id]} onFilter={setFilter(c.id)} />
+                <ColumnHead
+                  label={c.name}
+                  sub={`${c.unmapped.length}${c.total == null ? '' : ` of ${c.total}`} unmapped`}
+                  filter={filters[c.id] || null}
+                  onFilter={setFilter(c.id)}
+                  getOptions={() => optionsOf(columnNames(c))}
+                  onOpenChange={setMenuOpen}
+                  sortDir={sortCol?.id === c.id ? colSort.dir : null}
+                  onSort={(dir) => setColSort(dir ? { id: c.id, dir } : null)}
+                />
               </th>
             ))}
           </tr>
@@ -324,5 +375,6 @@ export default function HeaderMappingTable({
         </tbody>
       </table>
     </div>
+    </>
   )
 }
