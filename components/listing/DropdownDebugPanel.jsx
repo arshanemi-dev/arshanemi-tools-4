@@ -16,6 +16,9 @@ import DebugHeaderList from './DebugHeaderList'
 // outside the list. Validations-sheet columns that matched no header get
 // their own table underneath.
 // Headers — just the header names as one copyable list (DebugHeaderList.jsx).
+// Sheets & Headers — `sheetsTree` (the page's SheetHeaderTree: every
+// uploaded sheet with its headers, marketplace by marketplace), a third tab
+// when the batch has 2+ sheets; it shows even before any file has a report.
 // Read-only — nothing here changes what gets saved.
 
 const SOURCE_STYLES = {
@@ -187,9 +190,9 @@ function toTsv(headers) {
 const chipCls = (active) =>
   `rounded-full border px-2.5 py-1 text-[12px] font-medium ${active ? 'border-accent bg-accent text-white' : 'border-divider bg-background text-muted hover:text-foreground'}`
 
-export default function DropdownDebugPanel({ report, fileName }) {
+export default function DropdownDebugPanel({ report, fileName, sheetsTree = null, sheetsCount = 0 }) {
   const [open, setOpen] = useState(true)
-  const [tab, setTab] = useState('values') // 'values' | 'headers'
+  const [tab, setTab] = useState('values') // 'values' | 'headers' | 'sheets'
   const [filter, setFilter] = useState('dropdowns') // 'dropdowns' | 'all' | 'none' | a DROPDOWN_SOURCES id
   const [query, setQuery] = useState('')
   const [view, setView] = useState('columns')
@@ -197,10 +200,10 @@ export default function DropdownDebugPanel({ report, fileName }) {
   const [showUnmatched, setShowUnmatched] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  if (!report) return null
+  if (!report && !sheetsTree) return null
   // hiddenHeaders — headers in columns Excel hides, already left out of
   // `headers` by the extraction; only the Headers tab names them.
-  const { headers, hiddenHeaders = [], validation, unmatchedValidation } = report
+  const { headers = [], hiddenHeaders = [], validation = null, unmatchedValidation = [] } = report || {}
 
   const count = (pred) => headers.filter(pred).length
   const filters = [
@@ -210,9 +213,14 @@ export default function DropdownDebugPanel({ report, fileName }) {
     { id: 'none', label: 'No values', n: count((h) => !h.source) },
   ]
   const tabs = [
-    { id: 'values', label: 'Dropdown values', n: filters[0].n },
-    { id: 'headers', label: 'Headers', n: headers.length },
+    ...(report ? [
+      { id: 'values', label: 'Dropdown values', n: filters[0].n },
+      { id: 'headers', label: 'Headers', n: headers.length },
+    ] : []),
+    ...(sheetsTree ? [{ id: 'sheets', label: 'Sheets & Headers', n: sheetsCount }] : []),
   ]
+  // A tab that isn't there (no report yet, or under 2 sheets) falls back to the first one.
+  const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id
   const q = query.trim().toLowerCase()
   const visible = headers
     .filter((h) => (filter === 'all' ? true : filter === 'dropdowns' ? !!h.source : filter === 'none' ? !h.source : h.source === filter))
@@ -232,16 +240,16 @@ export default function DropdownDebugPanel({ report, fileName }) {
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
         {open ? <ChevronDown className="h-4 w-4 flex-shrink-0 text-subtle" /> : <ChevronRight className="h-4 w-4 flex-shrink-0 text-subtle" />}
         <Bug className="h-4 w-4 flex-shrink-0 text-accent" />
-        <h2 className="whitespace-nowrap text-[15px] font-semibold text-foreground">Dropdown Values Debug</h2>
-        <span className="hidden min-w-0 truncate text-[12.5px] text-subtle sm:inline">{fileName}</span>
+        <h2 className="whitespace-nowrap text-[15px] font-semibold text-foreground">Debug</h2>
+        {report && <span className="hidden min-w-0 truncate text-[12.5px] text-subtle sm:inline">{fileName}</span>}
         <span className="ml-auto flex-shrink-0 rounded-full bg-card-hover px-2 py-0.5 text-[11px] font-semibold text-subtle">
-          {filters[0].n} / {headers.length} dropdowns
+          {report ? `${filters[0].n} / ${headers.length} dropdowns` : `${sheetsCount} sheets`}
         </span>
       </button>
 
       {open && (
         <div className="space-y-3 border-t border-divider px-3 pb-3 pt-3">
-          <div className="space-y-0.5 text-[12.5px] text-muted">
+          {report && activeTab !== 'sheets' && <div className="space-y-0.5 text-[12.5px] text-muted">
             <p>
               <span className="font-semibold text-foreground">Fill sheet:</span> {report.dataSheetName} · headers {lineText('vertical', report.headerRowIdx)}{report.dataStartColIdx ? ` from ${slotText('vertical', report.dataStartColIdx)}` : ''} · input rows from {lineText('vertical', report.dataStartIdx)}{hiddenHeaders.length ? ` · ${hiddenHeaders.length} header${hiddenHeaders.length === 1 ? '' : 's'} in hidden columns skipped` : ''}
             </p>
@@ -251,7 +259,7 @@ export default function DropdownDebugPanel({ report, fileName }) {
                 ? `${validation.sheetName} · ${validation.orientation === 'horizontal' ? 'Horizontal' : 'Vertical'} · headers ${lineText(validation.orientation, validation.headerLine)}${validation.startSlot ? ` from ${slotText(validation.orientation, validation.startSlot)}` : ''} · values from ${lineText(validation.orientation, validation.valuesLine)} · ${validation.columnsFound} header${validation.columnsFound === 1 ? '' : 's'} found, ${validation.matched} matched`
                 : 'none selected'}
             </p>
-          </div>
+          </div>}
 
           <div role="tablist" aria-label="Debug view" className="flex gap-1 border-b border-divider">
             {tabs.map((t) => (
@@ -259,9 +267,9 @@ export default function DropdownDebugPanel({ report, fileName }) {
                 key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={tab === t.id}
+                aria-selected={activeTab === t.id}
                 onClick={() => setTab(t.id)}
-                className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-[13px] font-medium ${tab === t.id ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground'}`}
+                className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-[13px] font-medium ${activeTab === t.id ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-foreground'}`}
               >
                 {t.label}
                 <span className="rounded-full bg-card-hover px-1.5 py-0.5 text-[10.5px] font-semibold text-subtle">{t.n}</span>
@@ -269,7 +277,9 @@ export default function DropdownDebugPanel({ report, fileName }) {
             ))}
           </div>
 
-          {tab === 'headers' ? (
+          {activeTab === 'sheets' ? (
+            sheetsTree
+          ) : activeTab === 'headers' ? (
             <DebugHeaderList headers={headers} hiddenHeaders={hiddenHeaders} />
           ) : (
             <>

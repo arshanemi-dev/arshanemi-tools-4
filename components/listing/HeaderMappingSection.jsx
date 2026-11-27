@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Check, Link2, Loader2, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, Link2, Loader2, Maximize2, Minimize2, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
 import Modal from '@/components/admin/Modal'
 import ConfirmDialog from '@/components/admin/ConfirmDialog'
 import { useToast } from '@/components/admin/Toast'
@@ -83,12 +83,17 @@ function HeaderNameModal({ header, isDuplicate, saving, onClose, onSave, onOpenS
 //   - HeaderMappingTable: tick ONE Our Header + any sheet headers, press
 //     Mapped — they map onto it; × on a box unmaps. Rows also carry their
 //     own Settings / inline rename / Delete.
-//   - Search + Name / Created sort narrow and order the Our Header rows (the
-//     search is the same text as the table's Our Header column filter).
+//   - Search + Name / Created sort first on the toolbar row: the search looks
+//     in every column, the sort orders the Our Header rows.
+//   - Full Screen (tools-5's Full Page): the section covers the whole screen
+//     for room to work; Exit or Esc goes back.
 // `showMapping` false (sidebar's Header Mapping eye off) leaves just the
 // Our Headers list — no sheet columns, no Mapped button.
 // `sheets` — every uploaded sheet with its own headers ([{ id, name,
 // headers }], the page's sheetsIndex): the table shows one column per sheet.
+// `footer` — the page's save buttons, on the title line before Full Screen (in view
+// in Full Screen too). `popupOpen` — a popup the page opened from here (Header /
+// column settings) is up, so Esc closes that first, not the Full Screen.
 //
 // Deleting asks `onCheckHeaderUsage(ids)` first (→ { usage: {[id]: {templates,
 // rules, mappedHere}}, complete }, see ourHeaderUsage.js): a header that's
@@ -98,7 +103,7 @@ export default function HeaderMappingSection({
   title, showMapping = true, ourHeaders, creating,
   onCreateHeader, onRenameHeader, onDeleteHeader, onDeleteAllHeaders, onCheckHeaderUsage, onOpenHeaderSettings,
   unmappedRawHeaders, commonHeaderKeys, sheets, mappedHeaders, onMap, onUnmap, onOpenColumnSettings, onOpenRawHeaderSettings,
-  categoryForOurHeaderId, categoryOrder,
+  categoryForOurHeaderId, categoryOrder, footer = null, popupOpen = false,
 }) {
   const { addToast } = useToast()
   const [activeId, setActiveId] = useState(null)
@@ -118,6 +123,26 @@ export default function HeaderMappingSection({
   const active = ourHeaders.find((h) => h.id === activeId) || null
   const deleteTarget = ourHeaders.find((h) => h.id === deleteId) || null
   const editTarget = modal?.mode === 'edit' ? ourHeaders.find((h) => h.id === modal.id) : null
+
+  // Full Screen — tools-5's Full Page: the section covers the whole screen
+  // (over the top bar and the sidebar); Exit Full Screen or Esc goes back.
+  // Esc first closes an open popup / filter menu, only then the full screen.
+  const [full, setFull] = useState(false)
+  const anyPopup = popupOpen || !!modal || !!deleteId || deleteAllOpen
+  useEffect(() => {
+    if (!full) return undefined
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || anyPopup || document.querySelector('#section-header-mapping .dropdown-panel-in')) return
+      setFull(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [full, anyPopup])
   const isDuplicate = (label, exceptId) => ourHeaders.some((h) => h.id !== exceptId && h.label.trim().toLowerCase() === label.trim().toLowerCase())
   const liveChecked = [...checked].filter((h) => unmappedRawHeaders.includes(h))
   // What the open delete confirm has to say, from the usage answer it opened with.
@@ -229,12 +254,38 @@ export default function HeaderMappingSection({
   }
 
   return (
-    <div>
-      <h2 className="mb-3 text-lg font-bold text-foreground">{title}</h2>
+    <div id="section-header-mapping" className={full ? 'fixed inset-0 z-[60] flex flex-col bg-background p-3 sm:p-4' : ''}>
+      {/* Top line: the title, then the page's Save buttons and Full Screen
+          on the right (in view in Full Screen too — outside the scroll). */}
+      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-foreground">{title}</h2>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {footer}
+          <button
+            type="button"
+            onClick={() => setFull((v) => !v)}
+            title={full ? 'Back to the normal page (Esc)' : 'Cover the whole screen — hides the top bar and the sidebar'}
+            className="inline-flex items-center gap-1.5 rounded-full border border-divider-light px-4 py-2 text-[14px] font-medium text-foreground hover:bg-card-hover"
+          >
+            {full ? <><Minimize2 size={14} /> Exit Full Screen</> : <><Maximize2 size={14} /> Full Screen</>}
+          </button>
+        </div>
+      </div>
 
-      <div className="space-y-4 rounded-xl border border-divider bg-background py-4">
-        {/* Toolbar — Add always; Edit / Settings / Delete once an Our Header is ticked; then Mapped */}
+      <div className={`space-y-4 rounded-xl border border-divider bg-background py-4 ${full ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
+        {/* Toolbar — Search + sort first; then Add always; Edit / Settings /
+            Delete once an Our Header is ticked; then Mapped; Delete All last. */}
         <div className="flex flex-wrap items-center gap-2 px-4">
+          <ListSearchSort
+            query={query}
+            onQuery={setQuery}
+            sort={sort}
+            onSort={setSort}
+            placeholder="Search headers…"
+            shown={ourHeaders.filter((h) => matchesQuery(h.label, query)).length}
+            total={ourHeaders.length}
+          />
+          <span className="mx-1 hidden h-6 w-px bg-divider sm:block" />
           <button type="button" onClick={() => setModal({ mode: 'add' })} className={`${btn} border-dashed border-divider-light text-action hover:bg-action-soft`}>
             <Plus size={14} /> Add
           </button>
@@ -288,17 +339,6 @@ export default function HeaderMappingSection({
               : 'Tick one Our Header and any sheet headers, then press Mapped. × on a box unmaps it.'}
         </p>
 
-        <ListSearchSort
-          className="px-4"
-          query={query}
-          onQuery={setQuery}
-          sort={sort}
-          onSort={setSort}
-          placeholder="Search headers…"
-          shown={ourHeaders.filter((h) => matchesQuery(h.label, query)).length}
-          total={ourHeaders.length}
-        />
-
         <HeaderMappingTable
           ourHeaders={ourHeaders}
           mappedHeaders={mappedHeaders}
@@ -323,8 +363,10 @@ export default function HeaderMappingSection({
           ourQuery={query}
           ourSort={sort}
           onOurSort={setSort}
+          full={full}
         />
       </div>
+
 
       {modal && (modal.mode === 'add' || editTarget) && (
         <HeaderNameModal

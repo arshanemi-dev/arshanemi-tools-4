@@ -94,6 +94,9 @@ export default function HeaderMappingTable({
   activeId, onSelect, checked, onToggleCheck, onUnmap, onRename, isDuplicate, onDelete, busyId,
   onOpenHeaderSettings, onOpenColumnSettings, onOpenRawHeaderSettings,
   categoryForOurHeaderId, categoryOrder, ourQuery = '', ourSort = DEFAULT_LIST_SORT, onOurSort = () => {},
+  // The section is in Full Screen — the table takes the screen's height
+  // instead of a fixed box (tools-5's `full`).
+  full = false,
 }) {
   const [filters, setFilters] = useState({}) // { [column]: { values: [header name, ...] } | null }
   const [colSort, setColSort] = useState(null) // { id, dir } — the sheet column the table is sorted on
@@ -303,7 +306,7 @@ export default function HeaderMappingTable({
       </div>
     )}
     {/* Taller while a filter menu is open, so the menu isn't cut off. */}
-    <div data-table-scroll className={`max-h-[32rem] overflow-auto border-y border-divider ${menuOpen ? 'min-h-[32rem]' : 'min-h-[14rem]'}`}>
+    <div data-table-scroll className={`${full ? 'max-h-[calc(100vh-17rem)]' : 'max-h-[32rem]'} overflow-auto border-y border-divider ${menuOpen ? 'min-h-[32rem]' : 'min-h-[14rem]'}`}>
       <table className="w-full border-collapse text-left text-[13px]">
         <thead className="sticky top-0 z-10 bg-background text-muted">
           <tr>

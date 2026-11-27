@@ -1938,9 +1938,47 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
     )
   }
 
+  // The save buttons — at the end of the Header Mapping section (still in
+  // view there in its Full Screen); up top only while the sidebar hides that
+  // section, so saving is always one click away.
+  const mappingShown = !isLinkHidden('ourHeaders') || !isLinkHidden('mapping')
+  const saveButtons = (
+    <>
+      {activeIsDirty && (
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-600" title="This template has changes that aren't saved yet">
+          <span className="h-2 w-2 rounded-full bg-amber-500" /> Unsaved changes
+        </span>
+      )}
+      {/* One-by-one: saves only the open (already-saved) template — the
+          rest of the batch isn't re-saved and gets no new version. */}
+      {isEditMode && templatesList.length > 1 && (
+        <button
+          type="button"
+          onClick={handleSaveActive}
+          disabled={saving}
+          title="Save only the template that's open now — the other templates aren't touched"
+          className="flex items-center gap-1.5 rounded-full border border-[#ec1e63] px-4 py-2 text-[14px] font-medium text-[#ec1e63] disabled:opacity-60 hover:bg-[#ec1e63]/10"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
+          Save This Template
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving}
+        title="Saves every template in the working set at once — not just whichever one is open right now"
+        className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60 hover:bg-[#c91753]"
+      >
+        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
+        Save All{templatesList.length > 1 ? ` (${templatesList.length})` : ''}
+      </button>
+    </>
+  )
+
   return (
-    <div className="w-full mx-auto px-6 py-8 space-y-4">
-      
+    <div className="w-full mx-auto px-2 py-2 space-y-4">
+
 
       <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-row gap-1.5">
@@ -1959,35 +1997,7 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
           {!isLinkHidden('templates') && (
             <SourceFileUploadControl fileName={fileName} parsing={parsing} onPick={handleFiles} onClear={confirmClearUpload} label="Upload Bulk Sheet" multiple tone="green" />
           )}
-          {activeIsDirty && (
-            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-amber-600" title="This template has changes that aren't saved yet">
-              <span className="h-2 w-2 rounded-full bg-amber-500" /> Unsaved changes
-            </span>
-          )}
-          {/* One-by-one: saves only the open (already-saved) template — the
-              rest of the batch isn't re-saved and gets no new version. */}
-          {isEditMode && templatesList.length > 1 && (
-            <button
-              type="button"
-              onClick={handleSaveActive}
-              disabled={saving}
-              title="Save only the template that's open now — the other templates aren't touched"
-              className="flex items-center gap-1.5 rounded-full border border-[#ec1e63] px-4 py-2 text-[14px] font-medium text-[#ec1e63] disabled:opacity-60 hover:bg-[#ec1e63]/10"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
-              Save This Template
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            title="Saves every template in the working set at once — not just whichever one is open right now"
-            className="flex items-center gap-1.5 rounded-full bg-[#ec1e63] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-60 hover:bg-[#c91753]"
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bookmark className="h-3.5 w-3.5" />}
-            Save All{templatesList.length > 1 ? ` (${templatesList.length})` : ''}
-          </button>
+          {!mappingShown && saveButtons}
         </div>
       </div>
 
@@ -2069,20 +2079,13 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
               {Object.keys(dropdownColumns).length > 0 && (
                 <div className="-mt-2 space-y-2 px-1">
                   <p className="text-[12.5px] text-subtle">
-                    {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} detected as dropdowns (Excel lists, Validations sheet, input rows) — spot-check below, or see where each came from in Dropdown Values Debug at the bottom:
+                    {Object.keys(dropdownColumns).length} column{Object.keys(dropdownColumns).length === 1 ? '' : 's'} detected as dropdowns (Excel lists, Validations sheet, input rows) — spot-check below, or see where each came from in Debug › Dropdown values at the bottom:
                   </p>
                   <DropdownValuesForm
                     fields={Object.fromEntries(Object.entries(dropdownColumns).map(([label, col]) => [label, col.values]))}
                   />
                 </div>
               )}
-            </div>
-          )}
-
-          {sheetsIndex.length >= 2 && (
-            <div>
-              <h2 className="mb-2 text-[15px] font-semibold text-foreground">Sheets &amp; Headers</h2>
-              <SheetHeaderTree marketplaceGroups={marketplaceGroups} dropdownColumns={allDropdownColumns} />
             </div>
           )}
 
@@ -2126,6 +2129,8 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
                 onOpenRawHeaderSettings={openSettingsForRawHeader}
                 categoryForOurHeaderId={categoryForOurHeaderId}
                 categoryOrder={categoryOrder}
+                footer={saveButtons}
+                popupOpen={!!modalId || !!headerSettingsId}
               />
             </div>
           )}
@@ -2170,8 +2175,17 @@ export default function BulkTemplateDesign({ templateIds = [] }) {
       </div>
 
       {/* Last thing on the page, full width (not squeezed beside the
-          sidebar) — the active file's dropdown extraction, header by header. */}
-      {dropdownReport && <DropdownDebugPanel report={dropdownReport} fileName={fileName} />}
+          sidebar) — the Debug panel: the active file's dropdown extraction,
+          header by header, and (2+ sheets) every uploaded sheet with its
+          headers, marketplace by marketplace (Sheets & Headers tab). */}
+      {(dropdownReport || sheetsIndex.length >= 2) && (
+        <DropdownDebugPanel
+          report={dropdownReport}
+          fileName={fileName}
+          sheetsCount={sheetsIndex.length}
+          sheetsTree={sheetsIndex.length >= 2 ? <SheetHeaderTree marketplaceGroups={marketplaceGroups} dropdownColumns={allDropdownColumns} /> : null}
+        />
+      )}
 
       {pendingSwitch && (
         <Modal
